@@ -1,0 +1,119 @@
+package ingest
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// ErrInvalidEvent wraps every validation failure so the handler can answer 400
+// without inspecting the specific reason.
+var ErrInvalidEvent = errors.New("invalid event")
+
+// DisputeWebhook is the processor's message. It mirrors the DisputeWebhook
+// interface in services/simulator/src/emit.ts.
+type DisputeWebhook struct {
+	ID        string      `json:"id"`
+	Type      string      `json:"type"`
+	CreatedAt time.Time   `json:"created_at"`
+	Data      DisputeData `json:"data"`
+}
+
+type DisputeData struct {
+	DisputeID     string `json:"dispute_id"`
+	MerchantID    string `json:"merchant_id"`
+	TransactionID string `json:"transaction_id"`
+	Kind          string `json:"kind"`
+	CardNetwork   string `json:"card_network"`
+	ReasonCode    string `json:"reason_code"`
+
+	// Minor units. Decoded as int64 rather than a float so a JSON number too
+	// large or too precise for a float64 is a parse error instead of a silently
+	// rounded amount.
+	AmountMinor int64  `json:"amount_minor"`
+	Currency    string `json:"currency"`
+
+	OpenedAt  time.Time `json:"opened_at"`
+	RespondBy time.Time `json:"respond_by"`
+}
+
+var (
+	validKinds    = map[string]bool{"alert": true, "chargeback": true}
+	validNetworks = map[string]bool{"visa": true, "mastercard": true, "amex": true, "discover": true}
+)
+
+// Decode parses a raw body strictly: unknown fields are an error rather than a
+// shrug. A processor that starts sending a field this service silently drops is
+// a change worth noticing at the boundary, not three phases later.
+func Decode(body []byte) (DisputeWebhook, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+
+	var event DisputeWebhook
+	if err := decoder.Decode(&event); err != nil {
+		return DisputeWebhook{}, fmt.Errorf("%w: %s", ErrInvalidEvent, err)
+	}
+	if decoder.More() {
+		return DisputeWebhook{}, fmt.Errorf("%w: trailing content after the JSON object", ErrInvalidEvent)
+	}
+	return event, nil
+}
+
+// Validate rejects anything that would put nonsense in the database. Every rule
+// here has a matching CHECK constraint in the schema; this layer exists to turn
+// a constraint violation into a 400 with a readable reason.
+func (e DisputeWebhook) Validate(now time.Time) error {
+	if e.ID == "" {
+		return fmt.Errorf("%w: id is required", ErrInvalidEvent)
+	}
+	if e.Type != "dispute.opened" {
+		return fmt.Errorf("%w: unsupported type %q", ErrInvalidEvent, e.Type)
+	}
+
+	d := e.Data
+	switch {
+	case d.DisputeID == "":
+		return fmt.Errorf("%w: data.dispute_id is required", ErrInvalidEvent)
+	case d.MerchantID == "":
+		return fmt.Errorf("%w: data.merchant_id is required", ErrInvalidEvent)
+	case d.TransactionID == "":
+		return fmt.Errorf("%w: data.transaction_id is required", ErrInvalidEvent)
+	case !validKinds[d.Kind]:
+		return fmt.Errorf("%w: unknown kind %q", ErrInvalidEvent, d.Kind)
+	case !validNetworks[d.CardNetwork]:
+		return fmt.Errorf("%w: unknown card_network %q", ErrInvalidEvent, d.CardNetwork)
+	case d.ReasonCode == "":
+		return fmt.Errorf("%w: data.reason_code is required", ErrInvalidEvent)
+	case d.AmountMinor <= 0:
+		// Zero is not a dispute and a negative amount is a bug upstream. Either
+		// way, refusing it here is cheaper than reconciling it later.
+		return fmt.Errorf("%w: amount_minor must be positive, got %d", ErrInvalidEvent, d.AmountMinor)
+	case !isCurrencyCode(d.Currency):
+		return fmt.Errorf("%w: currency must be a 3-letter code, got %q", ErrInvalidEvent, d.Currency)
+	case d.OpenedAt.IsZero():
+		return fmt.Errorf("%w: data.opened_at is required", ErrInvalidEvent)
+	case d.RespondBy.IsZero():
+		return fmt.Errorf("%w: data.respond_by is required", ErrInvalidEvent)
+	case !d.RespondBy.After(d.OpenedAt):
+		return fmt.Errorf("%w: respond_by must be after opened_at", ErrInvalidEvent)
+	case d.RespondBy.Before(now):
+		// A deadline already in the past cannot be raced. Taking it would put a
+		// dispute in the queue that the worker can only ever mark expired.
+		return fmt.Errorf("%w: respond_by is already in the past", ErrInvalidEvent)
+	}
+	return nil
+}
+
+func isCurrencyCode(code string) bool {
+	if len(code) != 3 {
+		return false
+	}
+	for _, r := range code {
+		if r < 'A' || r > 'Z' {
+			return false
+		}
+	}
+	return true
+}

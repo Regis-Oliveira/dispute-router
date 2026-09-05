@@ -3,3 +3,7 @@ dist/
 .env
 *.log
 .DS_Store
+
+# Go build output
+services/ingest/ingest
+services/ingest/bin/

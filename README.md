@@ -22,13 +22,14 @@ rather than decorative:
 
 ## Status
 
-**Phase 0 is complete**: schema, ledger and data generator. The rest is the roadmap.
+**Phases 0 and 1 are written.** Phase 0 is verified end to end; Phase 1 needs a Go
+toolchain on this machine before it can be built and run.
 
 | Phase | What | State |
 | --- | --- | --- |
 | 0 | Postgres schema, double-entry ledger, Node simulator | done |
-| 1 | Go ingest service: HMAC verification, Redis idempotency, outbox | next |
-| 2 | Angular dashboard over the seeded data | |
+| 1 | Go ingest service: HMAC verification, Redis idempotency, outbox | written, unbuilt |
+| 2 | Angular dashboard over the seeded data | next |
 | 3 | Redis deadline timers, Go worker pool, dispute state machine | |
 | 4 | Swap the homegrown queue for SQS, S3 evidence uploads, deploy | |
 
@@ -110,16 +111,67 @@ table, and spent 466 of those 508 seconds on an `UPDATE` touching 6,771 rows. An
 each table as soon as it is loaded — rather than once at the end — took that step from
 466.5s to 0.4s. The plan was never wrong; the statistics were missing.
 
-## Next: Phase 1
+## `services/ingest/` — the Go service
 
-The Go ingest service, at `services/ingest/`:
+`POST /webhooks/processor` takes a signed dispute webhook and turns it into a row. The
+order of its steps is the design, not an accident:
 
-- `POST /webhooks/processor` — verify the HMAC signature (constant-time; the simulator's
-  `signing.ts` is the other half of the contract), reject anything outside the replay window
-- `SETNX` the idempotency key in Redis, with the `webhook_events` unique index as the
-  durable backstop when Redis has been flushed
-- Write the raw payload to `webhook_events` and the parsed dispute plus its outbox message
-  in one transaction
-- A relay drains `outbox` into the queue
+1. A per-IP token bucket and a 64KB body cap, because everything after them costs a
+   database round trip.
+2. Parse the body. This has to happen before the signature check, because the merchant id
+   that selects the verification secret is *inside* the body — so nothing from the parse is
+   acted on until step 4; it only chooses which key to check against.
+3. **An unknown merchant and a bad signature return the same 401.** Different answers turn
+   the endpoint into a merchant-id oracle.
+4. Only once the signature holds does the request get to spend the merchant's rate-limit
+   budget or reach the write path.
 
-Go is not installed on this machine yet: `brew install go`.
+Two details worth the reading time:
+
+**The idempotency key comes from the signed body, never the `Idempotency-Key` header.**
+That header isn't covered by the signature, so keying off it would let anyone suppress a
+real event by guessing an id. Redis `SETNX` is the fast path; the unique index on
+`webhook_events.idempotency_key` is the actual guarantee. Flush Redis and the system stays
+correct, just slower.
+
+**A claim is released when the work behind it fails.** Claim the key, then fail to write to
+Postgres, and without the release the sender's retry is answered "already handled" for the
+next 24 hours — the event is gone and every log line says it succeeded.
+
+The write is one transaction: the raw payload, the dispute, its first audit event and the
+outbox message all commit together or none of them do. The relay then drains `outbox` with
+`FOR UPDATE SKIP LOCKED`, publishing *before* marking rows published — at-least-once,
+because the alternative loses messages on the same crash.
+
+Per-merchant rate limiting is a Lua script rather than GET/compute/SET, since two requests
+arriving together would otherwise read the same token count and both spend it. The bucket
+is keyed per merchant on purpose: one shared bucket turns a single noisy sender into an
+outage for everybody.
+
+### Building it
+
+Go is not installed on this machine yet. Once `go version` works:
+
+```bash
+make tidy          # resolves the module graph, writes go.sum
+make ingest-test   # signing + validation tests, including a cross-language HMAC vector
+make ingest        # listens on :8080
+```
+
+Then, in another shell:
+
+```bash
+make emit          # the simulator streams signed webhooks at it
+```
+
+`npm run emit -- --replay --count 3` in `services/simulator` sends every event twice. The
+first delivery answers `202 accepted`, the second `200 duplicate` — that is the Redis
+`SETNX` earning its place.
+
+`services/ingest/internal/signing/signing_test.go` pins the exact bytes both languages
+hash. If it fails, the Go and TypeScript halves of the contract have drifted apart.
+
+## Next: Phase 2
+
+The Angular dashboard: server-side pagination over 500,000 rows, faceted filters, CSV
+export, and a live feed of what the ingest service is accepting.
