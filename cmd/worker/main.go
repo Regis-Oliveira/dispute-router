@@ -16,7 +16,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/errgroup"
 
+	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
 	"github.com/regisoliveira/dispute-router/internal/worker"
 )
@@ -77,6 +79,27 @@ func run(logger *slog.Logger) error {
 		ID:                id,
 	})
 
+	// The SQS consumer schedules a dispute the moment it arrives; the reconcile
+	// pass inside the pool remains the guarantee that nothing is ever missed.
+	awsCfg, err := awsx.Load(ctx, awsx.Config{
+		Region:          cfg.AWSRegion,
+		Endpoint:        cfg.AWSEndpoint,
+		AccessKeyID:     cfg.AWSAccessKey,
+		SecretAccessKey: cfg.AWSSecretKey,
+	})
+	if err != nil {
+		return err
+	}
+
+	consumer := &worker.Consumer{
+		Client:      awsx.SQS(awsCfg, cfg.AWSEndpoint),
+		QueueURL:    cfg.SQSQueueURL,
+		Deadlines:   worker.NewDeadlines(rdb),
+		Logger:      logger,
+		MaxMessages: int32(cfg.SQSMaxMessages),
+		WaitTime:    int32(cfg.SQSWaitSeconds),
+	}
+
 	logger.Info("worker starting",
 		"concurrency", cfg.WorkerConcurrency,
 		"poll", cfg.WorkerPollInterval.String(),
@@ -84,7 +107,11 @@ func run(logger *slog.Logger) error {
 		"reconcile", cfg.WorkerReconcileInterval.String(),
 		"id", id)
 
-	if err := workers.Run(ctx); err != nil {
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.Go(func() error { return workers.Run(groupCtx) })
+	group.Go(func() error { return consumer.Run(groupCtx) })
+
+	if err := group.Wait(); err != nil {
 		return err
 	}
 

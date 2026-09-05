@@ -20,6 +20,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/regisoliveira/dispute-router/internal/api"
+	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
 	"github.com/regisoliveira/dispute-router/internal/httpx"
 )
@@ -60,7 +61,26 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	handler := api.NewHandler(api.NewStore(pool), rdb, logger)
+	awsCfg, err := awsx.Load(ctx, awsx.Config{
+		Region:          cfg.AWSRegion,
+		Endpoint:        cfg.AWSEndpoint,
+		AccessKeyID:     cfg.AWSAccessKey,
+		SecretAccessKey: cfg.AWSSecretKey,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Fifteen minutes: long enough to pick a file and upload it over a bad
+	// connection, short enough that a URL pasted into a chat is dead by the
+	// time anyone else opens it.
+	evidence := api.NewEvidence(
+		awsx.S3(awsCfg, cfg.AWSEndpoint),
+		cfg.S3EvidenceBucket,
+		15*time.Minute,
+	)
+
+	handler := api.NewHandler(api.NewStore(pool), rdb, evidence, logger)
 
 	// Applied outermost-first: request id and logging wrap everything, then
 	// CORS answers preflights before the timeout clock starts.

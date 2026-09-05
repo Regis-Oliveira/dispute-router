@@ -48,6 +48,16 @@ type Config struct {
 	WorkerReconcileInterval time.Duration
 	WorkerLockTTL           time.Duration
 
+	// AWS. Endpoint is LocalStack; empty means the real thing.
+	AWSRegion        string
+	AWSEndpoint      string
+	AWSAccessKey     string
+	AWSSecretKey     string
+	SQSQueueURL      string
+	S3EvidenceBucket string
+	SQSMaxMessages   int
+	SQSWaitSeconds   int
+
 	// Read API.
 	APIAddr        string
 	CORSOrigins    []string
@@ -87,7 +97,15 @@ func Load(dotenvPath string) (Config, error) {
 		// Comfortably longer than one decision takes. A lock that expires
 		// mid-decision is survivable - the version check catches it - but it
 		// wastes the work.
-		WorkerLockTTL: dur("WORKER_LOCK_TTL", 30*time.Second),
+		WorkerLockTTL:    dur("WORKER_LOCK_TTL", 30*time.Second),
+		AWSRegion:        str("AWS_REGION", "us-east-1"),
+		AWSEndpoint:      str("AWS_ENDPOINT_URL", "http://localhost:4566"),
+		AWSAccessKey:     str("AWS_ACCESS_KEY_ID", "test"),
+		AWSSecretKey:     str("AWS_SECRET_ACCESS_KEY", "test"),
+		SQSQueueURL:      str("SQS_QUEUE_URL", "http://localhost:4566/000000000000/disputes-events"),
+		S3EvidenceBucket: str("S3_EVIDENCE_BUCKET", "dispute-evidence"),
+		SQSMaxMessages:   integer("SQS_MAX_MESSAGES", 10),
+		SQSWaitSeconds:   integer("SQS_WAIT_SECONDS", 20),
 
 		APIAddr: str("API_ADDR", ":8081"),
 		// Named origins only. A reflected Origin or a bare "*" would let any
@@ -103,6 +121,15 @@ func Load(dotenvPath string) (Config, error) {
 	}
 	if cfg.RateLimitBurst <= 0 || cfg.RateLimitPerMinute <= 0 {
 		return Config{}, fmt.Errorf("rate limit settings must be positive")
+	}
+	// A missing queue URL surfaced as an EC2 metadata timeout three layers
+	// away, because an empty endpoint sends the SDK looking for a real AWS and
+	// an instance role. Settings that cannot work are refused here instead.
+	if cfg.SQSQueueURL == "" {
+		return Config{}, fmt.Errorf("SQS_QUEUE_URL is required")
+	}
+	if cfg.S3EvidenceBucket == "" {
+		return Config{}, fmt.Errorf("S3_EVIDENCE_BUCKET is required")
 	}
 	return cfg, nil
 }

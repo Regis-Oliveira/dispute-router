@@ -23,6 +23,9 @@ help:
 	@echo "dash-test    unit tests for the dashboard"
 	@echo "tidy         resolve Go module dependencies"
 	@echo ""
+	@echo "aws-init    create the queue, dlq and bucket in localstack"
+	@echo "aws-status  queue depths and bucket contents"
+	@echo ""
 	@echo "psql    open a shell on the database"
 	@echo "redis   open redis-cli inside the container"
 
@@ -31,7 +34,9 @@ up:
 	@echo "waiting for health..."
 	@until [ "$$(docker inspect -f '{{.State.Health.Status}}' dr-postgres 2>/dev/null)" = "healthy" ]; do sleep 1; done
 	@until [ "$$(docker inspect -f '{{.State.Health.Status}}' dr-redis 2>/dev/null)" = "healthy" ]; do sleep 1; done
+	@until curl -sf http://localhost:4566/_localstack/health > /dev/null; do sleep 2; done
 	@echo "ready"
+	@$(MAKE) --no-print-directory aws-init
 
 down:
 	docker compose down
@@ -87,6 +92,31 @@ dash-test:
 
 dash-build:
 	cd $(DASH) && npm run build
+
+# LocalStack: the real AWS APIs, no account. awslocal is the AWS CLI with
+# --endpoint-url pre-set, and ships inside the image.
+aws-init:
+	@./infra/localstack-init.sh
+
+aws-status:
+	@echo "queue:"
+	@docker exec dr-localstack awslocal sqs get-queue-attributes \
+	  --queue-url http://localhost:4566/000000000000/disputes-events \
+	  --attribute-names ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible \
+	  --query Attributes --output table
+	@echo "dead letter queue:"
+	@docker exec dr-localstack awslocal sqs get-queue-attributes \
+	  --queue-url http://localhost:4566/000000000000/disputes-events-dlq \
+	  --attribute-names ApproximateNumberOfMessages \
+	  --query Attributes --output table
+	@echo "evidence bucket:"
+	@docker exec dr-localstack awslocal s3 ls s3://dispute-evidence --recursive --human-readable || true
+
+aws-dlq:
+	@docker exec dr-localstack awslocal sqs receive-message \
+	  --queue-url http://localhost:4566/000000000000/disputes-events-dlq \
+	  --max-number-of-messages 10 --visibility-timeout 0 \
+	  --query 'Messages[].Body' --output text
 
 # No local psql client needed; use the one inside the container.
 psql:

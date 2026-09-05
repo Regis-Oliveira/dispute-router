@@ -13,7 +13,11 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	// ErrInvalidInput is anything the caller could fix, and always answers 400.
+	ErrInvalidInput = errors.New("invalid input")
+)
 
 type Store struct{ pool *pgxpool.Pool }
 

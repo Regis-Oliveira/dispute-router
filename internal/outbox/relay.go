@@ -119,17 +119,22 @@ func (r *Relay) drainOnce(ctx context.Context) (int, error) {
 	}
 
 	ids := make([]int64, 0, len(batch))
+	var publishErr error
 	for _, msg := range batch {
 		if err := r.publisher.Publish(ctx, msg); err != nil {
 			// Stop at the first failure and commit the ones that made it, so a
 			// broken message does not block the ones behind it forever.
+			publishErr = err
 			break
 		}
 		ids = append(ids, msg.ID)
 	}
 
 	if len(ids) == 0 {
-		return 0, fmt.Errorf("publisher rejected every message in the batch")
+		// The cause is wrapped rather than summarised. "publisher rejected
+		// every message" describes the symptom and hides the one thing needed
+		// to fix it, which cost a debugging round trip to learn.
+		return 0, fmt.Errorf("publisher rejected every message in the batch: %w", publishErr)
 	}
 
 	if _, err := tx.Exec(ctx, `UPDATE outbox SET published_at = now() WHERE id = ANY($1)`, ids); err != nil {

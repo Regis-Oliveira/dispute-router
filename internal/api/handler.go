@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -15,13 +16,14 @@ import (
 )
 
 type Handler struct {
-	store  *Store
-	rdb    *redis.Client
-	logger *slog.Logger
+	store    *Store
+	rdb      *redis.Client
+	evidence *Evidence
+	logger   *slog.Logger
 }
 
-func NewHandler(store *Store, rdb *redis.Client, logger *slog.Logger) *Handler {
-	return &Handler{store: store, rdb: rdb, logger: logger}
+func NewHandler(store *Store, rdb *redis.Client, evidence *Evidence, logger *slog.Logger) *Handler {
+	return &Handler{store: store, rdb: rdb, evidence: evidence, logger: logger}
 }
 
 // Routes returns the read model. Every path is a GET: this service never
@@ -31,6 +33,11 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/disputes", h.listDisputes)
 	mux.HandleFunc("GET /api/disputes.csv", h.exportDisputes)
 	mux.HandleFunc("GET /api/disputes/{id}", h.getDispute)
+	mux.HandleFunc("GET /api/disputes/{id}/evidence", h.listEvidence)
+	// POST because it is not safe to cache, though it writes nothing: minting
+	// a presigned URL reads a credential, it does not change any state. The
+	// service stays read-only with respect to Postgres.
+	mux.HandleFunc("POST /api/disputes/{id}/evidence", h.presignEvidence)
 	mux.HandleFunc("GET /api/summary", h.summary)
 	mux.HandleFunc("GET /api/merchants", h.merchants)
 	mux.HandleFunc("GET /api/stream", h.stream)
@@ -75,6 +82,64 @@ func (h *Handler) getDispute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, detail)
+}
+
+func (h *Handler) listEvidence(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be an integer")
+		return
+	}
+
+	files, err := h.evidence.List(r.Context(), id)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "list evidence failed", "error", err, "dispute_id", id)
+		writeError(w, http.StatusInternalServerError, "could not list evidence")
+		return
+	}
+	writeJSON(w, http.StatusOK, files)
+}
+
+func (h *Handler) presignEvidence(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be an integer")
+		return
+	}
+
+	var body struct {
+		Filename    string `json:"filename"`
+		ContentType string `json:"content_type"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body must be {filename, content_type}")
+		return
+	}
+
+	// The dispute has to exist. Without this the endpoint mints upload URLs for
+	// any integer anybody asks about, which is a way to write into the bucket
+	// under keys that will never be read.
+	if _, err := h.store.Dispute(r.Context(), id); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			writeError(w, http.StatusNotFound, "no such dispute")
+			return
+		}
+		h.logger.ErrorContext(r.Context(), "dispute lookup failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	target, err := h.evidence.PresignUpload(r.Context(), id, body.Filename, body.ContentType)
+	if err != nil {
+		if errors.Is(err, ErrInvalidInput) {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		h.logger.ErrorContext(r.Context(), "presign failed", "error", err, "dispute_id", id)
+		writeError(w, http.StatusInternalServerError, "could not create an upload url")
+		return
+	}
+	writeJSON(w, http.StatusOK, target)
 }
 
 func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {

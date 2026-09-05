@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/regisoliveira/dispute-router/internal/api"
+	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
 	"github.com/regisoliveira/dispute-router/internal/httpx"
 	"github.com/regisoliveira/dispute-router/internal/ingest"
@@ -115,10 +116,26 @@ func run(logger *slog.Logger) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// The log publisher stands in for SQS until Phase 4; Live additionally
-	// broadcasts each message to the dashboard's SSE feed, best-effort.
+	// SQS is now the real transport; Live still broadcasts each message to the
+	// dashboard's SSE feed on the side, best-effort.
+	//
+	// The relay above this did not change at all. That is what the outbox
+	// pattern bought: the queue underneath it was always a swappable detail.
+	awsCfg, err := awsx.Load(ctx, awsx.Config{
+		Region:          cfg.AWSRegion,
+		Endpoint:        cfg.AWSEndpoint,
+		AccessKeyID:     cfg.AWSAccessKey,
+		SecretAccessKey: cfg.AWSSecretKey,
+	})
+	if err != nil {
+		return err
+	}
+
 	publisher := outbox.Live{
-		Next:    outbox.LogPublisher{Logger: logger},
+		Next: outbox.SQSPublisher{
+			Client:   awsx.SQS(awsCfg, cfg.AWSEndpoint),
+			QueueURL: cfg.SQSQueueURL,
+		},
 		Client:  rdb,
 		Channel: api.LiveChannel,
 		Logger:  logger,

@@ -46,6 +46,37 @@ services:
       timeout: 3s
       retries: 20
 
+  # LocalStack runs the real AWS APIs locally: same SDK, same calls, same error
+  # types, no account and no spend. SQS, S3 and Secrets Manager are all in the
+  # free Community edition. ECS is not - deploying the services is the one part
+  # of Phase 4 that needs a real account.
+  localstack:
+    image: localstack/localstack:4
+    container_name: dr-localstack
+    environment:
+      SERVICES: sqs,s3,secretsmanager
+      DEBUG: "0"
+      # Credentials are not checked by Community, but the SDK insists on
+      # finding some, and naming them "test" makes it obvious in any log that
+      # these are not real.
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    ports:
+      - "4566:4566"
+    volumes:
+      - dr-localstack:/var/lib/localstack
+      # LocalStack needs the host Docker socket for the services that spawn
+      # containers; harmless for SQS and S3, required by others.
+      - /var/run/docker.sock:/var/run/docker.sock
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
 volumes:
   dr-pgdata:
   dr-redisdata:
+  dr-localstack:
