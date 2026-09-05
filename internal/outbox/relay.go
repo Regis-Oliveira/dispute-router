@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 )
 
 // Publisher is whatever the messages go to. Phase 1 logs them; Phase 4 swaps in
@@ -152,5 +153,43 @@ func (p LogPublisher) Publish(ctx context.Context, msg Message) error {
 		"aggregate", msg.AggregateType,
 		"aggregate_id", msg.AggregateID,
 		"outbox_id", msg.ID)
+	return nil
+}
+
+// Live wraps a Publisher and additionally broadcasts each message on a Redis
+// pub/sub channel so the dashboard can show arrivals as they happen.
+//
+// The broadcast is deliberately best-effort and deliberately *after* the real
+// publish: pub/sub has no queue and no retention, so a message sent while
+// nobody is subscribed is simply gone. That is fine for a live feed and would
+// be a data-loss bug for delivery, which is why a failed broadcast never fails
+// the batch and never stops a row being marked published.
+type Live struct {
+	Next    Publisher
+	Client  *redis.Client
+	Channel string
+	Logger  *slog.Logger
+}
+
+func (p Live) Publish(ctx context.Context, msg Message) error {
+	if err := p.Next.Publish(ctx, msg); err != nil {
+		return err
+	}
+
+	broadcast, err := json.Marshal(struct {
+		OutboxID    int64           `json:"outbox_id"`
+		EventType   string          `json:"event_type"`
+		AggregateID int64           `json:"aggregate_id"`
+		Payload     json.RawMessage `json:"payload"`
+		At          time.Time       `json:"at"`
+	}{msg.ID, msg.EventType, msg.AggregateID, msg.Payload, time.Now().UTC()})
+	if err != nil {
+		p.Logger.WarnContext(ctx, "live broadcast encode failed", "error", err, "outbox_id", msg.ID)
+		return nil
+	}
+
+	if err := p.Client.Publish(ctx, p.Channel, broadcast).Err(); err != nil {
+		p.Logger.WarnContext(ctx, "live broadcast failed", "error", err, "outbox_id", msg.ID)
+	}
 	return nil
 }

@@ -43,6 +43,19 @@ func (r *statusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+// Unwrap lets http.NewResponseController reach the real ResponseWriter.
+//
+// Wrapping a ResponseWriter hides every optional interface it implements -
+// Flusher, Hijacker, ReadFrom - because the wrapper only satisfies
+// ResponseWriter itself. That is why the SSE endpoint saw "streaming
+// unsupported" the moment this middleware was in front of it: the type
+// assertion was against the recorder, not the writer underneath. Implementing
+// Unwrap is the supported way through, and it keeps working for interfaces
+// nobody here has thought about yet.
+func (r *statusRecorder) Unwrap() http.ResponseWriter {
+	return r.ResponseWriter
+}
+
 func (r *statusRecorder) Write(b []byte) (int, error) {
 	if r.status == 0 {
 		r.status = http.StatusOK

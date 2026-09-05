@@ -40,6 +40,11 @@ type Config struct {
 	OutboxPollInterval time.Duration
 	OutboxBatchSize    int
 
+	// Read API.
+	APIAddr        string
+	CORSOrigins    []string
+	RequestTimeout time.Duration
+
 	ShutdownTimeout time.Duration
 }
 
@@ -62,7 +67,13 @@ func Load(dotenvPath string) (Config, error) {
 		MaxBodyBytes:         int64(integer("INGEST_MAX_BODY_BYTES", 64*1024)),
 		OutboxPollInterval:   dur("INGEST_OUTBOX_POLL", time.Second),
 		OutboxBatchSize:      integer("INGEST_OUTBOX_BATCH", 100),
-		ShutdownTimeout:      dur("INGEST_SHUTDOWN_TIMEOUT", 15*time.Second),
+		APIAddr:              str("API_ADDR", ":8081"),
+		// Named origins only. A reflected Origin or a bare "*" would let any
+		// page on the internet read this data out of an operator's browser.
+		CORSOrigins:    list("API_CORS_ORIGINS", []string{"http://localhost:4200"}),
+		RequestTimeout: dur("API_REQUEST_TIMEOUT", 20*time.Second),
+
+		ShutdownTimeout: dur("INGEST_SHUTDOWN_TIMEOUT", 15*time.Second),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -79,6 +90,21 @@ func str(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func list(key string, fallback []string) []string {
+	v, ok := os.LookupEnv(key)
+	if !ok || v == "" {
+		return fallback
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func integer(key string, fallback int) int {

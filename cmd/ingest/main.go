@@ -16,6 +16,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/config"
 	"github.com/regisoliveira/dispute-router/internal/httpx"
 	"github.com/regisoliveira/dispute-router/internal/ingest"
@@ -114,8 +115,15 @@ func run(logger *slog.Logger) error {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	relay := outbox.NewRelay(pool, outbox.LogPublisher{Logger: logger},
-		cfg.OutboxPollInterval, cfg.OutboxBatchSize, logger)
+	// The log publisher stands in for SQS until Phase 4; Live additionally
+	// broadcasts each message to the dashboard's SSE feed, best-effort.
+	publisher := outbox.Live{
+		Next:    outbox.LogPublisher{Logger: logger},
+		Client:  rdb,
+		Channel: api.LiveChannel,
+		Logger:  logger,
+	}
+	relay := outbox.NewRelay(pool, publisher, cfg.OutboxPollInterval, cfg.OutboxBatchSize, logger)
 
 	group, groupCtx := errgroup.WithContext(ctx)
 
