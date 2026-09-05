@@ -40,6 +40,14 @@ type Config struct {
 	OutboxPollInterval time.Duration
 	OutboxBatchSize    int
 
+	// Deadline worker.
+	WorkerConcurrency       int
+	WorkerPollInterval      time.Duration
+	WorkerBatchSize         int
+	WorkerLookahead         time.Duration
+	WorkerReconcileInterval time.Duration
+	WorkerLockTTL           time.Duration
+
 	// Read API.
 	APIAddr        string
 	CORSOrigins    []string
@@ -67,7 +75,21 @@ func Load(dotenvPath string) (Config, error) {
 		MaxBodyBytes:         int64(integer("INGEST_MAX_BODY_BYTES", 64*1024)),
 		OutboxPollInterval:   dur("INGEST_OUTBOX_POLL", time.Second),
 		OutboxBatchSize:      integer("INGEST_OUTBOX_BATCH", 100),
-		APIAddr:              str("API_ADDR", ":8081"),
+		WorkerConcurrency:    integer("WORKER_CONCURRENCY", 8),
+		WorkerPollInterval:   dur("WORKER_POLL_INTERVAL", 2*time.Second),
+		WorkerBatchSize:      integer("WORKER_BATCH_SIZE", 100),
+		// Claim work slightly before it is due, so a decision lands inside the
+		// window instead of exactly on its edge.
+		WorkerLookahead: dur("WORKER_LOOKAHEAD", 30*time.Second),
+		// Long enough that it is not constant load, short enough that a gap
+		// left by an unreachable Redis is closed well before any deadline.
+		WorkerReconcileInterval: dur("WORKER_RECONCILE_INTERVAL", 60*time.Second),
+		// Comfortably longer than one decision takes. A lock that expires
+		// mid-decision is survivable - the version check catches it - but it
+		// wastes the work.
+		WorkerLockTTL: dur("WORKER_LOCK_TTL", 30*time.Second),
+
+		APIAddr: str("API_ADDR", ":8081"),
 		// Named origins only. A reflected Origin or a bare "*" would let any
 		// page on the internet read this data out of an operator's browser.
 		CORSOrigins:    list("API_CORS_ORIGINS", []string{"http://localhost:4200"}),

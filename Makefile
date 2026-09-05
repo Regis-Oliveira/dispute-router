@@ -15,6 +15,7 @@ help:
 	@echo ""
 	@echo "ingest       run the webhook ingest service on :8080"
 	@echo "api          run the read API on :8081"
+	@echo "worker       run the deadline worker"
 	@echo "dash         run the Angular dashboard on :4200"
 	@echo "stack        what to run, in which order"
 	@echo ""
@@ -59,14 +60,18 @@ tidy:
 stack:
 	@echo "terminal 1:  make ingest   # :8080 receives webhooks"
 	@echo "terminal 2:  make api      # :8081 serves the dashboard"
-	@echo "terminal 3:  make dash     # :4200 the dashboard itself"
-	@echo "terminal 4:  make emit     # sends signed disputes at :8080"
+	@echo "terminal 3:  make worker   # decides disputes before their deadlines"
+	@echo "terminal 4:  make dash     # :4200 the dashboard itself"
+	@echo "terminal 5:  make emit     # sends signed disputes at :8080"
 
 ingest:
 	go run ./cmd/ingest
 
 api:
 	go run ./cmd/api
+
+worker:
+	go run ./cmd/worker
 
 go-test:
 	go test ./... -race
