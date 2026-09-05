@@ -332,9 +332,17 @@ death of the universe — and it is never deleted just to keep the logs quiet, b
 message is worse than a noisy one. There is a test that sends a genuinely unusable message
 and waits for it to appear in the DLQ.
 
-**Evidence uploads are presigned S3 URLs.** The browser PUTs straight to S3, so a 40MB scan
-of a delivery receipt is never 40MB through a Go process, and the API never has to think
-about request body limits. Two details that matter more than the plumbing:
+**Evidence uploads are presigned S3 policies.** The browser posts a form straight to S3, so
+a large scan is never that many bytes through a Go process, and the API never has to think
+about request body limits. Three details that matter more than the plumbing:
+
+- **The size limit is in the signed policy, not in a field the client is asked to respect.**
+  A presigned PUT signs the method, the key and the content type and nothing about the body,
+  so its documented maximum was a request. A presigned POST signs a policy document with a
+  `content-length-range`, and S3 counts the bytes it actually receives. A 26MB file comes
+  back `400 Your proposed upload exceeds the maximum allowed size`, an empty one `400 smaller
+  than the minimum`, and editing the signed key afterwards is a `403` rather than an object
+  in somebody else's prefix.
 
 - A caller-supplied filename is reduced to something that cannot escape its prefix before it
   becomes a key. `../../delivery proof #7.pdf` lands as
@@ -362,6 +370,11 @@ presigned URL, and PUTs the bytes straight to S3. Two things worth knowing:
 download progress and nothing else. For a 40MB scan of a delivery receipt that is the
 difference between a progress bar and a frozen dialog, so that one call drops to
 `XMLHttpRequest`, which has had `upload.onprogress` since 2006.
+
+Two things S3 does not forgive, both found the hard way: every condition in the policy needs
+a matching form field — the SDK shapes the policy from `PutObjectInput.ContentType` but does
+not add that field, so a valid upload fails with `Policy Condition failed` — and the file
+part must come last, because S3 stops reading fields when it reaches it.
 
 **The API's CORS middleware advertised only `GET`.** The presign endpoint is a `POST`, so
 the browser would have refused it at the preflight — the server never even sees a blocked
