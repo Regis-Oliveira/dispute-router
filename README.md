@@ -22,16 +22,17 @@ rather than decorative:
 
 ## Status
 
-**Phases 0, 1 and 2 are built.** The whole path runs locally: a signed webhook becomes a
-row, the outbox relay broadcasts it, and the dashboard shows it arrive.
+**Phases 0 through 3 are built.** The whole path runs locally: a signed webhook becomes a
+row, the relay broadcasts it, the dashboard shows it arrive, and a worker decides it before
+its deadline passes.
 
 | Phase | What | State |
 | --- | --- | --- |
 | 0 | Postgres schema, double-entry ledger, Node simulator | done |
 | 1 | Go ingest service: HMAC verification, Redis idempotency, outbox | done |
 | 2 | Read API and the Angular dashboard | done |
-| 3 | Redis deadline timers, Go worker pool, dispute state machine | next |
-| 4 | Swap the homegrown queue for SQS, S3 evidence uploads, deploy | |
+| 3 | Redis deadline timers, Go worker pool, dispute state machine | done |
+| 4 | Swap the homegrown queue for SQS, S3 evidence uploads, deploy | next |
 
 Phase 4 comes last on purpose. Building the queue by hand first and *then* migrating it to
 SQS teaches more than reaching for SQS on day one.
@@ -57,6 +58,7 @@ Then three processes, one per terminal (`make stack` prints this):
 ```bash
 make ingest   # :8080  receives signed webhooks
 make api      # :8081  serves the dashboard
+make worker   #        decides disputes before their deadlines
 make dash     # :4200  the dashboard itself
 make emit     # sends disputes at :8080, and they appear on :4200 live
 ```
@@ -218,10 +220,75 @@ Deep paging is capped at offset 10,000 rather than left to rot — `OFFSET` make
 walk and discard every row before the window. Past that the CSV export is offered, which
 streams row by row and holds 13,000 disputes in 90ms and flat memory.
 
-## Next: Phase 3
+## `internal/worker/` — the deadline worker
 
-The deadline workers. A Redis sorted set scored by expiry (`ZADD deadlines <ts> <id>`), a
-Go worker pool draining it, a distributed lock so two workers never refund the same
-dispute, and the state machine that decides refund, represent, or escalate. That closes
-the loop: the dashboard's "overdue" count becomes something the system acts on rather than
-something it only reports.
+The process that makes this a platform rather than a filing cabinet.
+
+**The queue is a Redis sorted set** scored by deadline. A Lua script pops what is due and
+removes it in one operation — done as `ZRANGEBYSCORE` then `ZREM` from Go, two workers
+polling at once both read the same ids in the gap between the calls.
+
+**The index is derived, not a record.** A reconcile pass rebuilds it from the open disputes
+in Postgres, so flushing Redis costs a pass and nothing else. It also closes the gap the
+fast path cannot: a dispute written while Redis was unreachable was never scheduled, and
+without the pass it would sit unnoticed until its window closed.
+
+**The policy is a pure function** (`rules.go`), because what the system does with someone's
+money is the part that most needs to be readable and testable without standing up a
+database:
+
+| Situation | Decision |
+| --- | --- |
+| Past its deadline, still open | **expire** — a failure written down, not an outcome chosen |
+| Alert, within the merchant's ceiling, room left on the charge | **refund** |
+| Alert, above the ceiling or over the refundable remainder | **escalate** |
+| Chargeback, evidence-led reason code | **represent** |
+| Chargeback, fraud reason code | **escalate** |
+
+It never concedes a chargeback. Auto-refunding an alert is strictly cheaper than letting it
+lapse, so it is safe to automate; writing off money is a judgement about evidence and a
+merchant relationship, and a rule engine that quietly does it is the one nobody notices is
+wrong.
+
+**Safety is layered, and the lock is the weakest layer.** Any lock with a timeout can be
+held by two processes at once — the holder pauses for a GC, the TTL lapses, and a second
+worker acquires it perfectly legitimately. What actually makes a double refund impossible
+is the optimistic version check on the dispute row and the unique `external_ref` on the
+ledger entry. The Redis lock only means the second worker usually does not bother trying.
+It does still release safely, comparing its token before deleting, because a bare `DEL`
+deletes whatever lock is there — including somebody else's.
+
+Over the 1,667 open disputes in a fresh seed: **395 refunds, 412 representments, 860
+escalations, no errors** — and all nine money invariants still pass afterwards.
+
+### The livelock
+
+The first version did nothing at all, logged nothing, and pinned a core. `SIGQUIT` showed
+every goroutine parked in `SETNX`, but Redis was healthy with four clients — so `MONITOR`
+was the tool that answered it, showing the same four dispute ids being claimed,
+rescheduled and reclaimed a few thousand times a second.
+
+Claiming takes everything due before `now + lookahead`. Escalation rescheduled at the
+dispute's deadline, which is *inside* that window, so it was instantly claimable again.
+And because every batch came back full, `drainOnce`'s inner loop never ended, the poll loop
+never returned to its select, and the other 1,663 disputes were never looked at.
+
+Two fixes, both invariants rather than patches: every reschedule goes through `nextVisit`,
+which guarantees a time strictly outside the claim window, and one poll tick drains at most
+a bounded number of batches so the loop always gets back to its select. The heartbeat log
+line exists because of this too — a worker that only logs when it acts is indistinguishable
+from a worker that is stuck.
+
+## Next: Phase 4
+
+AWS. SQS replaces the hand-built outbox relay, S3 takes evidence uploads through presigned
+URLs, and the three services move to ECS. Having built the queue by hand first, the
+migration is the interesting part: at-least-once delivery, idempotent consumers and the
+outbox pattern are already here, so SQS stops looking like magic and starts looking like a
+managed version of what is already running.
+
+### Known gaps
+
+- A dispute that fails repeatedly is retried forever; there is no dead-letter path yet.
+- `represented` is terminal in practice — nothing models the network later ruling won or
+  lost, because the simulator does not send that webhook.
