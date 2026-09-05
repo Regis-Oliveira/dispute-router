@@ -360,13 +360,20 @@ func (s *Store) Dispute(ctx context.Context, id int64) (DisputeDetail, error) {
 
 	// The money this dispute actually moved, read straight off the ledger
 	// rather than recomputed. If the two ever disagree, the ledger is right.
+	// The pattern is built here and bound as one text parameter.
+	//
+	// Written as `LIKE 'dispute:' || $1 || ':%'`, Postgres infers $1 as text
+	// from the concatenation and pgx is holding an int64 - "unable to encode
+	// 830 into text format for text (OID 25)". Neither a psql literal nor a
+	// PREPARE with a declared bigint reproduces it, because both settle the
+	// type the query itself leaves open.
 	postingRows, err := s.pool.Query(ctx, `
 		SELECT lt.external_ref, lt.kind, la.kind, le.direction, le.amount_minor, le.currency, lt.occurred_at
 		  FROM ledger_transactions lt
 		  JOIN ledger_entries le ON le.ledger_transaction_id = lt.id
 		  JOIN ledger_accounts la ON la.id = le.account_id
-		 WHERE lt.external_ref LIKE 'dispute:' || $1 || ':%'
-		 ORDER BY lt.occurred_at, le.id`, id)
+		 WHERE lt.external_ref LIKE $1
+		 ORDER BY lt.occurred_at, le.id`, fmt.Sprintf("dispute:%d:%%", id))
 	if err != nil {
 		return DisputeDetail{}, fmt.Errorf("load ledger postings: %w", err)
 	}
