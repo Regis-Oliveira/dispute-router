@@ -381,6 +381,56 @@ the browser would have refused it at the preflight — the server never even see
 request, which is what makes this class of bug quiet. There are preflight tests now,
 including one asserting no origin ever receives a wildcard.
 
+### Draining the dead-letter queue
+
+A dead-letter queue nobody can read is a bin. The point of one is the loop:
+
+```bash
+make dlq              # what failed, how old, how many times it has been retried
+make dlq-replay       # dry run
+go run ./cmd/dlq replay
+```
+
+Replay sends before it deletes — a crash between the two redelivers a message, which the
+consumer is built for, where deleting first loses it. Each replayed message carries a
+`redrive_count`, and one already put back three times is refused: SQS's own receive count
+resets on re-send, so without carrying this a message loops forever and looks new every
+time.
+
+Two bugs found building it, both worth keeping in mind. **Approximate counts must never gate
+behaviour** — `replay` run straight after `peek` reported an empty queue and did nothing.
+And **a dry run has to be a no-op in every observable sense**: the first one reserved the
+messages for thirty seconds, so its report was accurate and its effect was a lie.
+
+The cause of the second is a genuine SDK trap. `ReceiveMessage`'s `VisibilityTimeout` is
+serialised only when non-zero:
+
+```go
+if v.VisibilityTimeout != 0 { s.WriteInt32(...) }
+```
+
+so passing `0` is indistinguishable from omitting it, and the queue default applies.
+`ChangeMessageVisibility` writes it unconditionally, which is the only way to actually hand
+a message straight back.
+
+### Signing keys, and rotating them
+
+`merchants.webhook_secret` was readable by anything holding a database connection: every
+service, every migration, every analyst with production read access, every backup of that
+table. The keys now live in one Secrets Manager document behind a single IAM permission,
+cached with a TTL — and that TTL *is* the rotation latency, so it wants to be minutes.
+
+**Verification accepts a set of keys, not one.** Rotation is not an instant: the new key is
+published, senders pick it up over minutes, and deliveries signed with the old one keep
+arriving throughout. Accepting a single key forces a cutover that rejects every in-flight
+delivery, which is why keys that can only be rotated with an outage never get rotated.
+
+`Merchant` no longer carries the key at all — it used to, so every path that wanted a
+merchant's currency also held its credential, and any log line dumping the struct leaked it.
+
+The database source stays as a fallback, because a secret store you cannot fall back from is
+a single point of failure wearing a security badge.
+
 ## Known gaps
 
 - Nothing is deployed anywhere; ECS needs a real account.
