@@ -61,7 +61,11 @@ make api      # :8081  serves the dashboard
 make worker   #        consumes SQS and decides disputes before their deadlines
 make dash     # :4200  the dashboard itself
 make emit     # sends disputes at :8080, and they appear on :4200 live
+make rule     # the network rules on represented disputes (won/lost)
 ```
+
+`make rule` closes the lifecycle. Run the worker first — it is what moves evidence-led
+chargebacks to `represented`, which is the only state a ruling can act on.
 
 `make aws-status` shows the queue depths and what is in the evidence bucket. `make aws-dlq`
 prints whatever ended up dead-lettered.
@@ -343,7 +347,8 @@ including one asserting no origin ever receives a wildcard.
 ## Known gaps
 
 - Nothing is deployed anywhere; ECS needs a real account.
-- `represented` is terminal in practice: nothing models the network later ruling won or
-  lost, because the simulator does not send that webhook.
+- A won representment moves no money, because nothing is deducted when a chargeback
+  arrives. A real platform holds the funds on arrival and releases them on a win; that
+  provisional hold is the next honest thing to build.
 - Merchant webhook secrets still live in `merchants.webhook_secret`. A Secrets Manager
   entry is provisioned but nothing reads from it yet.
