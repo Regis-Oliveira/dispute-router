@@ -11,3 +11,12 @@ services/ingest/bin/
 # Angular
 apps/dashboard/dist/
 apps/dashboard/.angular/
+
+# Terraform
+infra/terraform/.terraform/
+infra/terraform/*.tfstate
+infra/terraform/*.tfstate.*
+infra/terraform/terraform.tfvars
+# .terraform.lock.hcl is deliberately NOT ignored. It pins provider versions
+# and their checksums, exactly like package-lock.json, so everyone and CI
+# resolve the same provider - and a compromised registry cannot swap one in.

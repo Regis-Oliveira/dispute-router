@@ -1,0 +1,235 @@
+# Terraform, explained through this stack
+
+Written to be read before it is run. Nothing here has been applied — there is no
+AWS account behind this project — so treat it as a design you can critique, not
+a deployment you can trust blindly.
+
+## What Terraform actually is
+
+A program that reads a description of infrastructure, compares it against what
+exists, and makes the second match the first.
+
+That sentence contains the whole idea, and the interesting word is *compares*.
+
+This repo already has `infra/localstack-init.sh`, which creates the same queue
+and bucket by running AWS CLI commands. Put them side by side:
+
+```bash
+# The script says HOW
+$AWS sqs create-queue --queue-name "$DLQ"
+DLQ_ARN=$($AWS sqs get-queue-attributes --queue-url ... --query 'Attributes.QueueArn')
+$AWS sqs create-queue --queue-name "$QUEUE" --attributes "$(build_json "$DLQ_ARN")"
+```
+
+```hcl
+# Terraform says WHAT
+resource "aws_sqs_queue" "events" {
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.dead_letter.arn
+    maxReceiveCount     = 5
+  })
+}
+```
+
+Four differences, and each one is a reason:
+
+1. **The script cannot tell you what it is about to do.** `terraform plan` prints
+   every change before anything happens. That is the single most valuable thing
+   about the tool, and it is why review of infrastructure changes is possible at
+   all.
+2. **The script cannot notice drift.** Somebody widens the visibility timeout in
+   the console at 2am during an incident. The script re-runs, sees the queue
+   exists, and moves on. Terraform's next plan says the timeout differs and
+   offers to put it back.
+3. **The script cannot delete.** It has no memory of what it made. Terraform has
+   state, which is why `terraform destroy` exists and why removing a resource
+   from the code removes it from AWS.
+4. **The dependency is a reference, not an ordering.** `aws_sqs_queue.dead_letter.arn`
+   *is* the statement that the DLQ comes first. Terraform builds a graph from
+   those references and parallelises everything unrelated. The script's order is
+   the order somebody typed the lines in, and a reordering breaks it silently.
+
+## State: the part that surprises people
+
+Terraform keeps a JSON file recording every resource it created and its current
+attributes. Everything else follows from that:
+
+- It is how `plan` knows the difference between "create this" and "change this".
+- It is why the file must be **shared and locked** — two people applying at once
+  with local state produce two files, each describing half the truth. Hence the
+  S3 backend in `versions.tf`.
+- It **contains secrets in plaintext**. Any password or key that passes through a
+  resource attribute is in there. That is why `storage.tf` creates the secret
+  *container* and deliberately does not manage its value.
+- Losing it is bad but survivable: `terraform import` adopts existing resources
+  back into a fresh state, slowly and by hand.
+
+If somebody asks you one question about Terraform in an interview, it will be
+about state.
+
+## The workflow
+
+```bash
+terraform init      # download providers, configure the backend. Once per checkout.
+terraform fmt       # canonical formatting. Run it before every commit.
+terraform validate  # syntax and type checking. No AWS calls, so it is instant.
+terraform plan      # what would change. Read this. Every time.
+terraform apply     # do it
+terraform destroy   # undo it
+```
+
+`plan` is the habit worth building. It is not a formality: it is the review step,
+and the thing to look for is any line starting with `-` or `-/+`. The second one
+means **replace** — destroy then create — and on a database or a load balancer
+that is an outage hiding inside a config change.
+
+## The vocabulary, as it appears here
+
+| Concept | Where | What it is |
+| --- | --- | --- |
+| `provider` | `versions.tf` | The plugin that talks to an API. AWS is one; there are hundreds. |
+| `resource` | everywhere | Something Terraform owns and will create, change, or destroy. |
+| `data` | `data.tf` | Something it only reads. The VPC here is read, never managed. |
+| `variable` | `variables.tf` | Input. Whatever differs between staging and production. |
+| `output` | `outputs.tf` | The stack's public interface, for pipelines and other stacks. |
+| `locals` | `locals.tf` | Computed values. The `services` map is the shape of this whole design. |
+| `for_each` | `ecs.tf`, `iam.tf` | One block, many resources, keyed by name. |
+| `dynamic` | `ecs.tf` | A nested block that appears conditionally — the worker's missing load balancer. |
+| `lifecycle` | `ecs.tf`, `storage.tf` | Overrides to the default behaviour: `ignore_changes`, `prevent_destroy`. |
+
+### `for_each` rather than `count`
+
+Both repeat a resource. `count` indexes by number, so removing the middle entry
+of three renumbers everything after it, and Terraform reads that as *destroy and
+recreate* the survivors. `for_each` keys by a string: `aws_iam_role.task["worker"]`
+stays that no matter what happens to `ingest`.
+
+Reach for `for_each` by default. `count` is for "zero or one of this".
+
+## What this stack does not create, and why
+
+No VPC, no subnets, no NAT gateways, no RDS, no ElastiCache, no DNS. They are
+referenced through variables and data sources.
+
+Not laziness — **blast radius**. A VPC changes rarely and is shared by everything
+in the account; an application changes daily and is owned by one team. Putting
+them in one state means a routine deploy holds a lock on the network, and a
+mistyped `terraform destroy` reaches things this project has never heard of.
+
+Split Terraform by how often things change and by what an accident would take
+down. Not by size.
+
+## The ECS parts worth understanding
+
+**Cluster, task definition, service** are three different nouns:
+
+- A **task definition** is immutable. Registering one creates a new *revision*;
+  the old revisions stay forever.
+- A **service** points at a revision and keeps N copies alive.
+- **Deploying** is a service pointed at a new revision. **Rolling back** is
+  pointing it at the previous one, which is why an ECS rollback takes a minute
+  and not a rebuild.
+
+**The two IAM roles** are the thing to be able to explain:
+
+| | Execution role | Task role |
+| --- | --- | --- |
+| Used by | The ECS agent | Your process |
+| When | Before the container starts | While it runs |
+| For | Pulling the image, creating log streams, resolving `secrets` | Every SQS, S3 and Secrets Manager call your code makes |
+| Failure looks like | The task never starts; the error is in the ECS event log | The task runs fine, then returns `AccessDenied` |
+
+Getting these backwards is the classic ECS afternoon. If a task will not start,
+suspect the execution role; if it starts and then cannot do its job, suspect the
+task role.
+
+**One subtlety worth stealing** from `iam.tf`: the API service needs
+`s3:PutObject` even though it never uploads anything. Presigning is *local* — the
+SDK signs a URL with the caller's credentials and makes no API call — so nothing
+fails at signing time. S3 checks the permission when the URL is *used*, so a
+missing permission here surfaces as a browser upload failing with nothing at all
+in the server logs.
+
+## Why choose Terraform — and when not to
+
+**For it:**
+
+- One tool and one mental model across AWS, Cloudflare, Datadog, GitHub, Postgres
+  roles. Most real systems are not in one vendor.
+- `plan` makes infrastructure reviewable in a pull request.
+- The largest ecosystem of modules and the most people who already know it.
+- State enables the whole update/destroy lifecycle a script cannot have.
+
+**Against it, honestly:**
+
+- **The state file is a liability.** It holds secrets, it can be corrupted, and
+  recovering from a bad `apply` sometimes means hand-editing it. Nobody enjoys
+  their first `terraform state rm`.
+- **Drift is inevitable.** People click in consoles during incidents. Terraform
+  finds out at the next plan, which might be weeks later.
+- **HCL is not a programming language.** Loops and conditionals are awkward on
+  purpose. Anything genuinely dynamic fights the tool.
+- **Providers lag.** A new AWS feature can be weeks or months from being usable.
+- **Slow at scale.** A plan over a large estate refreshes real state and takes
+  minutes, every time.
+
+**When something else is the better answer:**
+
+- **CloudFormation / CDK** — AWS only, but no state file to own (AWS keeps it),
+  native rollback, and CDK lets you write TypeScript instead of HCL. If you are
+  all-in on AWS and the team already writes TypeScript, this is a real contender.
+- **Pulumi** — Terraform's model with a real language. Better for genuinely
+  dynamic infrastructure; a smaller community.
+- **Ansible / Chef** — configuration management. They shape servers that already
+  exist. Different problem; sometimes used alongside.
+- **The console** — for exploring, and for the one bootstrap resource that has to
+  exist before Terraform can store state anywhere.
+- **OpenTofu** — the open-source fork, after HashiCorp changed the licence in
+  2023. Drop-in compatible today. Worth knowing the name exists, because the
+  licence question comes up.
+
+**How I would answer "why Terraform" in an interview:** because infrastructure
+changes should be reviewable before they happen, and `plan` is the only reason
+that is possible. Everything else — multi-cloud, modules, the ecosystem — is a
+consequence. The cost is owning a state file, which is a real cost and worth
+naming rather than glossing over.
+
+## Reviewing this code
+
+It has never been applied. Things I would expect a reviewer to catch, and would
+want to be asked about:
+
+- There is deliberately no container-level `healthCheck`. ECS runs that command
+  *inside* the container, so it needs a shell and wget or curl — which a Go
+  binary on `scratch` does not have. The failure looks like a container that
+  starts and dies with no application error, which is nothing like its cause.
+  The load balancer's check does the same job from outside.
+- `readonlyRootFilesystem = true` breaks anything that writes to `/tmp`. Go's
+  standard library mostly does not, but a dependency might, and the failure is
+  at runtime.
+- The egress security group is `0.0.0.0/0`. Narrowing it properly means VPC
+  endpoints for SQS, S3, Secrets Manager and ECR — genuinely better, and a
+  bigger piece of work than it looks.
+- `ARM64` requires the images to be built for it. A `GOARCH=amd64` binary fails
+  with an exec format error that looks nothing like a platform mismatch.
+- There is no WAF, no rate limiting at the edge, and no DNS record. The
+  application rate-limits per merchant, which is not the same as surviving a
+  volumetric flood.
+
+## Running it without an account
+
+You cannot apply this against LocalStack Community — ECS is a Pro feature. But
+you can do everything short of that, which is most of the learning:
+
+```bash
+brew install opentofu       # or terraform
+cd infra/terraform
+tofu init
+tofu fmt -check
+tofu validate               # catches type and reference errors, makes no API calls
+```
+
+`validate` will not catch a wrong ARN or an IAM policy that grants nothing. It
+will catch every typo, every reference to a resource that does not exist, and
+every argument that does not belong on a resource — which is the majority of
+what goes wrong while learning.

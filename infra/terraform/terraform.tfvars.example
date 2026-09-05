@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars and fill in. That file is gitignored: it names your
+# actual account's resources.
+
+region      = "us-east-1"
+environment = "staging"
+
+# The network, created elsewhere - see the note in data.tf.
+vpc_id             = "vpc-0123456789abcdef0"
+private_subnet_ids = ["subnet-0aaa...", "subnet-0bbb..."]
+public_subnet_ids  = ["subnet-0ccc...", "subnet-0ddd..."]
+
+# From ACM, managed with the domain.
+certificate_arn = "arn:aws:acm:us-east-1:111122223333:certificate/..."
+
+# Created with the database. Terraform here reads it; it does not own it.
+database_url_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:dispute-router/database-url-AbCdEf"
+
+redis_url = "redis://dispute-router.abcdef.ng.0001.use1.cache.amazonaws.com:6379"
+
+# A git sha. The variable refuses "latest".
+image_tag = "a1b2c3d4"
+
+dashboard_origin = "https://disputes.example.com"
+
+# Empty means alarms still evaluate but notify nobody. Fine for a first apply.
+alarm_topic_arn = ""

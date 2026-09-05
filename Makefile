@@ -27,6 +27,7 @@ help:
 	@echo "aws-init    create the queue, dlq and bucket in localstack"
 	@echo "aws-status  queue depths and bucket contents"
 	@echo "dlq         show what is on the dead-letter queue"
+	@echo "tf-check    format and validate the Terraform (needs opentofu)"
 	@echo "dlq-replay  dry-run a replay back onto the main queue"
 	@echo ""
 	@echo "psql    open a shell on the database"
@@ -123,6 +124,13 @@ aws-status:
 # Fix the cause before replaying. A message put back into an unfixed failure
 # comes straight back, and a loop that looks like work is worse than a queue
 # that is visibly stuck.
+# Terraform for a real AWS account. Never applied - there is no account behind
+# this project - so `tf-check` is as far as it goes. That still catches every
+# typo, dangling reference and misspelled argument, which is most of what goes
+# wrong while learning.
+tf-check:
+	cd infra/terraform && tofu fmt -check -diff && tofu validate
+
 dlq:
 	go run ./cmd/dlq peek
 

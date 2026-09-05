@@ -431,8 +431,33 @@ merchant's currency also held its credential, and any log line dumping the struc
 The database source stays as a fallback, because a secret store you cannot fall back from is
 a single point of failure wearing a security badge.
 
+## `infra/terraform/` — the deployment, as a design
+
+ECS task definitions, IAM policies, queues, bucket, alarms. **Never applied** —
+there is no AWS account behind this project — so it is a design to read and
+critique, not a deployment to trust. `infra/terraform/README.md` is the longer
+piece: what Terraform is, why choose it over CloudFormation or a shell script,
+what state actually is, and the honest arguments against it.
+
+The two things worth taking from it:
+
+**An ECS task has two IAM roles and they are used by different things.** The
+*execution role* is assumed by the ECS agent before the container starts — it
+pulls the image, creates the log stream, resolves injected secrets. The *task
+role* is assumed by the process at runtime and authorises every SQS and S3 call
+the code makes. If a task never starts, suspect the execution role; if it starts
+and then returns `AccessDenied`, suspect the task role.
+
+**Compare `messaging.tf` with `infra/localstack-init.sh`.** They create the same
+queue. The script says *how* and cannot tell you what it is about to change,
+cannot notice that somebody widened a timeout in the console, and cannot delete
+what it made. Terraform says *what*, and `plan` prints the difference before
+anything happens. The cost is a state file, which holds secrets in plaintext and
+is a genuine liability — worth naming rather than glossing over.
+
 ## Known gaps
 
-- Nothing is deployed anywhere; ECS needs a real account.
+- Nothing is deployed anywhere; ECS needs a real account, and the Terraform has
+  never been applied or even `validate`d.
 - Merchant webhook secrets still live in `merchants.webhook_secret`. A Secrets Manager
   entry is provisioned but nothing reads from it yet.
