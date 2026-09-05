@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/regisoliveira/dispute-router/services/ingest/internal/signing"
+	"github.com/regisoliveira/dispute-router/internal/signing"
 )
 
 const signatureHeader = "X-Processor-Signature"

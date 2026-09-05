@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -17,10 +16,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/regisoliveira/dispute-router/services/ingest/internal/config"
-	"github.com/regisoliveira/dispute-router/services/ingest/internal/httpx"
-	"github.com/regisoliveira/dispute-router/services/ingest/internal/ingest"
-	"github.com/regisoliveira/dispute-router/services/ingest/internal/outbox"
+	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/httpx"
+	"github.com/regisoliveira/dispute-router/internal/ingest"
+	"github.com/regisoliveira/dispute-router/internal/outbox"
 )
 
 func main() {
@@ -155,5 +154,5 @@ func dotenvPath() string {
 	if explicit := os.Getenv("DOTENV_PATH"); explicit != "" {
 		return explicit
 	}
-	return filepath.Join("..", "..", ".env")
+	return ".env"
 }

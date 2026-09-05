@@ -1,4 +1,4 @@
-module github.com/regisoliveira/dispute-router/services/ingest
+module github.com/regisoliveira/dispute-router
 
 go 1.23
 
