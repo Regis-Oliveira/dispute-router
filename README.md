@@ -22,15 +22,15 @@ rather than decorative:
 
 ## Status
 
-**Phases 0 and 1 are written.** Phase 0 is verified end to end; Phase 1 needs a Go
-toolchain on this machine before it can be built and run.
+**Phases 0, 1 and 2 are built.** The whole path runs locally: a signed webhook becomes a
+row, the outbox relay broadcasts it, and the dashboard shows it arrive.
 
 | Phase | What | State |
 | --- | --- | --- |
 | 0 | Postgres schema, double-entry ledger, Node simulator | done |
-| 1 | Go ingest service: HMAC verification, Redis idempotency, outbox | written, unbuilt |
-| 2 | Angular dashboard over the seeded data | next |
-| 3 | Redis deadline timers, Go worker pool, dispute state machine | |
+| 1 | Go ingest service: HMAC verification, Redis idempotency, outbox | done |
+| 2 | Read API and the Angular dashboard | done |
+| 3 | Redis deadline timers, Go worker pool, dispute state machine | next |
 | 4 | Swap the homegrown queue for SQS, S3 evidence uploads, deploy | |
 
 Phase 4 comes last on purpose. Building the queue by hand first and *then* migrating it to
@@ -46,9 +46,19 @@ containers, so there is no local `psql` or `redis-cli` dependency.
 cp .env.example .env
 make up                    # postgres on :5433, redis on :6379
 cd services/simulator && npm install && cd -
+cd apps/dashboard && npm install && cd -
 make migrate
 make seed                  # ~500k transactions; SEED_TRANSACTIONS=20000 make seed for a fast one
 make verify                # asserts the money invariants, prints a summary
+```
+
+Then three processes, one per terminal (`make stack` prints this):
+
+```bash
+make ingest   # :8080  receives signed webhooks
+make api      # :8081  serves the dashboard
+make dash     # :4200  the dashboard itself
+make emit     # sends disputes at :8080, and they appear on :4200 live
 ```
 
 `make psql` opens a shell on the database. `make reset` destroys the volumes and starts over.
@@ -171,7 +181,47 @@ first delivery answers `202 accepted`, the second `200 duplicate` — that is th
 `services/ingest/internal/signing/signing_test.go` pins the exact bytes both languages
 hash. If it fails, the Go and TypeScript halves of the contract have drifted apart.
 
-## Next: Phase 2
+## `apps/dashboard/` — the Angular app
 
-The Angular dashboard: server-side pagination over 500,000 rows, faceted filters, CSV
-export, and a live feed of what the ingest service is accepting.
+Angular 21, standalone and zoneless, signals throughout.
+
+**`httpResource` takes a reactive URL.** It is built from the filter signals, so changing a
+filter reissues the request and aborts the one in flight. No subscribe, no unsubscribe, and
+no chance of a slow earlier response landing after a faster later one and painting stale
+rows over fresh ones. RxJS appears exactly once, to debounce the search box — the one thing
+signals have no notion of, since they don't model time.
+
+**Filters live in the URL.** An operator who finds something worth escalating sends a link
+and the recipient sees the same rows. `replaceUrl`, so filtering isn't twenty back presses
+to leave the page.
+
+**Money is minor units until the moment it renders.** One division, at the formatter, on a
+value already rounded by the ledger. The digits-per-currency map is why ¥5,000 renders as
+¥5,000 and not ¥50 — a blanket divide-by-100 is wrong by a factor of a hundred and doesn't
+look wrong.
+
+**Live arrivals are announced, not injected.** A "3 new — refresh" pill rather than rows
+appearing under someone mid-read.
+
+### The two-stage page query
+
+The first version of `/api/disputes` was one flat statement, and `EXPLAIN` showed why it
+was slow: Postgres joined all 13,119 matching disputes to their transactions and *then*
+sorted and discarded all but fifty. The count query also joined a 500,000-row table whose
+columns nobody read.
+
+Now the inner query finds the fifty ids and only those are joined out for display; the
+`transactions` join appears only when there is actually a search to run against it.
+**35ms → 3-7ms** warm. The work should follow the `LIMIT`, not precede it.
+
+Deep paging is capped at offset 10,000 rather than left to rot — `OFFSET` makes Postgres
+walk and discard every row before the window. Past that the CSV export is offered, which
+streams row by row and holds 13,000 disputes in 90ms and flat memory.
+
+## Next: Phase 3
+
+The deadline workers. A Redis sorted set scored by expiry (`ZADD deadlines <ts> <id>`), a
+Go worker pool draining it, a distributed lock so two workers never refund the same
+dispute, and the state machine that decides refund, represent, or escalate. That closes
+the loop: the dashboard's "overdue" count becomes something the system acts on rather than
+something it only reports.
