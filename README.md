@@ -93,6 +93,30 @@ the database rather than by whoever wrote the last service:
 
 Balances are a view, never a stored column, so there is no cached number to drift.
 
+### Chargebacks hold funds on arrival
+
+A chargeback is a clawback that has already happened — the acquirer takes the money when the
+network files it, and the outcome lands weeks later. So the entry is posted on arrival, not
+at the end:
+
+| Event | Entry |
+| --- | --- |
+| Chargeback filed | debit `merchant_balance`, credit `disputes_payable` |
+| Representment won | debit `disputes_payable`, credit `merchant_balance` |
+| Representment lost, or window closed | debit `disputes_payable` + `merchant_balance` (fee), credit `settlement_clearing` + `fee_revenue` |
+| Alert refunded | debit `merchant_balance`, credit `settlement_clearing` |
+
+An alert moves nothing until it is refunded, because it is a warning rather than a clawback
+— which is exactly why refunding one is the cheap outcome.
+
+The loss is four legs, not a netted two. Both balance; only one of them still contains the
+fee, which is the number a merchant eventually asks about.
+
+Two invariants tie this back to the domain tables: `disputes_payable` must equal the
+disputed amount of exactly those chargebacks still awaiting an outcome, and no resolved
+chargeback may still be holding funds. Both describe errors that balance perfectly and are
+still wrong, so nothing else would catch them.
+
 `ledger_transactions.external_ref` is the idempotency key for money: `dispute:1234:refund`
 can be posted exactly once. A worker that retries after a crash, or two workers racing the
 same dispute, cannot double-refund — the unique violation is the *successful* outcome.
@@ -347,8 +371,5 @@ including one asserting no origin ever receives a wildcard.
 ## Known gaps
 
 - Nothing is deployed anywhere; ECS needs a real account.
-- A won representment moves no money, because nothing is deducted when a chargeback
-  arrives. A real platform holds the funds on arrival and releases them on a win; that
-  provisional hold is the next honest thing to build.
 - Merchant webhook secrets still live in `merchants.webhook_secret`. A Secrets Manager
   entry is provisioned but nothing reads from it yet.
