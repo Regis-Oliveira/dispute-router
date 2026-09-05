@@ -1,0 +1,39 @@
+-- A lost chargeback costs the merchant the sale *and* a flat network fee, so
+-- the entry has three postings rather than two:
+--   debit  merchant_balance      amount + fee
+--   credit settlement_clearing   amount
+--   credit fee_revenue           fee
+--
+-- Three-legged entries are exactly what the balance trigger is for: get the
+-- fee wrong on one side and the COMMIT fails instead of the books drifting.
+
+WITH posted AS (
+  INSERT INTO ledger_transactions (external_ref, kind, currency, description, occurred_at, metadata)
+  SELECT 'dispute:' || d.id || ':chargeback', 'chargeback', d.currency,
+         'chargeback lost, reason ' || d.reason_code, d.resolved_at,
+         jsonb_build_object('fee_minor', 1500, 'reason_code', d.reason_code)
+    FROM disputes d
+   WHERE d.state = 'lost'
+  ON CONFLICT (external_ref) DO NOTHING
+  RETURNING id, external_ref
+),
+lines AS (
+  SELECT p.id AS lt_id, d.merchant_id, d.amount_minor, d.currency, 1500::bigint AS fee_minor
+    FROM posted p
+    JOIN disputes d ON d.id = split_part(p.external_ref, ':', 2)::bigint
+)
+INSERT INTO ledger_entries (ledger_transaction_id, account_id, direction, amount_minor, currency)
+SELECT l.lt_id, a.id, 'debit', l.amount_minor + l.fee_minor, l.currency
+  FROM lines l
+  JOIN ledger_accounts a
+    ON a.merchant_id = l.merchant_id AND a.kind = 'merchant_balance' AND a.currency = l.currency
+UNION ALL
+SELECT l.lt_id, a.id, 'credit', l.amount_minor, l.currency
+  FROM lines l
+  JOIN ledger_accounts a
+    ON a.merchant_id IS NULL AND a.kind = 'settlement_clearing' AND a.currency = l.currency
+UNION ALL
+SELECT l.lt_id, a.id, 'credit', l.fee_minor, l.currency
+  FROM lines l
+  JOIN ledger_accounts a
+    ON a.merchant_id IS NULL AND a.kind = 'fee_revenue' AND a.currency = l.currency;

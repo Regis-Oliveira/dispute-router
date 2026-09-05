@@ -1,0 +1,32 @@
+{
+  "name": "@dispute-router/simulator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fake payment processor: seeds history and emits signed dispute webhooks",
+  "scripts": {
+    "migrate": "tsx src/cli.ts migrate",
+    "seed": "tsx src/cli.ts seed",
+    "verify": "tsx src/cli.ts verify",
+    "emit": "tsx src/cli.ts emit",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "pg": "^8.13.1",
+    "pg-copy-streams": "^6.0.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/pg-copy-streams": "^1.2.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "volta": {
+    "node": "22.17.1"
+  }
+}
