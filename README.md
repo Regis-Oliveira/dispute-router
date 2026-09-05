@@ -22,9 +22,9 @@ rather than decorative:
 
 ## Status
 
-**Phases 0 through 3 are built.** The whole path runs locally: a signed webhook becomes a
-row, the relay broadcasts it, the dashboard shows it arrive, and a worker decides it before
-its deadline passes.
+**All five phases are built**, and the whole platform runs on a laptop with no AWS account:
+a signed webhook becomes a row, the relay puts it on SQS, a worker picks it up and decides
+it before its deadline passes, and the dashboard shows it happen.
 
 | Phase | What | State |
 | --- | --- | --- |
@@ -32,7 +32,7 @@ its deadline passes.
 | 1 | Go ingest service: HMAC verification, Redis idempotency, outbox | done |
 | 2 | Read API and the Angular dashboard | done |
 | 3 | Redis deadline timers, Go worker pool, dispute state machine | done |
-| 4 | Swap the homegrown queue for SQS, S3 evidence uploads, deploy | next |
+| 4 | SQS, S3 evidence uploads, on LocalStack | done |
 
 Phase 4 comes last on purpose. Building the queue by hand first and *then* migrating it to
 SQS teaches more than reaching for SQS on day one.
@@ -45,7 +45,7 @@ containers, so there is no local `psql` or `redis-cli` dependency.
 
 ```bash
 cp .env.example .env
-make up                    # postgres on :5433, redis on :6379
+make up                    # postgres :5433, redis :6379, localstack :4566 (and provisions AWS)
 cd services/simulator && npm install && cd -
 cd apps/dashboard && npm install && cd -
 make migrate
@@ -58,10 +58,13 @@ Then three processes, one per terminal (`make stack` prints this):
 ```bash
 make ingest   # :8080  receives signed webhooks
 make api      # :8081  serves the dashboard
-make worker   #        decides disputes before their deadlines
+make worker   #        consumes SQS and decides disputes before their deadlines
 make dash     # :4200  the dashboard itself
 make emit     # sends disputes at :8080, and they appear on :4200 live
 ```
+
+`make aws-status` shows the queue depths and what is in the evidence bucket. `make aws-dlq`
+prints whatever ended up dead-lettered.
 
 `make psql` opens a shell on the database. `make reset` destroys the volumes and starts over.
 
@@ -279,16 +282,55 @@ a bounded number of batches so the loop always gets back to its select. The hear
 line exists because of this too — a worker that only logs when it acts is indistinguishable
 from a worker that is stuck.
 
-## Next: Phase 4
+## Phase 4 — AWS, without an AWS account
 
-AWS. SQS replaces the hand-built outbox relay, S3 takes evidence uploads through presigned
-URLs, and the three services move to ECS. Having built the queue by hand first, the
-migration is the interesting part: at-least-once delivery, idempotent consumers and the
-outbox pattern are already here, so SQS stops looking like magic and starts looking like a
-managed version of what is already running.
+LocalStack runs the real AWS APIs in a container. Same SDK, same calls, same error types,
+no account and no spend. Everything below is the actual AWS API being exercised.
 
-### Known gaps
+**SQS replaced the log stand-in behind the same `Publisher` interface, and the relay did not
+change one line.** That is the return on building the outbox pattern first: the queue
+underneath it was always a swappable detail rather than an architecture.
 
-- A dispute that fails repeatedly is retried forever; there is no dead-letter path yet.
-- `represented` is terminal in practice — nothing models the network later ruling won or
+**The worker gained an SQS consumer** that schedules a dispute the moment it arrives instead
+of waiting up to a minute for the next reconcile pass. The reconcile pass stays — this is
+the fast path, that is the guarantee. Deleting a message is the acknowledgement and happens
+only after the work is durably done, so a crash means redelivery. That is safe here because
+scheduling is idempotent: `ZADD` on an id already present moves it rather than duplicating
+it.
+
+**A redrive policy closes the retry-forever gap** left at the end of Phase 3. A message that
+fails five times goes to a dead-letter queue instead of being redelivered until the heat
+death of the universe — and it is never deleted just to keep the logs quiet, because a lost
+message is worse than a noisy one. There is a test that sends a genuinely unusable message
+and waits for it to appear in the DLQ.
+
+**Evidence uploads are presigned S3 URLs.** The browser PUTs straight to S3, so a 40MB scan
+of a delivery receipt is never 40MB through a Go process, and the API never has to think
+about request body limits. Two details that matter more than the plumbing:
+
+- A caller-supplied filename is reduced to something that cannot escape its prefix before it
+  becomes a key. `../../delivery proof #7.pdf` lands as
+  `disputes/3/1788630168-delivery-proof--7.pdf`.
+- Content types are a whitelist, not a blacklist. Evidence is a document or an image;
+  `text/html` and `image/svg+xml` are not on the list, because a bucket serving attacker-
+  controlled markup is a stored XSS with a CDN in front of it.
+
+### What LocalStack cannot teach you
+
+Be clear-eyed. **ECS is Pro-only**, so nothing here is actually deployed. IAM is not
+enforced, so none of this practises least privilege. There is no throttling, no quota, no
+cost, and no CloudWatch alarm firing at 3am. The knowledge that transfers is SQS semantics,
+idempotent consumers and the presigned-upload pattern — not `aws ecs update-service`.
+
+Pointing all of it at real AWS is clearing `AWS_ENDPOINT_URL` and letting the SDK find
+credentials the normal way.
+
+## Known gaps
+
+- Nothing is deployed anywhere; ECS needs a real account.
+- The dashboard does not yet surface evidence uploads — the API endpoints exist and are
+  tested, the Angular side is not wired.
+- `represented` is terminal in practice: nothing models the network later ruling won or
   lost, because the simulator does not send that webhook.
+- Merchant webhook secrets still live in `merchants.webhook_secret`. A Secrets Manager
+  entry is provisioned but nothing reads from it yet.
