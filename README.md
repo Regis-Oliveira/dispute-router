@@ -325,11 +325,24 @@ idempotent consumers and the presigned-upload pattern — not `aws ecs update-se
 Pointing all of it at real AWS is clearing `AWS_ENDPOINT_URL` and letting the SDK find
 credentials the normal way.
 
+### The upload is the one request that skips HttpClient
+
+The dashboard's detail panel takes a file by picker or drag-and-drop, asks the API for a
+presigned URL, and PUTs the bytes straight to S3. Two things worth knowing:
+
+**The app runs `withFetch()`, and the Fetch API cannot report upload progress.** It reports
+download progress and nothing else. For a 40MB scan of a delivery receipt that is the
+difference between a progress bar and a frozen dialog, so that one call drops to
+`XMLHttpRequest`, which has had `upload.onprogress` since 2006.
+
+**The API's CORS middleware advertised only `GET`.** The presign endpoint is a `POST`, so
+the browser would have refused it at the preflight — the server never even sees a blocked
+request, which is what makes this class of bug quiet. There are preflight tests now,
+including one asserting no origin ever receives a wildcard.
+
 ## Known gaps
 
 - Nothing is deployed anywhere; ECS needs a real account.
-- The dashboard does not yet surface evidence uploads — the API endpoints exist and are
-  tested, the Angular side is not wired.
 - `represented` is terminal in practice: nothing models the network later ruling won or
   lost, because the simulator does not send that webhook.
 - Merchant webhook secrets still live in `merchants.webhook_secret`. A Secrets Manager
