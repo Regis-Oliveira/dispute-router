@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS outbox;
+DROP TABLE IF EXISTS webhook_events;
+DROP TABLE IF EXISTS dispute_events;
+DROP TABLE IF EXISTS disputes;
+DROP TABLE IF EXISTS transactions;
+DROP TABLE IF EXISTS merchants;
+DROP FUNCTION IF EXISTS set_updated_at();
