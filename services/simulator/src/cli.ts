@@ -3,6 +3,7 @@ import { migrate } from "./migrate.js";
 import { seed } from "./seed.js";
 import { verify } from "./verify.js";
 import { emit } from "./emit.js";
+import { rule } from "./rule.js";
 
 function flag(name: string): boolean {
   return process.argv.includes(`--${name}`);
@@ -22,10 +23,15 @@ dispute-router simulator
   seed      truncate and regenerate the whole dataset (deterministic per SEED)
   verify    assert the money invariants and print a summary
   emit      stream signed dispute webhooks at the ingest service
+  rule      send network rulings for disputes awaiting one (won/lost)
 
     --rate <n>    events per minute       (default 30)
     --count <n>   stop after n events     (default 0 = forever)
     --replay      send every event twice  (proves idempotency, or its absence)
+
+  rule options
+    --count <n>   how many disputes to rule on (default 25)
+    --rate <n>    rulings per minute          (default 600)
 `;
 
 async function main(): Promise<void> {
@@ -46,6 +52,9 @@ async function main(): Promise<void> {
       break;
     case "emit":
       await emit({ rate: option("rate", 30), count: option("count", 0), replay: flag("replay") });
+      break;
+    case "rule":
+      await rule({ count: option("count", 25), rate: option("rate", 600) });
       break;
     default:
       console.log(USAGE.trim());

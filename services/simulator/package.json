@@ -9,7 +9,8 @@
     "seed": "tsx src/cli.ts seed",
     "verify": "tsx src/cli.ts verify",
     "emit": "tsx src/cli.ts emit",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "rule": "tsx src/cli.ts rule"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

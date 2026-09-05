@@ -117,3 +117,82 @@ func isCurrencyCode(code string) bool {
 	}
 	return true
 }
+
+// RulingWebhook is the network coming back with a verdict on a representment.
+//
+// It is what makes "represented" a state rather than a dead end: the merchant
+// submitted evidence, weeks passed, and Visa or Mastercard decided.
+type RulingWebhook struct {
+	ID        string     `json:"id"`
+	Type      string     `json:"type"`
+	CreatedAt time.Time  `json:"created_at"`
+	Data      RulingData `json:"data"`
+}
+
+type RulingData struct {
+	DisputeID  string `json:"dispute_id"`
+	MerchantID string `json:"merchant_id"`
+	// Outcome is won or lost. There is no third answer.
+	Outcome   string    `json:"outcome"`
+	DecidedAt time.Time `json:"decided_at"`
+	// Note is the network's reason, kept for the audit trail rather than acted on.
+	Note string `json:"note"`
+}
+
+const (
+	TypeDisputeOpened   = "dispute.opened"
+	TypeDisputeResolved = "dispute.resolved"
+)
+
+var validOutcomes = map[string]bool{"won": true, "lost": true}
+
+// PeekType reads just enough of a body to route it.
+//
+// Deliberately lenient where the typed decoders are strict: this only has to
+// answer "which decoder", and a body it cannot classify is rejected by that
+// decoder with a message about the actual problem.
+func PeekType(body []byte) (id string, eventType string, err error) {
+	var peek struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(body, &peek); err != nil {
+		return "", "", fmt.Errorf("%w: %s", ErrInvalidEvent, err)
+	}
+	if peek.Type == "" {
+		return "", "", fmt.Errorf("%w: type is required", ErrInvalidEvent)
+	}
+	return peek.ID, peek.Type, nil
+}
+
+func DecodeRuling(body []byte) (RulingWebhook, error) {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+
+	var event RulingWebhook
+	if err := decoder.Decode(&event); err != nil {
+		return RulingWebhook{}, fmt.Errorf("%w: %s", ErrInvalidEvent, err)
+	}
+	if decoder.More() {
+		return RulingWebhook{}, fmt.Errorf("%w: trailing content after the JSON object", ErrInvalidEvent)
+	}
+	return event, nil
+}
+
+func (e RulingWebhook) Validate() error {
+	switch {
+	case e.ID == "":
+		return fmt.Errorf("%w: id is required", ErrInvalidEvent)
+	case e.Type != TypeDisputeResolved:
+		return fmt.Errorf("%w: unsupported type %q", ErrInvalidEvent, e.Type)
+	case e.Data.DisputeID == "":
+		return fmt.Errorf("%w: data.dispute_id is required", ErrInvalidEvent)
+	case e.Data.MerchantID == "":
+		return fmt.Errorf("%w: data.merchant_id is required", ErrInvalidEvent)
+	case !validOutcomes[e.Data.Outcome]:
+		return fmt.Errorf("%w: outcome must be won or lost, got %q", ErrInvalidEvent, e.Data.Outcome)
+	case e.Data.DecidedAt.IsZero():
+		return fmt.Errorf("%w: data.decided_at is required", ErrInvalidEvent)
+	}
+	return nil
+}

@@ -87,22 +87,52 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := Decode(body)
+	// The type decides which decoder runs. Each one is strict about its own
+	// shape, so a ruling body cannot be quietly read as a dispute.
+	_, eventType, err := PeekType(body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := event.Validate(h.now()); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	merchant, err := h.store.MerchantByExternalID(ctx, event.Data.MerchantID)
+	var (
+		opened     DisputeWebhook
+		ruling     RulingWebhook
+		eventID    string
+		merchantID string
+	)
+
+	switch eventType {
+	case TypeDisputeOpened:
+		opened, err = Decode(body)
+		if err == nil {
+			err = opened.Validate(h.now())
+		}
+		eventID, merchantID = opened.ID, opened.Data.MerchantID
+
+	case TypeDisputeResolved:
+		ruling, err = DecodeRuling(body)
+		if err == nil {
+			err = ruling.Validate()
+		}
+		eventID, merchantID = ruling.ID, ruling.Data.MerchantID
+
+	default:
+		writeError(w, http.StatusBadRequest, "unsupported event type "+eventType)
+		return
+	}
+
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	merchant, err := h.store.MerchantByExternalID(ctx, merchantID)
 	if err != nil {
 		if errors.Is(err, ErrUnknownMerchant) {
 			// Same answer as a bad signature, on purpose.
 			logger.WarnContext(ctx, "rejected delivery", "reason", "unknown merchant",
-				"claimed_merchant", event.Data.MerchantID)
+				"claimed_merchant", merchantID)
 			writeError(w, http.StatusUnauthorized, "invalid signature")
 			return
 		}
@@ -134,57 +164,79 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The idempotency key comes from the signed body, never from the
 	// Idempotency-Key header. That header is not covered by the signature, so
 	// keying off it would let anyone suppress a real event by guessing an id.
-	claimed, err := h.guard.Claim(ctx, event.ID)
+	claimed, err := h.guard.Claim(ctx, eventID)
 	if err != nil {
 		logger.ErrorContext(ctx, "idempotency claim failed", "error", err)
 		writeError(w, http.StatusServiceUnavailable, "idempotency store unavailable")
 		return
 	}
 	if !claimed {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": event.ID})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": eventID})
 		return
 	}
 
-	result, err := h.store.Record(ctx, merchant, body, signatureValue, event)
-	if err != nil && !errors.Is(err, ErrUnknownTransaction) {
+	var (
+		result     RecordResult
+		recordErr  error
+		unlinkable error
+	)
+
+	switch eventType {
+	case TypeDisputeOpened:
+		result, recordErr = h.store.Record(ctx, merchant, body, signatureValue, opened)
+		unlinkable = ErrUnknownTransaction
+	case TypeDisputeResolved:
+		result, recordErr = h.store.RecordRuling(ctx, merchant, body, signatureValue, ruling)
+		unlinkable = ErrNotRepresented
+	}
+
+	if recordErr != nil && !errors.Is(recordErr, unlinkable) {
 		// The claim is only valid if the work behind it committed. Hand it back
 		// so the sender's retry is processed instead of being answered
 		// "already handled" for the next day.
-		if releaseErr := h.guard.Release(ctx, event.ID); releaseErr != nil {
-			logger.ErrorContext(ctx, "could not release idempotency claim", "error", releaseErr, "event_id", event.ID)
+		if releaseErr := h.guard.Release(ctx, eventID); releaseErr != nil {
+			logger.ErrorContext(ctx, "could not release idempotency claim", "error", releaseErr, "event_id", eventID)
 		}
-		logger.ErrorContext(ctx, "record failed", "error", err, "event_id", event.ID)
+		logger.ErrorContext(ctx, "record failed", "error", recordErr, "event_id", eventID)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
-	if errors.Is(err, ErrUnknownTransaction) {
-		// The delivery was stored; the dispute could not be linked. 422 tells
-		// the sender this will not succeed on retry.
-		logger.WarnContext(ctx, "unlinkable dispute", "merchant", merchant.ExternalID,
-			"transaction", event.Data.TransactionID, "webhook_event_id", result.WebhookEventID)
+	if recordErr != nil {
+		// The delivery was stored; it could not be linked to anything to act
+		// on. 422 tells the sender this will not succeed on retry.
+		logger.WarnContext(ctx, "unlinkable delivery", "merchant", merchant.ExternalID,
+			"reason", recordErr.Error(), "webhook_event_id", result.WebhookEventID)
 		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-			"status": "unlinkable", "reason": "unknown transaction", "event_id": event.ID,
+			"status": "unlinkable", "reason": recordErr.Error(), "event_id": eventID,
 		})
 		return
 	}
 
 	if result.Duplicate {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": event.ID})
+		writeJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": eventID})
 		return
 	}
 
-	logger.InfoContext(ctx, "dispute received",
-		"merchant", merchant.ExternalID,
-		"dispute_id", result.DisputeID,
-		"kind", event.Data.Kind,
-		"amount_minor", event.Data.AmountMinor,
-		"currency", event.Data.Currency,
-		"deadline_at", event.Data.RespondBy)
+	switch eventType {
+	case TypeDisputeOpened:
+		logger.InfoContext(ctx, "dispute received",
+			"merchant", merchant.ExternalID,
+			"dispute_id", result.DisputeID,
+			"kind", opened.Data.Kind,
+			"amount_minor", opened.Data.AmountMinor,
+			"currency", opened.Data.Currency,
+			"deadline_at", opened.Data.RespondBy)
+	case TypeDisputeResolved:
+		logger.InfoContext(ctx, "network ruled",
+			"merchant", merchant.ExternalID,
+			"dispute_id", result.DisputeID,
+			"outcome", ruling.Data.Outcome)
+	}
 
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"status":     "accepted",
-		"event_id":   event.ID,
+		"event_id":   eventID,
 		"dispute_id": result.DisputeID,
 	})
 }

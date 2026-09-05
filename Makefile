@@ -12,6 +12,7 @@ help:
 	@echo "seed    regenerate the dataset (SEED_TRANSACTIONS=n to change size)"
 	@echo "verify  assert the money invariants and print a summary"
 	@echo "emit    stream signed webhooks at the ingest service"
+	@echo "rule    send network rulings (won/lost) for represented disputes"
 	@echo ""
 	@echo "ingest       run the webhook ingest service on :8080"
 	@echo "api          run the read API on :8081"
@@ -57,6 +58,11 @@ verify:
 
 emit:
 	cd $(SIM) && npm run emit -- --rate 20
+
+# The network coming back with a verdict on a representment. Needs the worker
+# to have run first: it is what moves chargebacks to 'represented'.
+rule:
+	cd $(SIM) && npm run rule -- --count 25
 
 tidy:
 	go mod tidy

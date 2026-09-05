@@ -94,3 +94,102 @@ func TestDecodeRejectsFractionalAmount(t *testing.T) {
 		t.Fatalf("Decode() = %v, want an error naming amount_minor", err)
 	}
 }
+
+func validRuling() RulingWebhook {
+	return RulingWebhook{
+		ID:        "evt_2",
+		Type:      TypeDisputeResolved,
+		CreatedAt: reference,
+		Data: RulingData{
+			DisputeID:  "dsp_1",
+			MerchantID: "mrc_northwind",
+			Outcome:    "won",
+			DecidedAt:  reference,
+			Note:       "compelling evidence accepted",
+		},
+	}
+}
+
+func TestRulingValidateAcceptsBothOutcomes(t *testing.T) {
+	for _, outcome := range []string{"won", "lost"} {
+		event := validRuling()
+		event.Data.Outcome = outcome
+		if err := event.Validate(); err != nil {
+			t.Errorf("outcome %q: %v", outcome, err)
+		}
+	}
+}
+
+func TestRulingValidateRejects(t *testing.T) {
+	tests := map[string]func(*RulingWebhook){
+		"missing id":       func(e *RulingWebhook) { e.ID = "" },
+		"wrong type":       func(e *RulingWebhook) { e.Type = TypeDisputeOpened },
+		"missing dispute":  func(e *RulingWebhook) { e.Data.DisputeID = "" },
+		"missing merchant": func(e *RulingWebhook) { e.Data.MerchantID = "" },
+		"no decided_at":    func(e *RulingWebhook) { e.Data.DecidedAt = time.Time{} },
+		// There is no third answer. "partial" and "pending" are not outcomes,
+		// and accepting one would put a dispute in a state the schema forbids.
+		"invented outcome": func(e *RulingWebhook) { e.Data.Outcome = "partial" },
+		"empty outcome":    func(e *RulingWebhook) { e.Data.Outcome = "" },
+		"cased outcome":    func(e *RulingWebhook) { e.Data.Outcome = "WON" },
+	}
+
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			event := validRuling()
+			mutate(&event)
+			if err := event.Validate(); !errors.Is(err, ErrInvalidEvent) {
+				t.Fatalf("Validate() = %v, want ErrInvalidEvent", err)
+			}
+		})
+	}
+}
+
+// Routing happens before either strict decoder runs, so it has to work on a
+// body that neither of them would accept.
+func TestPeekTypeRoutesBeforeDecoding(t *testing.T) {
+	tests := map[string]string{
+		`{"id":"evt_1","type":"dispute.opened","data":{"anything":1}}`:   TypeDisputeOpened,
+		`{"id":"evt_2","type":"dispute.resolved","data":{"nonsense":2}}`: TypeDisputeResolved,
+		`{"id":"evt_3","type":"dispute.updated"}`:                        "dispute.updated",
+	}
+	for body, want := range tests {
+		_, got, err := PeekType([]byte(body))
+		if err != nil {
+			t.Errorf("PeekType(%s) = %v", body, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("PeekType(%s) = %q, want %q", body, got, want)
+		}
+	}
+}
+
+func TestPeekTypeRejectsWhatItCannotRoute(t *testing.T) {
+	for _, body := range []string{`{"id":"evt_1"}`, `not json`, `[]`, ``} {
+		if _, _, err := PeekType([]byte(body)); !errors.Is(err, ErrInvalidEvent) {
+			t.Errorf("PeekType(%q) = %v, want ErrInvalidEvent", body, err)
+		}
+	}
+}
+
+// A ruling body must not be readable as a dispute, or a malformed one could be
+// silently misfiled.
+func TestTheDecodersDoNotAcceptEachOthersBodies(t *testing.T) {
+	ruling := `{"id":"evt_2","type":"dispute.resolved","created_at":"2026-03-01T12:00:00Z",
+		"data":{"dispute_id":"d","merchant_id":"m","outcome":"won",
+		"decided_at":"2026-03-01T12:00:00Z","note":"n"}}`
+
+	if _, err := Decode([]byte(ruling)); err == nil {
+		t.Error("the dispute decoder accepted a ruling body")
+	}
+
+	opened := `{"id":"evt_1","type":"dispute.opened","created_at":"2026-03-01T12:00:00Z",
+		"data":{"dispute_id":"d","merchant_id":"m","transaction_id":"t","kind":"alert",
+		"card_network":"visa","reason_code":"10.4","amount_minor":100,"currency":"USD",
+		"opened_at":"2026-03-01T12:00:00Z","respond_by":"2026-03-03T12:00:00Z"}}`
+
+	if _, err := DecodeRuling([]byte(opened)); err == nil {
+		t.Error("the ruling decoder accepted a dispute body")
+	}
+}
