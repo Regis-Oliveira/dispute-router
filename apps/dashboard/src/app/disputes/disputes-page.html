@@ -1,0 +1,22 @@
+<header class="masthead">
+  <div class="masthead__id">
+    <h1>Dispute Router</h1>
+    <span class="masthead__sub">operations</span>
+  </div>
+  <app-live-feed />
+</header>
+
+<app-summary-tiles
+  [states]="summary().states"
+  [exposure]="summary().open_value"
+  [deadlines]="summary().deadlines"
+/>
+
+<app-filter-bar />
+
+<div class="split" [class.split--open]="hasSelection()">
+  <app-dispute-table />
+  @if (hasSelection()) {
+    <app-dispute-detail />
+  }
+</div>

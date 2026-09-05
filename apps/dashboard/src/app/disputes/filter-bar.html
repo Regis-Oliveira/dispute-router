@@ -1,0 +1,93 @@
+<div class="bar">
+  <div class="bar__row">
+    <label class="search">
+      <span class="visually-hidden">Search by dispute or transaction reference</span>
+      <input
+        type="search"
+        placeholder="Dispute or transaction reference…"
+        [value]="filters.searchInput()"
+        (input)="onSearch($event)"
+      />
+    </label>
+
+    <label class="toggle">
+      <input
+        type="checkbox"
+        [checked]="filters.openOnly()"
+        (change)="filters.setOpenOnly($any($event.target).checked)"
+      />
+      <span>Still on the clock</span>
+    </label>
+
+    <div class="due" role="group" aria-label="Deadline window">
+      @for (window of dueWindows; track window.value) {
+        <button
+          type="button"
+          class="chip chip--due"
+          [class.chip--on]="filters.dueWithin() === window.value"
+          [attr.aria-pressed]="filters.dueWithin() === window.value"
+          (click)="setDue(window.value)"
+        >
+          {{ window.label }}
+        </button>
+      }
+    </div>
+
+    <span class="bar__spacer"></span>
+
+    @if (filters.isFiltered()) {
+      <button type="button" class="link-btn" (click)="filters.clear()">Clear filters</button>
+    }
+
+    <!-- A real link, not a fetch: the browser streams the download straight
+         from the API and the file never passes through this app's memory. -->
+    <a class="export" [href]="api.exportUrl()" download>Export CSV</a>
+  </div>
+
+  <div class="bar__row bar__row--chips">
+    <div class="group" role="group" aria-label="Kind">
+      @for (kind of kinds; track kind) {
+        <button
+          type="button"
+          class="chip"
+          [class.chip--on]="filters.kinds().includes(kind)"
+          [attr.aria-pressed]="filters.kinds().includes(kind)"
+          (click)="toggleKind(kind)"
+        >
+          {{ kind }}
+        </button>
+      }
+    </div>
+
+    <div class="group" role="group" aria-label="State">
+      @for (state of states; track state) {
+        <button
+          type="button"
+          class="chip"
+          [class.chip--on]="filters.states().includes(state)"
+          [attr.aria-pressed]="filters.states().includes(state)"
+          (click)="toggleState(state)"
+        >
+          {{ state }}
+        </button>
+      }
+    </div>
+
+    <div class="group" role="group" aria-label="Merchant">
+      @for (merchant of merchantOptions(); track merchant.external_id) {
+        <button
+          type="button"
+          class="chip chip--merchant"
+          [class.chip--on]="filters.merchants().includes(merchant.external_id)"
+          [attr.aria-pressed]="filters.merchants().includes(merchant.external_id)"
+          (click)="toggleMerchant(merchant.external_id)"
+        >
+          {{ merchant.name }}
+          <span class="chip__n">{{ merchant.disputes }}</span>
+        </button>
+      } @empty {
+        <span class="chip chip--ghost">loading merchants…</span>
+      }
+    </div>
+  </div>
+</div>

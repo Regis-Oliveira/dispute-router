@@ -1,0 +1,8 @@
+{
+  "name": "dispute-router",
+  "private": true,
+  "description": "Toolchain pin only. Volta reads the nearest package.json walking up, so this makes every Node command anywhere in the repo use the same runtime - without it the shell default (18) wins and the Angular CLI refuses to run.",
+  "volta": {
+    "node": "22.17.1"
+  }
+}

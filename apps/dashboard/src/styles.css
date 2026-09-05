@@ -1,0 +1,75 @@
+/* Theme tokens.
+   The light palette is the base; dark redefines only the tokens, so every
+   component styles against a name and neither theme is a special case. */
+:root {
+  color-scheme: light;
+
+  --ground: #eaeef2;
+  --surface: #ffffff;
+  --surface-2: #f4f7f9;
+  --ink: #0f1620;
+  --ink-2: #3b4756;
+  --ink-muted: #66717f;
+  --rule: #d5dde5;
+  --rule-strong: #b6c2ce;
+
+  --accent: #2b3a67;
+  --accent-ink: #ffffff;
+  --accent-soft: #dfe5f1;
+
+  /* Semantic colours, separate from the accent: "needs attention" must not
+     depend on what the brand colour happens to be. */
+  --ok: #2c6a4e;
+  --ok-soft: #ddebe3;
+  --warn: #8c6210;
+  --warn-soft: #f2e8d3;
+  --crit: #97302e;
+  --crit-soft: #f1dedd;
+
+  --mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: 'IBM Plex Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --ground: #0d1117;
+    --surface: #151b23;
+    --surface-2: #1b222c;
+    --ink: #e7ecf2;
+    --ink-2: #bac5d2;
+    --ink-muted: #8794a3;
+    --rule: #2a323d;
+    --rule-strong: #3b4553;
+
+    --accent: #9bb2e8;
+    --accent-ink: #0d1117;
+    --accent-soft: #202a40;
+
+    --ok: #79c79c;
+    --ok-soft: #17281f;
+    --warn: #dcae5c;
+    --warn-soft: #2a2317;
+    --crit: #e58b87;
+    --crit-soft: #2c1b1b;
+  }
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Digits that sit in columns line up. Without this a table of amounts is
+   ragged and comparing two rows takes real effort. */
+[class*='mono'], code, table { font-variant-numeric: tabular-nums; }

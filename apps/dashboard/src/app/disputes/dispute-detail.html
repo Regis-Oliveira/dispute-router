@@ -1,0 +1,71 @@
+@if (dispute(); as d) {
+  <header class="head">
+    <div>
+      <span class="head__ref">{{ d.external_id }}</span>
+      <h2>{{ d.merchant_name }}</h2>
+    </div>
+    <button type="button" class="close" (click)="api.closeDetail()" aria-label="Close details">×</button>
+  </header>
+
+  <dl class="facts">
+    <div><dt>Amount disputed</dt><dd class="mono">{{ d.amount | money }}</dd></div>
+    <div><dt>Original charge</dt><dd class="mono">{{ d.original_amount | money }}</dd></div>
+    <div><dt>Refunded</dt><dd class="mono">{{ refunded() }}</dd></div>
+    <div><dt>Deadline</dt><dd [class.urgent]="d.seconds_to_deadline < 0 && !d.resolved_at">{{ countdown() }}</dd></div>
+    <div><dt>Kind</dt><dd>{{ d.kind }} · {{ d.card_network }} {{ d.reason_code }}</dd></div>
+    <div><dt>State</dt><dd>{{ d.state }}</dd></div>
+    <div><dt>Card</dt><dd class="mono">•••• {{ d.card_last4 }}</dd></div>
+    <div><dt>Customer</dt><dd class="mono">{{ d.customer_ref }}</dd></div>
+    <div><dt>Charged</dt><dd>{{ d.captured_at | date: 'dd MMM yyyy HH:mm' }}</dd></div>
+    <div><dt>Descriptor</dt><dd class="mono">{{ d.descriptor }}</dd></div>
+  </dl>
+
+  <section class="block">
+    <h3>Ledger</h3>
+    @if (d.ledger_postings.length > 0) {
+      <div class="taccount">
+        <div class="tside">
+          <h4>Debit</h4>
+          @for (posting of debits(); track posting.external_ref + posting.account) {
+            <div class="posting">
+              <span>{{ posting.account }}</span>
+              <span class="mono">{{ posting.amount | money }}</span>
+            </div>
+          }
+        </div>
+        <div class="tside">
+          <h4>Credit</h4>
+          @for (posting of credits(); track posting.external_ref + posting.account) {
+            <div class="posting">
+              <span>{{ posting.account }}</span>
+              <span class="mono">{{ posting.amount | money }}</span>
+            </div>
+          }
+        </div>
+      </div>
+      <p class="balance" [class.balance--off]="balanceCheck() !== 0">
+        debits − credits = {{ balanceCheck() }}
+        @if (balanceCheck() === 0) { <span>· balanced</span> }
+      </p>
+    } @else {
+      <p class="muted">No money has moved for this dispute yet.</p>
+    }
+  </section>
+
+  <section class="block">
+    <h3>History</h3>
+    <ol class="timeline">
+      @for (event of d.events; track event.occurred_at + event.to_state) {
+        <li>
+          <span class="timeline__when">{{ event.occurred_at | date: 'dd MMM HH:mm' }}</span>
+          <span class="timeline__what">
+            @if (event.from_state) { {{ event.from_state }} → }{{ event.to_state }}
+          </span>
+          <span class="timeline__who">{{ event.actor }}</span>
+        </li>
+      }
+    </ol>
+  </section>
+} @else if (isLoading()) {
+  <p class="muted pad">Loading…</p>
+}

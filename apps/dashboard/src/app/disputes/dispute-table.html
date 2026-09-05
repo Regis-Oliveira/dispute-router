@@ -1,0 +1,97 @@
+<div class="wrap">
+  <div class="meta">
+    @if (api.isLoading()) {
+      <span class="meta__status">loading…</span>
+    } @else {
+      <span class="meta__status">
+        <strong>{{ rangeStart() }}–{{ rangeEnd() }}</strong> of
+        <strong>{{ page().total | number }}</strong>
+        @if (filters.isFiltered()) { <span class="meta__filtered">filtered</span> }
+      </span>
+    }
+    <!-- Server timing, surfaced rather than hidden: a query that gets slower
+         when a filter is added should be visible while it is still cheap to
+         fix. -->
+    <span class="meta__took">{{ api.tookMs() }} ms</span>
+  </div>
+
+  @if (api.error(); as error) {
+    <p class="error" role="alert">
+      The API did not answer. Check that <code>make api</code> is running on :8081.
+    </p>
+  }
+
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          @for (column of columns; track column.label) {
+            <th
+              [attr.aria-sort]="ariaSort(column.key)"
+              [class.th--right]="column.align === 'right'"
+              [class.th--sortable]="column.key !== null"
+            >
+              @if (column.key !== null) {
+                <button type="button" (click)="filters.sortBy(column.key!)">
+                  {{ column.label }}<span class="th__dir">{{ sortIndicator(column.key) }}</span>
+                </button>
+              } @else {
+                {{ column.label }}
+              }
+            </th>
+          }
+        </tr>
+      </thead>
+
+      <tbody>
+        @for (row of api.rows(); track row.id) {
+          <tr
+            [class.row--selected]="api.selectedId() === row.id"
+            [attr.data-urgency]="urgency(row)"
+            (click)="api.select(row.id)"
+            tabindex="0"
+            (keydown.enter)="api.select(row.id)"
+          >
+            <td class="td--deadline">
+              <span class="dot" [attr.data-urgency]="urgency(row)" aria-hidden="true"></span>
+              {{ countdown(row) }}
+            </td>
+            <td>{{ row.merchant_name }}</td>
+            <td class="td--mono">{{ row.external_id }}</td>
+            <td><span class="kind" [attr.data-kind]="row.kind">{{ row.kind }}</span></td>
+            <td class="td--mono">{{ row.reason_code }}</td>
+            <td><span class="state" [attr.data-state]="row.state">{{ row.state }}</span></td>
+            <td class="td--right td--mono">{{ row.amount | money }}</td>
+            <td class="td--muted">{{ row.opened_at | date: 'dd MMM HH:mm' }}</td>
+          </tr>
+        } @empty {
+          <tr class="empty">
+            <td [attr.colspan]="columns.length">
+              @if (api.isLoading()) {
+                Loading…
+              } @else if (filters.isFiltered()) {
+                No disputes match these filters.
+                <button type="button" class="link-btn" (click)="filters.clear()">Clear them</button>
+              } @else {
+                No disputes yet. Run <code>make seed</code>, or <code>make emit</code> to send some live.
+              }
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pager">
+    <button type="button" [disabled]="!hasPrevious()" (click)="filters.previousPage()">
+      ← Previous
+    </button>
+    <button type="button" [disabled]="!hasNext()" (click)="filters.nextPage(page().total)">
+      Next →
+    </button>
+    <!-- OFFSET is capped server-side; past that the export is the honest tool. -->
+    @if (page().offset >= 9500) {
+      <span class="pager__note">Near the paging limit — use the CSV export for the full set.</span>
+    }
+  </div>
+</div>

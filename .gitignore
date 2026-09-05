@@ -7,3 +7,7 @@ dist/
 # Go build output
 services/ingest/ingest
 services/ingest/bin/
+
+# Angular
+apps/dashboard/dist/
+apps/dashboard/.angular/

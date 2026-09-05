@@ -1,0 +1,89 @@
+.tiles {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+/* Only the tile that demands action gets an accent. Giving every tile one
+   flattens the hierarchy and none of them read as urgent. */
+.tile--urgent {
+  border-left: 3px solid var(--warn);
+}
+
+.tile__k {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.tile__v {
+  font-size: 1.6rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  line-height: 1.15;
+}
+
+.tile__v--money {
+  font-size: 1.25rem;
+}
+
+.tile__slash {
+  color: var(--ink-muted);
+  font-size: 1.1rem;
+}
+
+.tile__note {
+  font-size: 0.76rem;
+  color: var(--ink-muted);
+}
+
+/* A single stacked bar rather than five separate numbers: the proportion
+   between the buckets is the thing worth seeing at a glance. */
+.deadline-bar {
+  display: flex;
+  gap: 2px;
+  margin-top: 12px;
+  height: 54px;
+}
+
+.deadline-bar__seg {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  padding: 0 10px;
+  min-width: 0;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+}
+
+.deadline-bar__seg[data-bucket='overdue'] { background: var(--crit-soft); border-color: var(--crit); }
+.deadline-bar__seg[data-bucket='6h']      { background: var(--warn-soft); border-color: var(--warn); }
+.deadline-bar__seg[data-bucket='24h']     { background: var(--warn-soft); }
+
+.deadline-bar__n {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+.deadline-bar__l {
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
