@@ -80,6 +80,54 @@ const CHECKS: readonly Check[] = [
     describe: (row) => `dispute ${row["id"]} opens ${String(row["opened_at"])}`,
   },
   {
+    // The strongest check here: it ties the ledger to the domain tables. Every
+    // chargeback holds funds on arrival and releases them when it resolves, so
+    // disputes_payable must equal the disputed amount of exactly those
+    // chargebacks still awaiting an outcome. A hold that is never released, or
+    // a resolution that forgets to release one, shows up here and nowhere else
+    // - both of those balance perfectly and are still wrong.
+    name: "money held equals the chargebacks still open",
+    sql: `
+      WITH held AS (
+        SELECT b.merchant_id, b.currency, b.balance_minor
+          FROM ledger_account_balances b
+         WHERE b.kind = 'disputes_payable'
+      ),
+      expected AS (
+        SELECT d.merchant_id, d.currency, COALESCE(SUM(d.amount_minor), 0) AS amount
+          FROM disputes d
+         WHERE d.kind = 'chargeback'
+           AND d.state IN ('received', 'resolving', 'represented')
+         GROUP BY d.merchant_id, d.currency
+      )
+      SELECT COALESCE(h.merchant_id, e.merchant_id) AS merchant_id,
+             COALESCE(h.currency, e.currency)       AS currency,
+             COALESCE(h.balance_minor, 0)           AS held,
+             COALESCE(e.amount, 0)                  AS expected
+        FROM held h
+        FULL OUTER JOIN expected e
+          ON e.merchant_id = h.merchant_id AND e.currency = h.currency
+       WHERE COALESCE(h.balance_minor, 0) <> COALESCE(e.amount, 0)
+       LIMIT 5`,
+    describe: (row) =>
+      `merchant ${row["merchant_id"]} ${row["currency"]}: holding ${row["held"]}, should hold ${row["expected"]}`,
+  },
+  {
+    name: "no chargeback resolved without releasing its hold",
+    sql: `
+      SELECT d.id, d.state
+        FROM disputes d
+       WHERE d.kind = 'chargeback'
+         AND d.state IN ('won', 'lost', 'expired')
+         AND EXISTS (SELECT 1 FROM ledger_transactions lt
+                      WHERE lt.external_ref = 'dispute:' || d.id || ':hold')
+         AND NOT EXISTS (SELECT 1 FROM ledger_transactions lt
+                          WHERE lt.external_ref IN ('dispute:' || d.id || ':release',
+                                                    'dispute:' || d.id || ':chargeback'))
+       LIMIT 5`,
+    describe: (row) => `dispute ${row["id"]} is ${row["state"]} with its hold still standing`,
+  },
+  {
     name: "refund totals never exceed the capture",
     sql: `SELECT id, refunded_minor, amount_minor FROM transactions WHERE refunded_minor > amount_minor LIMIT 5`,
     describe: (row) => `transaction ${row["id"]}`,
@@ -207,6 +255,17 @@ async function report(): Promise<void> {
         LEFT JOIN merchants m ON m.id = b.merchant_id
        WHERE b.balance_minor <> 0
        ORDER BY m.name NULLS FIRST, b.kind`);
+
+    const { rows: held } = await client.query<{ n: number; amount: number; currency: Currency }>(`
+      SELECT count(*) AS n, COALESCE(SUM(amount_minor), 0) AS amount, currency
+        FROM disputes
+       WHERE kind = 'chargeback' AND state IN ('received','resolving','represented')
+       GROUP BY currency ORDER BY 3`);
+
+    console.log("\nfunds held pending a decision");
+    for (const row of held) {
+      console.log(`  ${String(row.n).padStart(6)} chargebacks  ${formatMinor(row.amount, row.currency).padStart(20)}`);
+    }
 
     console.log("\nledger balances (derived, never stored)");
     for (const row of balances) {

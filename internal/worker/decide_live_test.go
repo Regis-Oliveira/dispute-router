@@ -2,17 +2,21 @@ package worker
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 )
 
-// Loads real open disputes and reports what the policy decides about each.
-// Not an assertion about the seed data - a check that Load and Decide agree,
-// which is where a field that is read but never populated shows up.
-func TestDecisionsOverRealOpenDisputes(t *testing.T) {
+// Runs Load and Decide over real disputes.
+//
+// The property under test is that the two agree: every field Decide reads is a
+// field Load populates. The first version of this asserted that some disputes
+// were still actionable, which is a fact about the data rather than the code -
+// it passed on a fresh seed and failed the moment the worker had done its job.
+// A test that only holds before the system runs is worse than no test.
+func TestLoadPopulatesEverythingDecideReads(t *testing.T) {
 	ctx := context.Background()
-	pool := testPool(t)
-	store := NewStore(pool)
+	store := NewStore(testPool(t))
 
 	open, err := store.OpenDeadlines(ctx)
 	if err != nil {
@@ -36,9 +40,38 @@ func TestDecisionsOverRealOpenDisputes(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load(%d): %v", id, err)
 		}
-		d := Decide(l.Candidate, time.Now())
-		counts[d.Action]++
-		reasons[d.Reason]++
+
+		// A field left at its zero value is how a query that forgot a column
+		// turns into a policy that quietly escalates everything.
+		switch {
+		case l.Kind == "":
+			t.Fatalf("dispute %d: Kind is empty", id)
+		case l.State == "":
+			t.Fatalf("dispute %d: State is empty", id)
+		case l.ReasonCode == "":
+			t.Fatalf("dispute %d: ReasonCode is empty", id)
+		case l.AmountMinor <= 0:
+			t.Fatalf("dispute %d: AmountMinor is %d", id, l.AmountMinor)
+		case len(l.Currency) != 3:
+			t.Fatalf("dispute %d: Currency is %q", id, l.Currency)
+		case l.DeadlineAt.IsZero():
+			t.Fatalf("dispute %d: DeadlineAt is zero", id)
+		case l.MerchantID == 0:
+			t.Fatalf("dispute %d: MerchantID is zero", id)
+		}
+
+		decision := Decide(l.Candidate, time.Now())
+		counts[decision.Action]++
+		reasons[decision.Reason]++
+
+		// These two reasons mean the policy met something it does not
+		// recognise, which is a gap in the code rather than a judgement call.
+		if strings.Contains(decision.Reason, "unrecognised reason code") {
+			t.Errorf("dispute %d: reason code %q is not in the category map", id, l.ReasonCode)
+		}
+		if strings.Contains(decision.Reason, "unknown dispute kind") {
+			t.Errorf("dispute %d: kind %q is not handled", id, l.Kind)
+		}
 	}
 
 	t.Logf("over %d real open disputes:", checked)
@@ -47,9 +80,5 @@ func TestDecisionsOverRealOpenDisputes(t *testing.T) {
 	}
 	for reason, n := range reasons {
 		t.Logf("  %4d  %s", n, reason)
-	}
-
-	if counts[ActionRefund] == 0 && counts[ActionRepresent] == 0 {
-		t.Error("the policy decided nothing actionable over 400 open disputes; Load and Decide disagree somewhere")
 	}
 }

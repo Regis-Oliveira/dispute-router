@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/ledger"
 )
 
 var (
@@ -159,6 +161,16 @@ func (s *Store) Record(
 		return RecordResult{}, fmt.Errorf("insert dispute: %w", err)
 	}
 
+	// A chargeback is a clawback that has already happened: the acquirer took
+	// the money when the network filed it, and the outcome is weeks away. An
+	// alert is only a warning, so nothing moves.
+	if event.Data.Kind == "chargeback" {
+		if err := ledger.Hold(ctx, tx, disputeID, merchant.ID, event.Data.AmountMinor,
+			event.Data.Currency, event.Data.OpenedAt, event.Data.ReasonCode); err != nil {
+			return RecordResult{}, err
+		}
+	}
+
 	detail, err := json.Marshal(map[string]any{
 		"source":           "webhook",
 		"webhook_event_id": webhookEventID,
@@ -240,10 +252,6 @@ func (s *Store) Ping(ctx context.Context) error {
 	defer cancel()
 	return s.pool.Ping(ctx)
 }
-
-// chargebackFeeMinor is what the network charges when a representment is lost,
-// on top of the disputed amount.
-const chargebackFeeMinor int64 = 1500
 
 // ErrNotRepresented means the ruling arrived for a dispute that was never
 // argued, or that has already been ruled on.
@@ -337,16 +345,19 @@ func (s *Store) RecordRuling(
 		return RecordResult{}, fmt.Errorf("insert dispute_event: %w", err)
 	}
 
+	// Both outcomes move money now, because the funds were held when the
+	// chargeback arrived. A win releases the hold back to the merchant; a loss
+	// sends it to the issuer and charges the fee.
 	if event.Data.Outcome == "lost" {
-		if err := postChargebackLoss(ctx, tx, disputeID, merchant.ID, amountMinor, currency,
-			event.Data.DecidedAt); err != nil {
-			return RecordResult{}, err
-		}
+		err = ledger.SettleLoss(ctx, tx, disputeID, merchant.ID, amountMinor, currency,
+			event.Data.DecidedAt, "representment lost")
+	} else {
+		err = ledger.ReleaseHold(ctx, tx, disputeID, merchant.ID, amountMinor, currency,
+			event.Data.DecidedAt)
 	}
-	// A win moves no money here. In this model nothing was deducted when the
-	// chargeback arrived, so there is nothing to give back - a real platform
-	// holds the funds on arrival and releases them on a win, and that provisional
-	// hold is the honest next thing to build.
+	if err != nil {
+		return RecordResult{}, err
+	}
 
 	payload, err := json.Marshal(map[string]any{
 		"dispute_id":   disputeID,
@@ -375,47 +386,4 @@ func (s *Store) RecordRuling(
 	}
 
 	return RecordResult{WebhookEventID: webhookEventID, DisputeID: disputeID}, nil
-}
-
-// postChargebackLoss writes the three-legged entry a lost representment costs:
-// the merchant loses the sale and the network's fee, so the debit is larger
-// than the credit that returns the money.
-func postChargebackLoss(
-	ctx context.Context, tx pgx.Tx,
-	disputeID, merchantID, amountMinor int64, currency string, occurredAt time.Time,
-) error {
-	var ledgerTxID int64
-	err := tx.QueryRow(ctx, `
-		INSERT INTO ledger_transactions (external_ref, kind, currency, description, occurred_at, metadata)
-		VALUES ($1, 'chargeback', $2, 'representment lost', $3, $4::jsonb)
-		RETURNING id`,
-		fmt.Sprintf("dispute:%d:chargeback", disputeID),
-		currency, occurredAt,
-		fmt.Sprintf(`{"fee_minor":%d}`, chargebackFeeMinor),
-	).Scan(&ledgerTxID)
-	if err != nil {
-		return fmt.Errorf("post chargeback for dispute %d: %w", disputeID, err)
-	}
-
-	// Every parameter cast: in an INSERT ... SELECT across a UNION ALL, Postgres
-	// does not infer a parameter's type from the target column and an untyped
-	// one defaults to text.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO ledger_entries (ledger_transaction_id, account_id, direction, amount_minor, currency)
-		SELECT $1::bigint, a.id, 'debit', $2::bigint + $3::bigint, $4::char(3)
-		  FROM ledger_accounts a
-		 WHERE a.merchant_id = $5::bigint AND a.kind = 'merchant_balance' AND a.currency = $4::char(3)
-		UNION ALL
-		SELECT $1::bigint, a.id, 'credit', $2::bigint, $4::char(3)
-		  FROM ledger_accounts a
-		 WHERE a.merchant_id IS NULL AND a.kind = 'settlement_clearing' AND a.currency = $4::char(3)
-		UNION ALL
-		SELECT $1::bigint, a.id, 'credit', $3::bigint, $4::char(3)
-		  FROM ledger_accounts a
-		 WHERE a.merchant_id IS NULL AND a.kind = 'fee_revenue' AND a.currency = $4::char(3)`,
-		ledgerTxID, amountMinor, chargebackFeeMinor, currency, merchantID,
-	); err != nil {
-		return fmt.Errorf("post chargeback entries for dispute %d: %w", disputeID, err)
-	}
-	return nil
 }

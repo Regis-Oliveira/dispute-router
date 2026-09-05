@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/ledger"
 )
 
 // Every test here runs the real write path against a real database inside a
@@ -149,7 +151,9 @@ func TestARefundCannotBePostedTwice(t *testing.T) {
 	}
 
 	// Same dispute, same external_ref. Postgres has to refuse it.
-	if err := postRefund(ctx, tx, candidate); err == nil {
+	err = ledger.Refund(ctx, tx, candidate.ID, candidate.MerchantID, candidate.AmountMinor,
+		candidate.Currency, time.Now(), candidate.ReasonCode)
+	if err == nil {
 		t.Fatal("a second refund for the same dispute was accepted")
 	}
 }

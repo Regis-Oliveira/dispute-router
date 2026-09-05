@@ -9,15 +9,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/ledger"
 )
 
 // ErrStaleCandidate means the dispute changed between being read and being
 // written. Not a failure: the version check did its job.
 var ErrStaleCandidate = errors.New("dispute changed underneath this worker")
-
-// chargebackFeeMinor is what the network charges the merchant when a
-// chargeback lands, on top of the disputed amount.
-const chargebackFeeMinor int64 = 1500
 
 type Store struct{ pool *pgxpool.Pool }
 
@@ -173,13 +171,29 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 
 	switch decision.Action {
 	case ActionRefund:
-		if err := postRefund(ctx, tx, l); err != nil {
+		if err := ledger.Refund(ctx, tx, l.ID, l.MerchantID, l.AmountMinor,
+			l.Currency, time.Now(), l.ReasonCode); err != nil {
 			return err
 		}
-	case ActionRepresent, ActionExpire:
-		// No money moves. Representing spends effort, not funds; an expiry is
-		// an option lapsing, and the loss only lands if the network later rules
-		// against the merchant.
+		if err := addRefundToTransaction(ctx, tx, l); err != nil {
+			return err
+		}
+
+	case ActionExpire:
+		// An expired chargeback is a lost one: the window to argue closed, so
+		// the held funds go to the issuer and the merchant pays the fee. An
+		// expired alert costs nothing here - no money was ever held, and the
+		// chargeback it invites has not arrived yet.
+		if l.Kind == "chargeback" {
+			if err := ledger.SettleLoss(ctx, tx, l.ID, l.MerchantID, l.AmountMinor,
+				l.Currency, time.Now(), "response window closed with no representment"); err != nil {
+				return err
+			}
+		}
+
+	case ActionRepresent:
+		// Representing spends effort, not funds. The hold posted when the
+		// chargeback arrived stays exactly where it is until the network rules.
 	}
 
 	payload, err := json.Marshal(map[string]any{
@@ -207,53 +221,13 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 	return nil
 }
 
-// postRefund writes the balanced journal entry that gives the money back:
-// the merchant is owed less, and the money leaves the clearing account.
+// addRefundToTransaction keeps the denormalised refund total on the original
+// charge in step with the ledger.
 //
-// external_ref is 'dispute:<id>:refund' and is unique. If this worker is a
-// retry after a crash that committed, the insert conflicts and the whole
-// transaction rolls back rather than paying twice - the conflict is the
-// success condition, not an error.
-func postRefund(ctx context.Context, tx pgx.Tx, l loaded) error {
-	var ledgerTxID int64
-	err := tx.QueryRow(ctx, `
-		INSERT INTO ledger_transactions (external_ref, kind, currency, description, occurred_at, metadata)
-		VALUES ($1, 'refund', $2, $3, now(), $4::jsonb)
-		RETURNING id`,
-		fmt.Sprintf("dispute:%d:refund", l.ID),
-		l.Currency,
-		"auto-refund inside the alert window",
-		fmt.Sprintf(`{"reason_code":%q,"kind":%q}`, l.ReasonCode, l.Kind),
-	).Scan(&ledgerTxID)
-	if err != nil {
-		return fmt.Errorf("post refund for dispute %d: %w", l.ID, err)
-	}
-
-	// Every parameter is cast explicitly.
-	//
-	// In an INSERT ... SELECT across a UNION ALL, Postgres does not infer a
-	// parameter's type from the target column, and an untyped parameter
-	// defaults to text: "column ledger_transaction_id is of type bigint but
-	// expression is of type text". The same class of mistake as the ledger
-	// lookup in the read API - a query that leaves a type open gets one chosen
-	// for it, and the choice is only wrong at runtime.
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO ledger_entries (ledger_transaction_id, account_id, direction, amount_minor, currency)
-		SELECT $1::bigint, a.id, 'debit', $2::bigint, $3::char(3)
-		  FROM ledger_accounts a
-		 WHERE a.merchant_id = $4::bigint AND a.kind = 'merchant_balance' AND a.currency = $3::char(3)
-		UNION ALL
-		SELECT $1::bigint, a.id, 'credit', $2::bigint, $3::char(3)
-		  FROM ledger_accounts a
-		 WHERE a.merchant_id IS NULL AND a.kind = 'settlement_clearing' AND a.currency = $3::char(3)`,
-		ledgerTxID, l.AmountMinor, l.Currency, l.MerchantID,
-	); err != nil {
-		return fmt.Errorf("post refund entries for dispute %d: %w", l.ID, err)
-	}
-
-	// The transaction's running refund total. The CHECK constraint
-	// (refunded_minor <= amount_minor) is what catches a double-refund that
-	// somehow got past everything above.
+// The CHECK constraint (refunded_minor <= amount_minor) is what catches a
+// double refund that somehow got past the version check and the unique
+// external_ref above it.
+func addRefundToTransaction(ctx context.Context, tx pgx.Tx, l loaded) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE transactions t
 		   SET refunded_minor = t.refunded_minor + $2,
@@ -265,6 +239,5 @@ func postRefund(ctx context.Context, tx pgx.Tx, l loaded) error {
 	); err != nil {
 		return fmt.Errorf("update refund total for dispute %d: %w", l.ID, err)
 	}
-
 	return nil
 }
