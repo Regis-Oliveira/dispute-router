@@ -54,6 +54,7 @@ type Config struct {
 	AWSAccessKey     string
 	AWSSecretKey     string
 	SQSQueueURL      string
+	SQSDLQURL        string
 	S3EvidenceBucket string
 	SQSMaxMessages   int
 	SQSWaitSeconds   int
@@ -103,6 +104,7 @@ func Load(dotenvPath string) (Config, error) {
 		AWSAccessKey:     str("AWS_ACCESS_KEY_ID", "test"),
 		AWSSecretKey:     str("AWS_SECRET_ACCESS_KEY", "test"),
 		SQSQueueURL:      str("SQS_QUEUE_URL", "http://localhost:4566/000000000000/disputes-events"),
+		SQSDLQURL:        str("SQS_DLQ_URL", "http://localhost:4566/000000000000/disputes-events-dlq"),
 		S3EvidenceBucket: str("S3_EVIDENCE_BUCKET", "dispute-evidence"),
 		SQSMaxMessages:   integer("SQS_MAX_MESSAGES", 10),
 		SQSWaitSeconds:   integer("SQS_WAIT_SECONDS", 20),

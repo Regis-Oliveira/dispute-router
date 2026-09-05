@@ -26,6 +26,8 @@ help:
 	@echo ""
 	@echo "aws-init    create the queue, dlq and bucket in localstack"
 	@echo "aws-status  queue depths and bucket contents"
+	@echo "dlq         show what is on the dead-letter queue"
+	@echo "dlq-replay  dry-run a replay back onto the main queue"
 	@echo ""
 	@echo "psql    open a shell on the database"
 	@echo "redis   open redis-cli inside the container"
@@ -118,11 +120,17 @@ aws-status:
 	@echo "evidence bucket:"
 	@docker exec dr-localstack awslocal s3 ls s3://dispute-evidence --recursive --human-readable || true
 
-aws-dlq:
-	@docker exec dr-localstack awslocal sqs receive-message \
-	  --queue-url http://localhost:4566/000000000000/disputes-events-dlq \
-	  --max-number-of-messages 10 --visibility-timeout 0 \
-	  --query 'Messages[].Body' --output text
+# Fix the cause before replaying. A message put back into an unfixed failure
+# comes straight back, and a loop that looks like work is worse than a queue
+# that is visibly stuck.
+dlq:
+	go run ./cmd/dlq peek
+
+dlq-replay:
+	go run ./cmd/dlq replay -dry-run
+	@echo
+	@echo "that was a dry run. to actually move them:"
+	@echo "  go run ./cmd/dlq replay"
 
 # No local psql client needed; use the one inside the container.
 psql:
