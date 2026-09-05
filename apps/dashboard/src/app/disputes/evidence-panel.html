@@ -1,0 +1,65 @@
+<div
+  class="drop"
+  [class.drop--active]="dragging()"
+  [class.drop--busy]="api.isBusy()"
+  (dragover)="onDragOver($event)"
+  (dragleave)="onDragLeave()"
+  (drop)="onDrop($event)"
+>
+  @if (api.isBusy()) {
+    <div class="busy">
+      <span class="busy__name">{{ api.upload().filename }}</span>
+      @if (api.upload().status === 'preparing') {
+        <span class="busy__note">requesting an upload URL…</span>
+      } @else {
+        <!-- Real progress, measured from bytes on the wire. The Fetch API
+             cannot report this, which is why the upload uses XHR. -->
+        <div class="bar" role="progressbar" [attr.aria-valuenow]="progress()"
+             aria-valuemin="0" aria-valuemax="100">
+          <div class="bar__fill" [style.width.%]="progress()"></div>
+        </div>
+        <span class="busy__note">{{ progress() }}% uploaded</span>
+      }
+    </div>
+  } @else {
+    <label class="pick">
+      <input
+        type="file"
+        [accept]="api.acceptAttribute"
+        (change)="onPicked($event)"
+        hidden
+      />
+      <span class="pick__cta">Choose a file</span>
+      <span class="pick__hint">or drop one here · {{ api.describeAccepted() }}</span>
+    </label>
+  }
+</div>
+
+@if (api.upload().status === 'error') {
+  <p class="msg msg--error" role="alert">
+    {{ api.upload().message }}
+    <button type="button" (click)="api.reset()">Dismiss</button>
+  </p>
+} @else if (api.upload().status === 'done') {
+  <p class="msg msg--ok">
+    {{ api.upload().filename }} filed.
+    <button type="button" (click)="api.reset()">Dismiss</button>
+  </p>
+}
+
+@if (files().length > 0) {
+  <ul class="files">
+    @for (file of files(); track file.key) {
+      <li>
+        <!-- A presigned GET that expires. Evidence is a customer's receipt,
+             their address, sometimes their signature - never a public link. -->
+        <a [href]="file.url" target="_blank" rel="noopener">{{ file.name }}</a>
+        <span class="files__meta">
+          {{ size(file.size_bytes) }} · {{ file.uploaded_at | date: 'dd MMM HH:mm' }}
+        </span>
+      </li>
+    }
+  </ul>
+} @else if (!isLoading()) {
+  <p class="msg muted">Nothing filed yet.</p>
+}

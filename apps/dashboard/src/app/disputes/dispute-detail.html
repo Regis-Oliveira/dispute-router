@@ -53,6 +53,22 @@
   </section>
 
   <section class="block">
+    <h3>Evidence</h3>
+    @if (d.kind === 'chargeback') {
+      <p class="muted small">
+        What the merchant can show: a delivery confirmation, a signed receipt, a record of
+        the duplicate charge. It is what a representment is made of.
+      </p>
+    } @else {
+      <p class="muted small">
+        Alerts are settled by refunding, not by arguing &mdash; evidence here is for the
+        record rather than for a case.
+      </p>
+    }
+    <app-evidence-panel [disputeId]="d.id" />
+  </section>
+
+  <section class="block">
     <h3>History</h3>
     <ol class="timeline">
       @for (event of d.events; track event.occurred_at + event.to_state) {

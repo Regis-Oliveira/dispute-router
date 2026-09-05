@@ -289,7 +289,11 @@ func CORS(allowed []string) func(http.Handler) http.Handler {
 				// Tells caches that the response body depends on the Origin, so
 				// one origin's response is never served to another.
 				w.Header().Add("Vary", "Origin")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+				// POST is here for the presigned-upload endpoint. It mints a
+				// credential rather than changing state, but the browser does
+				// not know that: a preflight for a method not listed here is
+				// refused before the request is ever sent.
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 				w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 				w.Header().Set("Access-Control-Max-Age", "600")
 			}

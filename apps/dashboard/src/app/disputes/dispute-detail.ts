@@ -2,12 +2,13 @@ import { DatePipe } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
 import { DisputesApi } from '../core/disputes.api';
 import { formatCountdown, formatMinor, MoneyPipe } from '../core/money';
+import { EvidencePanel } from './evidence-panel';
 import type { LedgerPosting } from '../core/api.types';
 
 @Component({
   selector: 'app-dispute-detail',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [MoneyPipe, DatePipe],
+  imports: [MoneyPipe, DatePipe, EvidencePanel],
   templateUrl: './dispute-detail.html',
   styleUrl: './dispute-detail.css',
   host: {

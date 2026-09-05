@@ -140,3 +140,22 @@ export interface LiveEvent {
   };
   at: string;
 }
+
+/** A file already filed against a dispute. */
+export interface EvidenceFile {
+  key: string;
+  name: string;
+  size_bytes: number;
+  uploaded_at: string;
+  /** Short-lived presigned GET. Never a public link: evidence is a customer's receipt. */
+  url: string;
+}
+
+/** Permission to write one object, minted by the API and used by the browser. */
+export interface UploadTarget {
+  key: string;
+  url: string;
+  expires_at: string;
+  method: string;
+  content_type: string;
+}

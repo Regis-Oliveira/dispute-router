@@ -130,3 +130,5 @@ h4 {
 
 .muted { color: var(--ink-muted); font-size: 0.85rem; margin: 0; }
 .pad { padding: 20px 16px; }
+
+.small { font-size: 0.78rem; margin: 0 0 10px; line-height: 1.45; }
