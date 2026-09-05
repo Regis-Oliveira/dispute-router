@@ -56,3 +56,16 @@ func TestOnlyDocumentTypesAreAccepted(t *testing.T) {
 		}
 	}
 }
+
+// The size limit has to be in the signed policy, not just in a JSON field the
+// client is trusted to read. A presigned PUT could not express it at all.
+func TestUploadPolicyCarriesTheSizeLimit(t *testing.T) {
+	if MaxUploadBytes <= 0 {
+		t.Fatal("MaxUploadBytes must be positive; a zero range refuses everything")
+	}
+	// 5GB is S3's single-request ceiling. Anything at or above it means the
+	// policy is not actually constraining anything.
+	if MaxUploadBytes >= 5*1024*1024*1024 {
+		t.Errorf("MaxUploadBytes = %d, which is not a limit", MaxUploadBytes)
+	}
+}

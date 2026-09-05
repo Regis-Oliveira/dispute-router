@@ -20,12 +20,10 @@ const ACCEPTED = new Map<string, string>([
 ]);
 
 /**
- * Checked here only.
- *
- * A presigned PUT cannot carry a size limit - the signature covers the method,
- * the key and the content type, not the body - so this is a courtesy, not a
- * control. Enforcing it properly needs a presigned POST policy with a
- * content-length-range, which is the next thing to build here.
+ * Checked here so an oversized file fails instantly instead of after a long
+ * upload. It is not the control: the signed policy carries a
+ * content-length-range and S3 counts the bytes it actually receives, so a
+ * client that skips this check is refused by storage rather than by politeness.
  */
 const MAX_BYTES = 25 * 1024 * 1024;
 
@@ -120,7 +118,7 @@ export class EvidenceApi {
     this.uploadState.set({ status: 'uploading', filename: file.name, progress: 0 });
 
     try {
-      await putWithProgress(target, file, (progress) =>
+      await postWithProgress(target, file, (progress) =>
         this.uploadState.set({ status: 'uploading', filename: file.name, progress }),
       );
     } catch (error) {
@@ -142,23 +140,30 @@ export class EvidenceApi {
  *
  * The app is configured with `withFetch()`, and the Fetch API has no way to
  * report how much of a request body has been sent - it can report download
- * progress and nothing else. For a 40MB scan of a delivery receipt that is the
+ * progress and nothing else. For a 25MB scan of a delivery receipt that is the
  * difference between a progress bar and a frozen dialog, so this one call drops
  * to XMLHttpRequest, which has had upload progress events since 2006.
  *
- * The Content-Type must match the presigned value exactly. The signature covers
- * it, so sending anything else is rejected by S3 with a signature mismatch
- * rather than a helpful error.
+ * The form is a signed policy plus the file. Two rules S3 does not forgive:
+ * every field the policy conditions on must be present, and the file part must
+ * come last - S3 stops reading fields when it reaches it.
  */
-function putWithProgress(
+function postWithProgress(
   target: UploadTarget,
   file: File,
   onProgress: (percent: number) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    const form = new FormData();
+    for (const [name, value] of Object.entries(target.fields)) {
+      form.append(name, value);
+    }
+    form.append('file', file);
+
     const request = new XMLHttpRequest();
-    request.open(target.method || 'PUT', target.url, true);
-    request.setRequestHeader('Content-Type', target.content_type);
+    request.open('POST', target.url, true);
+    // No Content-Type header is set by hand: the browser has to write the
+    // multipart boundary into it, and overriding it breaks the parse.
 
     request.upload.addEventListener('progress', (event) => {
       if (event.lengthComputable) {
@@ -171,9 +176,9 @@ function putWithProgress(
         resolve();
         return;
       }
-      // S3 answers with XML. Surfacing the status is more use than surfacing
-      // an unparsed document.
-      reject(new Error(`Storage rejected the upload (${request.status}).`));
+      // S3 answers with XML, and its message is genuinely useful here - it says
+      // which policy condition failed, or that the file was too large.
+      reject(new Error(explainS3Error(request.status, request.responseText)));
     });
 
     request.addEventListener('error', () =>
@@ -181,8 +186,14 @@ function putWithProgress(
     );
     request.addEventListener('abort', () => reject(new Error('Upload cancelled.')));
 
-    request.send(file);
+    request.send(form);
   });
+}
+
+function explainS3Error(status: number, body: string): string {
+  const message = /<Message>([^<]+)<\/Message>/.exec(body)?.[1];
+  if (message) return `Storage refused the upload: ${message}`;
+  return `Storage refused the upload (${status}).`;
 }
 
 export function formatBytes(bytes: number): string {

@@ -81,17 +81,34 @@ func safeName(name string) string {
 	return cleaned
 }
 
+// MaxUploadBytes is enforced by S3 itself, not by this service and not by the
+// browser.
+const MaxUploadBytes int64 = 25 * 1024 * 1024
+
 type UploadTarget struct {
 	Key       string    `json:"key"`
 	URL       string    `json:"url"`
 	ExpiresAt time.Time `json:"expires_at"`
-	// Method and headers the browser has to match exactly: the signature covers
-	// them, so a PUT with a different Content-Type is rejected by S3.
-	Method      string `json:"method"`
+	// Fields go into the multipart form, before the file part. They carry the
+	// signed policy; the browser cannot change any of them without invalidating
+	// the signature.
+	Fields map[string]string `json:"fields"`
+	// MaxBytes is the same limit the policy encodes, repeated here only so the
+	// client can refuse an oversized file without spending the upload first.
+	MaxBytes    int64  `json:"max_bytes"`
 	ContentType string `json:"content_type"`
 }
 
-// PresignUpload mints a URL the browser can PUT to.
+// PresignUpload mints a signed policy the browser posts a form to.
+//
+// A presigned PUT cannot carry a size limit: its signature covers the method,
+// the key and the content type, and nothing about the body. So a client that
+// ignored the documented maximum could put a 4GB file in the bucket and the
+// only defence was asking nicely.
+//
+// A presigned POST signs a *policy document* instead, and S3 enforces every
+// condition in it - including content-length-range, which it checks against the
+// actual bytes received. The limit stops being a request and becomes a rule.
 func (e *Evidence) PresignUpload(ctx context.Context, disputeID int64, filename, contentType string) (UploadTarget, error) {
 	if _, ok := allowedTypes[contentType]; !ok {
 		return UploadTarget{}, fmt.Errorf("%w: content type %q is not accepted", ErrInvalidInput, contentType)
@@ -106,20 +123,43 @@ func (e *Evidence) PresignUpload(ctx context.Context, disputeID int64, filename,
 	// replacing the original. Evidence is not something to overwrite.
 	key := fmt.Sprintf("%s%d-%s", e.prefix(disputeID), time.Now().UTC().Unix(), name)
 
-	signed, err := e.presigner.PresignPutObject(ctx, &s3.PutObjectInput{
+	signed, err := e.presigner.PresignPostObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(e.bucket),
 		Key:         aws.String(key),
 		ContentType: aws.String(contentType),
-	}, s3.WithPresignExpires(e.ttl))
+	}, func(o *s3.PresignPostOptions) {
+		o.Expires = e.ttl
+		o.Conditions = []any{
+			// The condition that could not be expressed as a PUT. S3 counts the
+			// bytes it receives and refuses anything outside the range, so the
+			// limit holds against a client that ignores every other signal.
+			[]any{"content-length-range", 1, MaxUploadBytes},
+			// Pinning the type stops a signed policy for a PDF being reused to
+			// upload something else under the same key.
+			map[string]string{"Content-Type": contentType},
+		}
+	})
 	if err != nil {
 		return UploadTarget{}, fmt.Errorf("presign upload: %w", err)
 	}
+
+	// Every condition in the policy needs a matching form field, and the SDK
+	// does not add this one: PutObjectInput.ContentType shapes the policy but
+	// not the returned Values. Without it S3 answers
+	// "Policy Condition failed: {"Content-Type": ...}" on a perfectly valid
+	// upload, which reads like a signing bug rather than a missing field.
+	fields := make(map[string]string, len(signed.Values)+1)
+	for name, value := range signed.Values {
+		fields[name] = value
+	}
+	fields["Content-Type"] = contentType
 
 	return UploadTarget{
 		Key:         key,
 		URL:         signed.URL,
 		ExpiresAt:   time.Now().Add(e.ttl).UTC(),
-		Method:      signed.Method,
+		Fields:      fields,
+		MaxBytes:    MaxUploadBytes,
 		ContentType: contentType,
 	}, nil
 }

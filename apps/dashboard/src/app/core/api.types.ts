@@ -151,11 +151,19 @@ export interface EvidenceFile {
   url: string;
 }
 
-/** Permission to write one object, minted by the API and used by the browser. */
+/**
+ * A signed policy the browser posts a form to.
+ *
+ * `fields` carry the policy and its signature. They go into the form first and
+ * the file goes last, because S3 stops reading fields once it reaches the file
+ * part - a field after it is simply never seen.
+ */
 export interface UploadTarget {
   key: string;
   url: string;
   expires_at: string;
-  method: string;
+  fields: Record<string, string>;
+  /** The same limit the signed policy encodes. S3 enforces it either way. */
+  max_bytes: number;
   content_type: string;
 }

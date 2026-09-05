@@ -56,15 +56,15 @@ echo "    $QUEUE_URL"
 echo "==> evidence bucket"
 $AWS s3api create-bucket --bucket "$BUCKET" 2>/dev/null || echo "    (already exists)"
 
-# The browser PUTs directly to S3 with a presigned URL, so S3 itself has to
-# allow the dashboard's origin - the Go service is not in that request path at
-# all, and its CORS rules do not apply.
+# The browser POSTs a multipart form directly to S3 with a signed policy, so S3
+# itself has to allow the dashboard's origin - the Go service is not in that
+# request path at all, and its CORS rules do not apply to it.
 $AWS s3api put-bucket-cors --bucket "$BUCKET" --cors-configuration "$(cat <<'JSON'
 {
   "CORSRules": [
     {
       "AllowedOrigins": ["http://localhost:4200"],
-      "AllowedMethods": ["GET", "PUT", "HEAD"],
+      "AllowedMethods": ["GET", "POST", "HEAD"],
       "AllowedHeaders": ["*"],
       "ExposeHeaders": ["ETag"],
       "MaxAgeSeconds": 600
