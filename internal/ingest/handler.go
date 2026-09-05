@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/regisoliveira/dispute-router/internal/secrets"
 	"github.com/regisoliveira/dispute-router/internal/signing"
 )
 
@@ -16,6 +17,7 @@ const signatureHeader = "X-Processor-Signature"
 
 type Handler struct {
 	store           *Store
+	secrets         secrets.Resolver
 	guard           *Guard
 	merchantLimiter *Limiter
 	ipLimiter       *Limiter
@@ -27,6 +29,7 @@ type Handler struct {
 
 type HandlerOptions struct {
 	Store           *Store
+	Secrets         secrets.Resolver
 	Guard           *Guard
 	MerchantLimiter *Limiter
 	IPLimiter       *Limiter
@@ -38,6 +41,7 @@ type HandlerOptions struct {
 func NewHandler(opts HandlerOptions) *Handler {
 	return &Handler{
 		store:           opts.Store,
+		secrets:         opts.Secrets,
 		guard:           opts.Guard,
 		merchantLimiter: opts.MerchantLimiter,
 		ipLimiter:       opts.IPLimiter,
@@ -141,7 +145,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := signing.Verify(merchant.WebhookSecret, body, signatureValue, h.now(), h.tolerance); err != nil {
+	// Resolved separately from the merchant row, and never logged. The set is
+	// plural so a key can be rotated without a cutover that rejects every
+	// in-flight delivery.
+	merchantSecrets, err := h.secrets.SecretsFor(ctx, merchant.ExternalID)
+	if err != nil {
+		logger.ErrorContext(ctx, "secret lookup failed", "error", err, "merchant", merchant.ExternalID)
+		writeError(w, http.StatusServiceUnavailable, "cannot verify signatures right now")
+		return
+	}
+
+	if err := signing.VerifyAny(merchantSecrets, body, signatureValue, h.now(), h.tolerance); err != nil {
 		logger.WarnContext(ctx, "rejected delivery", "reason", "signature", "error", err,
 			"merchant", merchant.ExternalID)
 		writeError(w, http.StatusUnauthorized, "invalid signature")

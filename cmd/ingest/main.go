@@ -22,6 +22,7 @@ import (
 	"github.com/regisoliveira/dispute-router/internal/httpx"
 	"github.com/regisoliveira/dispute-router/internal/ingest"
 	"github.com/regisoliveira/dispute-router/internal/outbox"
+	"github.com/regisoliveira/dispute-router/internal/secrets"
 )
 
 func main() {
@@ -66,9 +67,37 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	// One AWS config, built before either the secret resolver or the outbox
+	// publisher asks for a client.
+	awsCfg, err := awsx.Load(ctx, awsx.Config{
+		Region:          cfg.AWSRegion,
+		Endpoint:        cfg.AWSEndpoint,
+		AccessKeyID:     cfg.AWSAccessKey,
+		SecretAccessKey: cfg.AWSSecretKey,
+	})
+	if err != nil {
+		return err
+	}
+
 	store := ingest.NewStore(pool)
+
+	// The database source keeps the system runnable with no AWS at all, and a
+	// secret store you cannot fall back from is a single point of failure
+	// wearing a security badge.
+	var resolver secrets.Resolver = secrets.FromDatabase{Pool: pool}
+	if cfg.WebhookSecretSource == "secretsmanager" {
+		resolver = secrets.NewFromManager(
+			awsx.SecretsManager(awsCfg, cfg.AWSEndpoint),
+			cfg.WebhookSecretID,
+			cfg.WebhookSecretTTL,
+		)
+	}
+	logger.Info("webhook secrets", "source", cfg.WebhookSecretSource,
+		"rotation_latency", cfg.WebhookSecretTTL.String())
+
 	handler := ingest.NewHandler(ingest.HandlerOptions{
 		Store:           store,
+		Secrets:         resolver,
 		Guard:           ingest.NewGuard(rdb, cfg.IdempotencyTTL),
 		MerchantLimiter: ingest.NewLimiter(rdb, "ratelimit:merchant", cfg.RateLimitPerMinute, cfg.RateLimitBurst),
 		IPLimiter:       ingest.NewLimiter(rdb, "ratelimit:ip", cfg.IPRateLimitPerMinute, cfg.IPRateLimitBurst),
@@ -121,16 +150,6 @@ func run(logger *slog.Logger) error {
 	//
 	// The relay above this did not change at all. That is what the outbox
 	// pattern bought: the queue underneath it was always a swappable detail.
-	awsCfg, err := awsx.Load(ctx, awsx.Config{
-		Region:          cfg.AWSRegion,
-		Endpoint:        cfg.AWSEndpoint,
-		AccessKeyID:     cfg.AWSAccessKey,
-		SecretAccessKey: cfg.AWSSecretKey,
-	})
-	if err != nil {
-		return err
-	}
-
 	publisher := outbox.Live{
 		Next: outbox.SQSPublisher{
 			Client:   awsx.SQS(awsCfg, cfg.AWSEndpoint),

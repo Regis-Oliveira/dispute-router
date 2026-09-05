@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 )
 
@@ -75,4 +76,13 @@ func S3(cfg aws.Config, endpoint string) *s3.Client {
 // Presigner mints URLs the browser can use directly.
 func Presigner(client *s3.Client) *s3.PresignClient {
 	return s3.NewPresignClient(client)
+}
+
+// SecretsManager returns a client.
+func SecretsManager(cfg aws.Config, endpoint string) *secretsmanager.Client {
+	return secretsmanager.NewFromConfig(cfg, func(o *secretsmanager.Options) {
+		if endpoint != "" {
+			o.BaseEndpoint = aws.String(endpoint)
+		}
+	})
 }

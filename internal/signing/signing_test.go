@@ -88,3 +88,61 @@ func TestComputeIsStableAcrossImplementations(t *testing.T) {
 		t.Fatalf("Sign() = %s\nwant   %s\n(regenerate with the TypeScript side before trusting this)", got, want)
 	}
 }
+
+// Rotation is not an instant. The new key is published, senders pick it up over
+// minutes or hours, and deliveries signed with the old one keep arriving the
+// whole time. Accepting only one secret forces a cutover where every in-flight
+// delivery is rejected - which is why keys that can only be rotated with an
+// outage never get rotated.
+func TestVerifyAnyAcceptsEitherSideOfARotation(t *testing.T) {
+	const (
+		next    = "whsec_rotated_in"
+		current = "whsec_rotating_out"
+	)
+	body := []byte(`{"id":"evt_1"}`)
+	now := time.Now()
+	secrets := []string{next, current}
+
+	for name, secret := range map[string]string{
+		"signed with the new key": next,
+		"signed with the old key": current,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := VerifyAny(secrets, body, Sign(secret, body, now), now, DefaultTolerance); err != nil {
+				t.Errorf("VerifyAny() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+func TestVerifyAnyStillRejectsAStranger(t *testing.T) {
+	body := []byte(`{"id":"evt_1"}`)
+	now := time.Now()
+
+	err := VerifyAny([]string{"whsec_a", "whsec_b"}, body, Sign("whsec_c", body, now), now, DefaultTolerance)
+	if !errors.Is(err, ErrMismatch) {
+		t.Fatalf("VerifyAny() = %v, want ErrMismatch", err)
+	}
+}
+
+func TestVerifyAnyWithNoSecretsRejects(t *testing.T) {
+	body := []byte(`{"id":"evt_1"}`)
+	now := time.Now()
+
+	if err := VerifyAny(nil, body, Sign("whsec_a", body, now), now, DefaultTolerance); !errors.Is(err, ErrMismatch) {
+		t.Fatalf("VerifyAny() = %v, want ErrMismatch", err)
+	}
+}
+
+// A stale timestamp fails the same way for every secret, so it is reported once
+// rather than after hashing against each.
+func TestVerifyAnyReportsAStaleTimestampWithoutTryingEverySecret(t *testing.T) {
+	body := []byte(`{"id":"evt_1"}`)
+	signedAt := time.Now()
+
+	err := VerifyAny([]string{"a", "b", "c"}, body, Sign("a", body, signedAt),
+		signedAt.Add(time.Hour), DefaultTolerance)
+	if !errors.Is(err, ErrStaleTimestamp) {
+		t.Fatalf("VerifyAny() = %v, want ErrStaleTimestamp", err)
+	}
+}

@@ -33,10 +33,14 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
+// Merchant deliberately no longer carries the signing key.
+//
+// It used to, which meant every code path that wanted a merchant's currency
+// also held its credential, and every log line that dumped the struct leaked
+// it. Secrets are resolved separately, by the one component that needs them.
 type Merchant struct {
 	ID                     int64
 	ExternalID             string
-	WebhookSecret          string
 	Currency               string
 	AutoRefundCeilingMinor *int64
 }
@@ -44,10 +48,10 @@ type Merchant struct {
 func (s *Store) MerchantByExternalID(ctx context.Context, externalID string) (Merchant, error) {
 	var m Merchant
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, external_id, webhook_secret, currency, auto_refund_ceiling_minor
+		SELECT id, external_id, currency, auto_refund_ceiling_minor
 		  FROM merchants
 		 WHERE external_id = $1`, externalID,
-	).Scan(&m.ID, &m.ExternalID, &m.WebhookSecret, &m.Currency, &m.AutoRefundCeilingMinor)
+	).Scan(&m.ID, &m.ExternalID, &m.Currency, &m.AutoRefundCeilingMinor)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Merchant{}, ErrUnknownMerchant

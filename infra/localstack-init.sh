@@ -76,12 +76,25 @@ JSON
 echo "    cors set for http://localhost:4200"
 
 echo "==> webhook signing secrets"
-# The secrets currently live in merchants.webhook_secret. Mirroring them here
-# is the realistic shape: a signing key is a credential, and a credential in an
-# application table is readable by anything with a database connection.
-$AWS secretsmanager create-secret --name dispute-router/webhook-secrets \
-  --secret-string '{"note":"populated by make aws-sync-secrets"}' >/dev/null 2>&1 \
-  || echo "    (already exists)"
+# The keys currently live in merchants.webhook_secret, where anything with a
+# database connection can read them. This publishes them where one IAM
+# permission can, and where reading them is an auditable event.
+#
+# Each merchant maps to a LIST of keys, newest first, so a key can be rotated
+# by prepending the new one and dropping the old one a while later - rather
+# than a cutover that rejects every delivery already in flight.
+SECRETS=$(docker exec dr-postgres psql -U dispute -d dispute_router -t -A -c \
+  "SELECT jsonb_pretty(jsonb_object_agg(external_id, jsonb_build_array(webhook_secret))) FROM merchants;" 2>/dev/null)
+
+if [ -z "$SECRETS" ] || [ "$SECRETS" = "" ]; then
+  echo "    (no merchants yet - run make seed, then make aws-init again)"
+else
+  $AWS secretsmanager create-secret --name dispute-router/webhook-secrets \
+    --secret-string "$SECRETS" >/dev/null 2>&1 \
+    || $AWS secretsmanager put-secret-value --secret-id dispute-router/webhook-secrets \
+         --secret-string "$SECRETS" >/dev/null
+  echo "    published keys for $(echo "$SECRETS" | grep -c 'whsec_') merchant(s)"
+fi
 
 echo
 echo "ready:"

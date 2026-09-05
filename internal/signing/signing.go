@@ -104,6 +104,37 @@ func Verify(secret string, body []byte, header string, now time.Time, tolerance 
 	return nil
 }
 
+// VerifyAny accepts a delivery signed with any one of the merchant's current
+// secrets.
+//
+// This is what makes a signing key rotatable without downtime. Rotation is not
+// an instant: the new key has to be published, senders have to pick it up, and
+// requests signed with the old one keep arriving in the meantime. A single
+// accepted secret forces a cutover where every in-flight delivery is rejected,
+// which is why keys that can only be rotated with an outage never get rotated.
+//
+// Order matters for cost, not correctness: the newest secret is tried first, so
+// the steady state is one hash rather than two.
+func VerifyAny(secrets []string, body []byte, header string, now time.Time, tolerance time.Duration) error {
+	if len(secrets) == 0 {
+		return fmt.Errorf("%w: no secrets configured", ErrMismatch)
+	}
+
+	var lastErr error
+	for _, secret := range secrets {
+		lastErr = Verify(secret, body, header, now, tolerance)
+		if lastErr == nil {
+			return nil
+		}
+		// A malformed header or a stale timestamp fails identically for every
+		// secret, so there is nothing to gain by hashing again.
+		if errors.Is(lastErr, ErrMalformedHeader) || errors.Is(lastErr, ErrStaleTimestamp) {
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
 // Sign produces a header in the same format, for tests and for any outbound
 // webhooks this platform sends later.
 func Sign(secret string, body []byte, ts time.Time) string {

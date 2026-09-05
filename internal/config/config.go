@@ -56,8 +56,13 @@ type Config struct {
 	SQSQueueURL      string
 	SQSDLQURL        string
 	S3EvidenceBucket string
-	SQSMaxMessages   int
-	SQSWaitSeconds   int
+	// WebhookSecretSource is "secretsmanager" or "database". The database is
+	// the fallback that keeps the system runnable with no AWS at all.
+	WebhookSecretSource string
+	WebhookSecretID     string
+	WebhookSecretTTL    time.Duration
+	SQSMaxMessages      int
+	SQSWaitSeconds      int
 
 	// Read API.
 	APIAddr        string
@@ -98,14 +103,19 @@ func Load(dotenvPath string) (Config, error) {
 		// Comfortably longer than one decision takes. A lock that expires
 		// mid-decision is survivable - the version check catches it - but it
 		// wastes the work.
-		WorkerLockTTL:    dur("WORKER_LOCK_TTL", 30*time.Second),
-		AWSRegion:        str("AWS_REGION", "us-east-1"),
-		AWSEndpoint:      str("AWS_ENDPOINT_URL", "http://localhost:4566"),
-		AWSAccessKey:     str("AWS_ACCESS_KEY_ID", "test"),
-		AWSSecretKey:     str("AWS_SECRET_ACCESS_KEY", "test"),
-		SQSQueueURL:      str("SQS_QUEUE_URL", "http://localhost:4566/000000000000/disputes-events"),
-		SQSDLQURL:        str("SQS_DLQ_URL", "http://localhost:4566/000000000000/disputes-events-dlq"),
-		S3EvidenceBucket: str("S3_EVIDENCE_BUCKET", "dispute-evidence"),
+		WorkerLockTTL:       dur("WORKER_LOCK_TTL", 30*time.Second),
+		AWSRegion:           str("AWS_REGION", "us-east-1"),
+		AWSEndpoint:         str("AWS_ENDPOINT_URL", "http://localhost:4566"),
+		AWSAccessKey:        str("AWS_ACCESS_KEY_ID", "test"),
+		AWSSecretKey:        str("AWS_SECRET_ACCESS_KEY", "test"),
+		SQSQueueURL:         str("SQS_QUEUE_URL", "http://localhost:4566/000000000000/disputes-events"),
+		SQSDLQURL:           str("SQS_DLQ_URL", "http://localhost:4566/000000000000/disputes-events-dlq"),
+		S3EvidenceBucket:    str("S3_EVIDENCE_BUCKET", "dispute-evidence"),
+		WebhookSecretSource: str("WEBHOOK_SECRET_SOURCE", "secretsmanager"),
+		WebhookSecretID:     str("WEBHOOK_SECRET_ID", "dispute-router/webhook-secrets"),
+		// The cache TTL is the real rotation latency: a key published now takes
+		// effect within this window. Minutes, not hours.
+		WebhookSecretTTL: dur("WEBHOOK_SECRET_TTL", 5*time.Minute),
 		SQSMaxMessages:   integer("SQS_MAX_MESSAGES", 10),
 		SQSWaitSeconds:   integer("SQS_WAIT_SECONDS", 20),
 
@@ -132,6 +142,11 @@ func Load(dotenvPath string) (Config, error) {
 	}
 	if cfg.S3EvidenceBucket == "" {
 		return Config{}, fmt.Errorf("S3_EVIDENCE_BUCKET is required")
+	}
+	switch cfg.WebhookSecretSource {
+	case "secretsmanager", "database":
+	default:
+		return Config{}, fmt.Errorf("WEBHOOK_SECRET_SOURCE must be secretsmanager or database, got %q", cfg.WebhookSecretSource)
 	}
 	return cfg, nil
 }
