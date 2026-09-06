@@ -12,6 +12,54 @@ compute the graph even though ECS and ELB cannot actually be created there.
 What that still does not prove: nothing has been applied, so IAM policies have
 never been evaluated by IAM, and no container has ever started.
 
+## How it runs, before anything else
+
+Terraform is **not a service**. There is no daemon, no port, nothing to deploy,
+and nothing running between the times you use it. It is a single binary you
+invoke like `make` or `npm`: it starts, does work, and exits.
+
+```
+$ pgrep -f tofu | wc -l     # before
+0
+$ tofu plan                 # ... 40 API calls to AWS, then done
+$ pgrep -f tofu | wc -l     # after
+0
+```
+
+What it does while it runs is call the AWS API — `sts.GetCallerIdentity`,
+`ec2.DescribeVpcs`, `ecs.RegisterTaskDefinition`. The same API the console calls
+when a person clicks around, just called by a program that read a file first.
+
+| | Runs continuously | You invoke it |
+| --- | --- | --- |
+| nginx, Postgres, the services in this repo | yes | |
+| make, npm, git, **terraform** | | yes |
+
+Three commands, and only one of them writes anything:
+
+```
+tofu init     once per checkout. Downloads the provider plugin.
+tofu plan     read AWS, compare against the code, print the difference. Changes nothing.
+tofu apply    make the API calls that close that difference. Then exit.
+```
+
+`plan` is read-only, which is what makes it safe to run on every pull request.
+`apply` shows the same diff and waits for a yes.
+
+The infrastructure it creates keeps running afterwards. Terraform does not, and
+has no idea what happens in between — which is exactly why the state file exists
+and why the next section is about it.
+
+**Where it runs in practice:** on a laptop while learning, and in CI for
+anything real. A pull request runs `plan` and posts the diff for review; merging
+runs `apply`. Nobody applies from a laptop on a team, because then the state and
+the credentials live on one person's machine.
+
+**The hosted thing you may have heard of** — HCP Terraform, Spacelift, Atlantis —
+are services that run this binary *for you*: they hold the state, plan on your
+PRs, and gate apply behind approvals. A workflow layer on top. The tool
+underneath is still the binary above.
+
 ## What Terraform actually is
 
 A program that reads a description of infrastructure, compares it against what
