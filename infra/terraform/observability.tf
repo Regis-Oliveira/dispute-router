@@ -29,8 +29,8 @@ resource "aws_cloudwatch_metric_alarm" "dead_letters" {
     QueueName = aws_sqs_queue.dead_letter.name
   }
 
-  alarm_description = "Messages the platform could not process. Inspect with `dlq peek`, fix the cause, then `dlq replay`."
-  alarm_actions     = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
+  alarm_description  = "Messages the platform could not process. Inspect with `dlq peek`, fix the cause, then `dlq replay`."
+  alarm_actions      = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
   treat_missing_data = "notBreaching"
 }
 
@@ -54,8 +54,8 @@ resource "aws_cloudwatch_metric_alarm" "queue_age" {
     QueueName = aws_sqs_queue.events.name
   }
 
-  alarm_description = "The oldest queued dispute has waited 15 minutes. Alerts expire in hours, so this is the early warning for a missed window."
-  alarm_actions     = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
+  alarm_description  = "The oldest queued dispute has waited 15 minutes. Alerts expire in hours, so this is the early warning for a missed window."
+  alarm_actions      = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
   treat_missing_data = "notBreaching"
 }
 
@@ -79,7 +79,7 @@ resource "aws_cloudwatch_metric_alarm" "task_count" {
     ServiceName = aws_ecs_service.main[each.key].name
   }
 
-  alarm_description = "${each.key} is running fewer tasks than it should."
-  alarm_actions     = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
+  alarm_description  = "${each.key} is running fewer tasks than it should."
+  alarm_actions      = var.alarm_topic_arn == "" ? [] : [var.alarm_topic_arn]
   treat_missing_data = "breaching"
 }

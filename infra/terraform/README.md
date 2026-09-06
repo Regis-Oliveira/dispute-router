@@ -1,8 +1,16 @@
 # Terraform, explained through this stack
 
-Written to be read before it is run. Nothing here has been applied — there is no
-AWS account behind this project — so treat it as a design you can critique, not
-a deployment you can trust blindly.
+**Never applied** — there is no AWS account behind this project — but it does
+`fmt`, `validate` and **`plan` cleanly**: 60 resources, no errors, against
+OpenTofu 1.12.6 and AWS provider 5.100.
+
+A plan is a much stronger check than `validate`. `validate` only sees syntax and
+references; `plan` resolves every data source and puts every argument through
+the provider's own validation. It was run against LocalStack, which is enough to
+compute the graph even though ECS and ELB cannot actually be created there.
+
+What that still does not prove: nothing has been applied, so IAM policies have
+never been evaluated by IAM, and no container has ever started.
 
 ## What Terraform actually is
 
@@ -218,18 +226,49 @@ want to be asked about:
 
 ## Running it without an account
 
-You cannot apply this against LocalStack Community — ECS is a Pro feature. But
-you can do everything short of that, which is most of the learning:
+You cannot apply this against LocalStack Community — ECS is a Pro feature. You
+can do everything short of that, which is most of the learning:
 
 ```bash
-brew install opentofu       # or terraform
 cd infra/terraform
-tofu init
+tofu init -backend=false
 tofu fmt -check
-tofu validate               # catches type and reference errors, makes no API calls
+tofu validate               # syntax and references. No API calls, instant.
 ```
 
-`validate` will not catch a wrong ARN or an IAM policy that grants nothing. It
-will catch every typo, every reference to a resource that does not exist, and
-every argument that does not belong on a resource — which is the majority of
-what goes wrong while learning.
+To go further and get a real plan, point the provider at LocalStack. It needs
+`ec2` enabled so the VPC and subnet data sources resolve — the compose file does
+that, and nothing in this project uses EC2 at runtime:
+
+```bash
+AWS_ENDPOINT_URL=http://localhost:4566 \
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
+  tofu plan -var-file=/path/to/localstack.tfvars
+```
+
+That is the step worth doing. `validate` passed this configuration first time;
+`plan` is what proved every argument is one the provider accepts and every data
+source resolves.
+
+### What the plan actually found
+
+One real thing, and it is the kind that only shows up at the boundary.
+
+AWS caps load balancer target group names at 32 characters, and
+`dispute-router-production-ingest` is **exactly 32**. It plans, it applies, and
+it leaves the next person one character of headroom — so a fourth service, or a
+longer environment name, fails at apply, from AWS, phrased as a complaint about
+the name rather than about its length, after part of the stack already exists.
+
+There is now a `precondition` on the target group that catches it at plan time
+and says what to do:
+
+```
+Error: Resource precondition failed
+  on alb.tf line 58, in resource "aws_lb_target_group" "service":
+    │ each.key is "ingest"
+    │ local.name is "dispute-router-prod-eu-west"
+```
+
+`precondition` is worth knowing generally: it moves a class of failure from
+apply — where things are half-created — to plan, where nothing has happened yet.

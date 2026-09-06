@@ -1,0 +1,13 @@
+# Generated to let `tofu plan` resolve its data sources against LocalStack.
+# Not a deployment target: ECS, ELB and ECR are not in the Community edition.
+region      = "us-east-1"
+environment = "staging"
+vpc_id             = "vpc-d26661650b3590891"
+private_subnet_ids = ["subnet-729ac9e8c1e075166", "subnet-31a850375297f7b87"]
+public_subnet_ids  = ["subnet-18966f55cbbdf2d5c", "subnet-68e8492648878783c"]
+certificate_arn         = "arn:aws:acm:us-east-1:000000000000:certificate/11111111-2222-3333-4444-555555555555"
+database_url_secret_arn = "arn:aws:secretsmanager:us-east-1:000000000000:secret:dispute-router/database-url-AbCdEf"
+redis_url        = "redis://localhost:6379"
+image_tag        = "a1b2c3d4"
+dashboard_origin = "http://localhost:4200"
+alarm_topic_arn  = ""

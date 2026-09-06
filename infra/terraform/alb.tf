@@ -23,15 +23,10 @@ resource "aws_lb" "main" {
 resource "aws_lb_target_group" "service" {
   for_each = local.public_services
 
-  # AWS caps target group names at 32 characters, and
-  # "dispute-router-production-ingest" is exactly 32. A longer environment name
-  # or service name fails at apply with a message about the name, not about the
-  # limit. Worth a validation before this bites somebody adding a fourth
-  # service called "reconciliation".
-  name        = "${local.name}-${each.key}"
-  port        = each.value.port
-  protocol    = "HTTP"
-  vpc_id      = var.vpc_id
+  name     = "${local.name}-${each.key}"
+  port     = each.value.port
+  protocol = "HTTP"
+  vpc_id   = var.vpc_id
   # Fargate tasks have their own network interfaces, so the target is an IP
   # rather than an instance.
   target_type = "ip"
@@ -49,6 +44,21 @@ resource "aws_lb_target_group" "service" {
   # Shorter than the idle timeout above would cut off the export this exists
   # to protect.
   deregistration_delay = 30
+
+  lifecycle {
+    # AWS caps target group names at 32 characters, and
+    # "dispute-router-production-ingest" is exactly 32 - it plans, applies, and
+    # leaves the next person one character of headroom.
+    #
+    # Without this the failure arrives at apply, from AWS, phrased as a
+    # complaint about the name rather than about its length, and only after
+    # some of the stack already exists. A precondition moves it to plan time
+    # and says what to do about it.
+    precondition {
+      condition     = length("${local.name}-${each.key}") <= 32
+      error_message = "Target group name '${local.name}-${each.key}' is ${length("${local.name}-${each.key}")} characters; AWS allows 32. Shorten the environment or service name."
+    }
+  }
 }
 
 resource "aws_lb_listener" "https" {

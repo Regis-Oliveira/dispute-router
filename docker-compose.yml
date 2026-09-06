@@ -54,7 +54,9 @@ services:
     image: localstack/localstack:4
     container_name: dr-localstack
     environment:
-      SERVICES: sqs,s3,secretsmanager
+      # ec2 is here only so `tofu plan` can resolve the VPC and subnet data
+      # sources against something. Nothing in this project uses EC2 at runtime.
+      SERVICES: sqs,s3,secretsmanager,ec2,sts
       DEBUG: "0"
       # Credentials are not checked by Community, but the SDK insists on
       # finding some, and naming them "test" makes it obvious in any log that

@@ -149,8 +149,8 @@ data "aws_iam_policy_document" "worker" {
 
 data "aws_iam_policy_document" "api" {
   statement {
-    sid    = "ListEvidence"
-    effect = "Allow"
+    sid     = "ListEvidence"
+    effect  = "Allow"
     actions = ["s3:ListBucket"]
     # Listing is a permission on the BUCKET; reading is a permission on the
     # OBJECTS. Two different ARNs, and mixing them up is why "it can list but

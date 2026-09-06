@@ -28,6 +28,7 @@ help:
 	@echo "aws-status  queue depths and bucket contents"
 	@echo "dlq         show what is on the dead-letter queue"
 	@echo "tf-check    format and validate the Terraform (needs opentofu)"
+	@echo "tf-plan     plan it against localstack, which resolves the data sources"
 	@echo "dlq-replay  dry-run a replay back onto the main queue"
 	@echo ""
 	@echo "psql    open a shell on the database"
@@ -125,11 +126,17 @@ aws-status:
 # comes straight back, and a loop that looks like work is worse than a queue
 # that is visibly stuck.
 # Terraform for a real AWS account. Never applied - there is no account behind
-# this project - so `tf-check` is as far as it goes. That still catches every
-# typo, dangling reference and misspelled argument, which is most of what goes
-# wrong while learning.
+# this project - but it does plan cleanly.
 tf-check:
 	cd infra/terraform && tofu fmt -check -diff && tofu validate
+
+# A plan is the stronger check: it resolves every data source and puts every
+# argument through the provider's own validation. Pointed at LocalStack, which
+# is enough to compute the graph even though ECS cannot be created there.
+tf-plan:
+	@cd infra/terraform && AWS_ENDPOINT_URL=http://localhost:4566 \
+	  AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
+	  tofu plan -input=false -var-file=localstack.tfvars
 
 dlq:
 	go run ./cmd/dlq peek
