@@ -133,10 +133,12 @@ tf-check:
 # A plan is the stronger check: it resolves every data source and puts every
 # argument through the provider's own validation. Pointed at LocalStack, which
 # is enough to compute the graph even though ECS cannot be created there.
+#
+# The tfvars are generated rather than committed: LocalStack hands out new VPC
+# and subnet ids every time its volume is recreated, so a checked-in file would
+# be stale the first time somebody ran `make reset`.
 tf-plan:
-	@cd infra/terraform && AWS_ENDPOINT_URL=http://localhost:4566 \
-	  AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_REGION=us-east-1 \
-	  tofu plan -input=false -var-file=localstack.tfvars
+	@./infra/terraform/plan-against-localstack.sh
 
 dlq:
 	go run ./cmd/dlq peek
