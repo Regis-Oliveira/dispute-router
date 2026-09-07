@@ -455,6 +455,13 @@ what it made. Terraform says *what*, and `plan` prints the difference before
 anything happens. The cost is a state file, which holds secrets in plaintext and
 is a genuine liability — worth naming rather than glossing over.
 
+## Notes in Portuguese
+
+`docs/conceitos-pt.md` — why Terraform exists and what category of thing it is,
+why Go rather than Node here, what HMAC proves, and why these are long-running
+processes rather than serverless functions. Written to be reread before an
+interview, with every answer grounded in this repository.
+
 ## Known gaps
 
 - Nothing is deployed anywhere; ECS needs a real account, and the Terraform has
