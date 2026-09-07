@@ -71,6 +71,72 @@ requisições — não tem fila, não tem worker, não recebe HTTP. Quem faz iss
 Seria como guardar o `package.json` no Redis. Não é errado, é que não existe
 problema sendo resolvido.
 
+### Provisionar não é popular
+
+Outra confusão comum: achar que o Terraform "sobe dados para a AWS". Ele nunca
+toca em dado. Dá para provar no próprio código — não existe um único recurso
+aqui que escreva conteúdo:
+
+```
+$ grep -rn 'aws_s3_object' *.tf        # nenhum
+$ grep -rn 'send_message' *.tf         # nenhum
+```
+
+Ele cria o bucket **vazio** e a fila **vazia**. É a mesma relação do
+`docker-compose.yml` com o Postgres: o Compose cria o container, e quem insere
+linha é `make migrate` e `make seed`. Outra ferramenta, outro momento.
+
+| Recurso | O Terraform cria | Quem coloca coisa dentro |
+| --- | --- | --- |
+| Fila SQS | a fila, vazia | `cmd/ingest` → outbox → relay |
+| Dead-letter queue | a fila, vazia | a própria política de redrive da AWS |
+| Bucket S3 | o bucket, vazio | o **navegador**, com política assinada |
+| Secrets Manager | a entrada, com placeholder | um processo separado, fora do Terraform |
+| Cluster ECS | o cluster, vazio | as imagens que o pipeline empurra para o ECR |
+| Postgres e Redis | nem isso — são só referências | migrations e a aplicação |
+
+A única exceção no código é o `aws_secretsmanager_secret_version`, e ela grava
+um placeholder **de propósito**, com `ignore_changes = [secret_string]` — ou
+seja, existe justamente para o Terraform *não* gerenciar o conteúdo. Credencial
+em arquivo `.tf` vai parar no git; credencial no state vai parar no bucket de
+state em texto puro.
+
+Terraform constrói o galpão, instala as prateleiras, passa a fiação e distribui
+as chaves. Nunca põe uma caixa na prateleira.
+
+### O teste que separa infraestrutura de dado
+
+Pergunte: *"se eu rodar `terraform destroy` e depois `apply`, o que eu perco?"*
+
+- **A infraestrutura volta idêntica** — filas, bucket, roles, cluster.
+- **Os dados não voltam** — disputas, mensagens, arquivos de evidência. O
+  Terraform nunca soube que existiam.
+
+É exatamente por isso que `aws_s3_bucket_versioning` está ligado e que o load
+balancer tem `enable_deletion_protection` em produção: o Terraform pode destruir
+o recipiente que guarda um dado que ele não sabe recriar.
+
+> **Resposta pronta:** *"Terraform provisiona, não popula. Cria a fila vazia, o
+> bucket vazio e as roles de IAM que dizem o que cada serviço pode fazer. Quem
+> publica mensagem é a aplicação; quem sobe arquivo é o navegador com uma
+> política assinada. A linha divisória é: se `destroy` seguido de `apply` recria
+> aquilo, é infraestrutura; se não recria, é dado."*
+
+### E por que ele existe *neste* projeto, especificamente
+
+Não é para "conectar na AWS" — quem conecta é o SDK dentro do Go, lendo
+credenciais. São três motivos concretos:
+
+1. **Os três binários Go precisam de um lugar para rodar.** Sem o `ecs.tf`, o
+   `cmd/ingest` é um arquivo no seu disco.
+2. **Sem IAM, eles não podem fazer nada.** O motivo mais importante e o menos
+   óbvio. O worker só lê da fila porque o `iam.tf` permite — e repare que ele
+   **não** tem `sqs:SendMessage`: consome e decide, não publica na fila que
+   drena. Isso não é configuração de conexão, é uma decisão de segurança escrita
+   em código e revisável num pull request.
+3. **São 60 recursos.** Criados clicando no console, ninguém lembra o que foi
+   clicado, staging não fica igual a produção, e não dá para revisar um clique.
+
 ### Por que não escrever um app em Node?
 
 Você pode — e já fez, em bash, no `infra/localstack-init.sh`:
@@ -617,6 +683,10 @@ indistinguível de um worker travado.**
    consequência."*
 3. *"O custo é o state file — guarda segredo em texto puro e é uma
    responsabilidade real. Vale citar em vez de fingir que não existe."*
+
+3b. *"Terraform provisiona, não popula: cria a fila vazia e o bucket vazio. Se
+    `destroy` seguido de `apply` recria aquilo, é infraestrutura; se não recria,
+    é dado."*
 
 **Go vs Node**
 
