@@ -366,7 +366,246 @@ Go — para renderizar um painel que cinco pessoas abrem por dia.
 
 ---
 
-## 7. As frases para levar
+## 7. A Fase 2: a API de leitura e o painel
+
+### Por que dois binários Go e não um
+
+O `cmd/ingest` só escreve e tem segundos para aceitar um webhook. O `cmd/api` só
+lê e responde a um painel. Separados, uma consulta pesada de operador nunca
+segura uma disputa entrando, e cada um escala por conta própria.
+
+### A consulta que fazia o trabalho antes do LIMIT
+
+A primeira versão de `/api/disputes` era uma consulta única e chata. O `EXPLAIN`
+mostrou o problema:
+
+```
+Nested Loop  (rows=12991)
+  ->  Hash Join  (rows=12991)
+  ->  Index Only Scan on transactions  (loops=13119)   <-- 13.119 buscas
+Sort  ->  top-N heapsort                                <-- e aí descarta 13.069
+```
+
+O Postgres juntava **todas** as 13.119 disputas às suas transações e **depois**
+ordenava e jogava fora todas menos cinquenta. Treze mil buscas em índice para
+mostrar uma página.
+
+A consulta de contagem tinha o mesmo defeito por outro motivo: fazia join numa
+tabela de 500 mil linhas cujas colunas ninguém lia — 39.358 buffers tocados à
+toa.
+
+A correção foi em dois estágios: a consulta interna acha só os cinquenta ids, e
+só esses cinquenta são unidos ao merchant e à transação para exibição. O join
+com `transactions` só aparece quando existe busca textual de verdade.
+
+```
+antes:   35 ms
+depois:  3 a 7 ms
+```
+
+> **A lição:** o trabalho deve vir **depois** do `LIMIT`, não antes.
+
+### OFFSET tem um teto, e a exportação é a resposta
+
+`OFFSET` faz o Postgres percorrer e descartar cada linha antes da janela — a
+página 10.000 é uma varredura de tabela usando um número de página como
+disfarce. Por isso o offset é limitado a 10.000, e quem realmente quer 40 mil
+disputas recebe o CSV, que sai em streaming linha a linha: 13.119 linhas em
+90 ms com memória constante.
+
+### `httpResource` e a URL reativa
+
+No Angular, a URL da requisição é **derivada dos signals de filtro**:
+
+```ts
+readonly list = httpResource<DisputeList>(
+  () => `${this.base}/api/disputes?${this.filters.listQuery()}`,
+  { defaultValue: EMPTY_LIST },
+);
+```
+
+Mudou um filtro, a URL computada muda, a requisição é refeita e **a anterior é
+abortada**. Não existe `subscribe`, não existe `unsubscribe`, e — o ponto que
+importa — não existe a chance de uma resposta lenta antiga chegar depois de uma
+rápida nova e pintar dados velhos por cima dos novos.
+
+RxJS aparece **uma vez só**, para dar debounce na busca:
+
+```ts
+toSignal(toObservable(this.searchInput).pipe(debounceTime(250)))
+```
+
+Signals não modelam tempo. É a única coisa que RxJS faz melhor aqui, e é
+exatamente onde ele foi usado.
+
+### Filtros na URL
+
+Um operador que encontra algo grave manda o link, e quem abre vê as mesmas
+linhas. Estado guardado só em campo de componente não pode ser compartilhado,
+nem favoritado, nem recarregado. Com `replaceUrl`, filtrar não vira vinte
+"voltar" para sair da página.
+
+### Dinheiro continua inteiro até o último instante
+
+O valor viaja como `amount_minor` inteiro mais a moeda, e a **única** divisão
+acontece no formatador. O mapa de casas decimais por moeda existe por isso:
+
+```ts
+formatMinor(5000, "JPY")  // "¥5,000"  — e não "¥50"
+```
+
+Um "divide por 100" genérico erra por um fator de cem e **não parece errado**.
+
+### Dois bugs que valem a história
+
+**O 500 no detalhe da disputa.** Esta consulta:
+
+```sql
+WHERE lt.external_ref LIKE 'dispute:' || $1 || ':%'
+```
+
+O Postgres infere `$1` como **texto** por causa da concatenação, e o pgx estava
+segurando um `int64`. Toda requisição de detalhe era 500. O que torna esse bug
+interessante é que eu tinha "verificado" a consulta no psql — mas um literal não
+é um parâmetro, e um `PREPARE p(bigint)` *declara* justamente o tipo que a
+consulta deixa em aberto. As duas verificações resolviam a ambiguidade que era o
+bug. Só rodando pelo pgx aparece.
+
+> **A regra que sobrou:** nunca deixe o tipo de um parâmetro ser decidido pelo
+> SQL ao redor dele.
+
+**O CORS que bloqueava o próprio upload.** O middleware anunciava
+`Access-Control-Allow-Methods: GET, OPTIONS`, mas o endpoint que assina o upload
+é `POST`. O navegador recusaria no preflight — e é isso que torna essa classe de
+bug silenciosa: **o servidor nunca vê a requisição bloqueada**, então não há nada
+no log. Parece que o botão não faz nada.
+
+---
+
+## 8. A Fase 3: o worker que decide antes do prazo
+
+O processo que faz disso uma plataforma em vez de um arquivo morto.
+
+### A fila é um sorted set do Redis
+
+`ZADD disputes:deadlines <timestamp> <id>` — o score é o prazo. Perguntar "o que
+venceu?" é `ZRANGEBYSCORE`, em tempo logarítmico.
+
+Mas pegar o trabalho é um **script Lua**:
+
+```lua
+local ids = redis.call('ZRANGEBYSCORE', key, '-inf', upto, 'LIMIT', 0, limit)
+if #ids > 0 then redis.call('ZREM', key, unpack(ids)) end
+return ids
+```
+
+Feito como duas chamadas do Go — ler e depois remover — existe uma janela entre
+elas, e dois workers fazendo polling ao mesmo tempo leem os mesmos ids e fazem o
+mesmo trabalho duas vezes. Dentro de um script é uma operação atômica: um id vai
+para exatamente um worker. Existe um teste com 8 goroutines e 500 ids que prova
+isso.
+
+### O índice é descartável, e isso é de propósito
+
+O sorted set não é registro, é **índice**. Um passo de reconciliação reconstrói
+ele inteiro a partir das disputas abertas no Postgres:
+
+```sql
+SELECT id, deadline_at FROM disputes WHERE state IN ('received','resolving')
+```
+
+Apague o Redis e custa uma passada, nada mais. Isso também fecha a lacuna que o
+caminho rápido não cobre: uma disputa gravada enquanto o Redis estava fora nunca
+foi agendada, e sem essa passada ficaria esquecida até o prazo passar.
+
+> Se perder aquele dado dói, ele não deveria estar só ali.
+
+### O lock é a camada **mais fraca**, não a mais forte
+
+Essa é a parte que a maioria erra numa entrevista.
+
+Qualquer lock com timeout pode ser segurado por dois processos ao mesmo tempo: o
+dono pausa numa coleta de lixo, o TTL expira, e um segundo worker adquire o lock
+**legitimamente**. Não é bug, é a natureza da coisa.
+
+O que **de fato** impede um reembolso duplicado são duas camadas abaixo:
+
+1. A checagem otimista de versão: `WHERE id = $1 AND version = $2`
+2. O `external_ref` único no ledger: `dispute:1234:refund` só pode existir uma vez
+
+O lock só significa que o segundo worker normalmente nem tenta. Ele ainda libera
+com segurança — comparando o token antes de apagar, porque um `DEL` cru apaga
+qualquer lock que estiver ali, inclusive o que outro worker acabou de pegar.
+
+### A política é uma função pura
+
+`rules.go` não tem banco nem Redis dentro. Recebe uma struct e devolve uma
+decisão. O que o sistema faz com o dinheiro de alguém é a parte que mais precisa
+ser legível, revisável e testável sem subir infraestrutura.
+
+| Situação | Decisão |
+| --- | --- |
+| Prazo vencido, ainda aberta | **expirar** — um fracasso registrado, não um resultado escolhido |
+| Alerta, dentro do teto do merchant, com saldo na cobrança | **reembolsar** |
+| Alerta, acima do teto ou sem saldo restante | **escalar** |
+| Chargeback, código de motivo baseado em evidência | **contestar** |
+| Chargeback, código de fraude | **escalar** |
+
+**Ele nunca desiste de um chargeback.** Reembolsar um alerta dentro da janela é
+estritamente mais barato do que deixar vencer, então é seguro automatizar.
+Desistir de um chargeback é um julgamento sobre evidência e sobre a relação com
+o merchant — e um motor de regras que silenciosamente dá dinheiro por perdido é
+justamente o que ninguém percebe estar errado.
+
+Resultado sobre 1.667 disputas abertas: **395 reembolsos, 412 contestações, 860
+escalações, zero erros** — e as onze invariantes de dinheiro continuaram passando
+depois.
+
+### O livelock: a melhor história do projeto
+
+A primeira versão **não fazia nada, não logava nada, e consumia um núcleo
+inteiro**.
+
+`SIGQUIT` despejou as pilhas de todas as goroutines: todas paradas em `SETNX`.
+Parecia Redis travado — mas o Redis respondia `PING` instantaneamente e tinha
+quatro clientes. As pilhas eram uma pista falsa.
+
+Quem respondeu foi o `MONITOR`:
+
+```
+zadd disputes:deadlines 1788667662 9467
+evalsha ... lock:dispute:9467
+zadd disputes:deadlines 1788667662 9467
+evalsha ... lock:dispute:9467
+```
+
+Os **mesmos quatro ids** sendo pegos, reagendados e pegos de novo, alguns
+milhares de vezes por segundo.
+
+A causa: pegar trabalho leva tudo que vence antes de `agora + lookahead`. A
+escalação reagendava para o **prazo da disputa**, que está *dentro* dessa
+janela — então voltava a ser elegível imediatamente. Pior: como todo lote voltava
+cheio, o laço interno nunca terminava, o laço de polling nunca voltava ao seu
+`select`, e as outras 1.663 disputas **nunca foram olhadas**.
+
+Duas correções, ambas invariantes e não remendos:
+
+1. Todo reagendamento passa por uma função que garante um horário **fora** da
+   janela de captura
+2. Um tick de polling drena um número limitado de lotes, então o laço sempre
+   volta ao `select`
+
+```
+antes:  0 decisões
+depois: 807 decisões, 1.667 capturadas, 0 erros
+```
+
+E o heartbeat existe por causa disso: **um worker que só loga quando age é
+indistinguível de um worker travado.**
+
+---
+
+## 9. As frases para levar
 
 **Terraform**
 
@@ -419,3 +658,30 @@ Go — para renderizar um painel que cinco pessoas abrem por dia.
 11. *"Sem SSR porque é painel interno atrás de autenticação. O ganho de primeira
     pintura não paga um quarto processo Node em produção — sem SSR o front é
     93 kB num CDN e custa praticamente nada."*
+
+**Banco e performance**
+
+12. *"O trabalho tem que vir depois do LIMIT. O EXPLAIN mostrou o Postgres
+    juntando 13 mil disputas às transações e só então ordenando e descartando
+    todas menos cinquenta. Em dois estágios: 35ms para 3ms."*
+
+13. *"Nunca deixe o tipo de um parâmetro ser decidido pelo SQL ao redor. Um LIKE
+    com concatenação faz o Postgres inferir texto, e o driver estava mandando
+    int64 — toda requisição de detalhe era 500. Nem literal no psql nem PREPARE
+    com tipo declarado reproduzem, porque os dois resolvem a ambiguidade que é o
+    bug."*
+
+**Concorrência**
+
+14. *"Pegar trabalho da fila é um script Lua porque ler e remover em duas
+    chamadas deixa uma janela onde dois workers leem os mesmos ids."*
+
+15. *"O lock distribuído é a camada mais fraca, não a mais forte. Qualquer lock
+    com timeout pode ser segurado por dois processos — o dono pausa, o TTL
+    expira, outro adquire legitimamente. O que impede reembolso duplicado é a
+    checagem de versão e o external_ref único no ledger."*
+
+16. *"Tive um livelock que não logava nada e queimava um núcleo. As pilhas do
+    SIGQUIT eram pista falsa; quem respondeu foi o MONITOR do Redis, mostrando
+    os mesmos quatro ids sendo reagendados milhares de vezes por segundo. O
+    reagendamento caía dentro da própria janela de captura."*
