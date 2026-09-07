@@ -231,7 +231,142 @@ Vale contar numa entrevista, porque mostra que você **mede em vez de supor**.
 
 ---
 
-## 5. As frases para levar
+## 5. Onde cada tecnologia realmente roda
+
+A pergunta direta: **existe um servidor Node rodando o tempo todo?**
+Não. Em produção, zero processos Node.
+
+| Componente | Linguagem | Roda em produção? | Como |
+| --- | --- | --- | --- |
+| `cmd/ingest` | Go | **sim, sempre** | 2 tasks no Fargate |
+| `cmd/api` | Go | **sim, sempre** | 2 tasks |
+| `cmd/worker` | Go | **sim, sempre** | 1 a 10 tasks, autoscale por profundidade da fila |
+| `cmd/dlq` | Go | não | CLI operacional, você invoca |
+| `apps/dashboard` | TypeScript/Angular | **não roda** | vira 93 kB de arquivos estáticos; quem executa é o navegador |
+| `services/simulator` | TypeScript/Node | **não** | ferramenta de desenvolvimento; em produção quem manda webhook é a Verifi ou a Ethoca de verdade |
+
+Os ~300 MB de `node_modules` no disco não vão para lugar nenhum: existem para
+compilar o front e para rodar o simulador localmente.
+
+### A Fase 1: o `cmd/ingest`
+
+O problema: um alerta de disputa chega e você tem 24 horas. Se a requisição se
+perder, ninguém descobre até o prazo passar.
+
+A ordem dos passos **é** o design de segurança:
+
+```
+1. rate limit por IP + limite de 64KB no corpo
+2. ler o corpo e o header de assinatura
+3. espiar o "type" para escolher o decoder
+4. decodificar e validar (valor positivo, moeda de 3 letras, prazo no futuro)
+5. buscar o merchant  ──┐
+6. verificar o HMAC   ──┴─ os dois devolvem o mesmo 401
+7. gastar a cota do merchant
+8. reservar a chave de idempotência no Redis
+9. gravar tudo em uma transação
+```
+
+**Por que 1 vem antes de tudo.** Cada passo seguinte custa uma ida ao banco.
+Antes da assinatura ser verificada você não sabe quem é do outro lado, e o
+limite por IP é a única proteção que existe nesse momento.
+
+**Por que 2 a 4 vêm antes de 6, mesmo sem confiar em nada.** O `merchant_id` que
+escolhe *qual segredo usar* está dentro do corpo — não dá para verificar a
+assinatura antes de ler. Mas nada do que foi lido é *usado* até o passo 6; só
+serve para escolher a chave.
+
+**Por que 5 e 6 devolvem o mesmo 401.** Se merchant inexistente devolvesse 404 e
+assinatura errada devolvesse 401, qualquer um descobriria quais merchants
+existem, um chute por vez. O endpoint viraria um oráculo.
+
+**Por que 7 vem depois de 6.** Se a cota do merchant fosse gasta antes da
+assinatura, eu poderia mandar requisições dizendo `merchant_id: "mrc_lumen"` e
+derrubar a cota deles sem ter chave nenhuma.
+
+### A chave de idempotência vem do corpo assinado
+
+```go
+claimed, err := h.guard.Claim(ctx, event.ID)   // event.ID vem de dentro do corpo
+```
+
+O header `Idempotency-Key` existe, mas **não é coberto pela assinatura**. Usar
+ele permitiria a qualquer um adivinhar um id e fazer o sistema descartar um
+evento real como duplicado.
+
+Redis é o caminho rápido; o índice único em `webhook_events.idempotency_key` é a
+garantia real. Apague o Redis e o sistema continua correto, só mais lento.
+
+E o detalhe que quase ninguém lembra:
+
+```go
+if releaseErr := h.guard.Release(ctx, event.ID); releaseErr != nil { ... }
+```
+
+Se você reserva a chave e a escrita falha, sem devolver a reserva o retry do
+emissor recebe "já processei" pelas próximas 24 horas. O evento sumiu, e todo
+log diz que deu certo.
+
+### O outbox: por que não publicar direto no SQS
+
+Não dá para commitar no Postgres e publicar no SQS atomicamente. As duas
+alternativas ingênuas quebram:
+
+- publicar antes do commit: publica, o commit falha, o worker recebe evento de
+  uma disputa que não existe
+- commitar antes de publicar: commita, o processo morre, a disputa existe e
+  ninguém nunca soube
+
+O outbox resolve gravando a mensagem **na mesma transação** que a disputa: ou as
+duas existem, ou nenhuma. Um relay separado lê linhas já commitadas e publica.
+
+Foi isso que pagou na Fase 4: quando SQS substituiu o log, **o relay não mudou
+uma linha**. O padrão foi construído primeiro, então a fila embaixo dele era um
+detalhe trocável.
+
+---
+
+## 6. Angular sem SSR, e o peso comparado
+
+O projeto foi criado com `--ssr=false`. Decisão, não descuido.
+
+**SSR** (Server-Side Rendering) significaria adicionar um **quarto processo
+longo, em Node**, que renderiza o HTML no servidor antes de mandar ao navegador.
+
+O que se ganha: primeira pintura mais rápida, funciona sem JavaScript, e SEO.
+
+O que se paga: mais um container para deployar, monitorar, escalar e pagar; mais
+um processo Node em produção — exatamente o que hoje não existe; as chamadas de
+API acontecem duas vezes, servidor e depois navegador, a menos que se transfira
+o estado; e bugs de hidratação, quando o HTML do servidor não bate com o que o
+navegador renderiza.
+
+Para este projeto nada disso vale: é painel interno, atrás de login, para duas
+pessoas de operações. SEO é irrelevante porque o Google nunca vai ver a página,
+e ninguém abre um painel de disputas com JavaScript desligado.
+
+### Os números reais
+
+| | Tamanho | Roda onde | Custo em produção |
+| --- | --- | --- | --- |
+| `cmd/ingest` (Go) | 13,6 MB | Fargate, 24h por dia | horas de container |
+| `cmd/api` (Go) | 14,2 MB | Fargate, 24h por dia | horas de container |
+| `cmd/worker` (Go) | 13,1 MB | Fargate, 24h por dia | horas de container |
+| **Angular** | **93 kB** gzipped | **navegador do operador** | perto de zero, S3 e CDN |
+
+Não é comparação justa, e é aí que está o ponto: são coisas de natureza
+diferente. Os binários Go são o **servidor** — 13 MB no disco, mas gastando CPU e
+memória continuamente, cobrados por hora. O Angular são **93 kB baixados uma vez**
+por navegador; depois disso o custo é zero, porque quem executa é a máquina do
+usuário.
+
+Com SSR ligado, o front deixaria de ser 93 kB estáticos e viraria um quarto
+container Node rodando 24 horas, com o mesmo perfil de custo dos três serviços
+Go — para renderizar um painel que cinco pessoas abrem por dia.
+
+---
+
+## 7. As frases para levar
 
 **Terraform**
 
@@ -260,3 +395,27 @@ Vale contar numa entrevista, porque mostra que você **mede em vez de supor**.
 6. *"Não é serverless: são processos longos no Fargate. Cold start aqui aparece
    no deploy, não por requisição — e o efeito frio que eu de fato medi foi o
    pool de conexões, 245ms na primeira e 3ms nas seguintes."*
+
+**Arquitetura**
+
+7. *"Em produção não roda nenhum processo Node. TypeScript existe em dois
+   lugares: o front, que compila para 93 kB estáticos e roda no navegador, e o
+   simulador, que é ferramenta de desenvolvimento e some quando o processador
+   real assume."*
+
+8. *"A ordem dos passos no ingest é o design de segurança. Merchant inexistente
+   e assinatura errada devolvem o mesmo 401, senão o endpoint vira um oráculo
+   para descobrir quais merchants existem."*
+
+9. *"A chave de idempotência vem do corpo assinado, nunca do header — o header
+   não é coberto pela assinatura, então quem adivinhasse um id poderia fazer o
+   sistema descartar um evento real como duplicado."*
+
+10. *"Outbox porque não dá para commitar no Postgres e publicar no SQS
+    atomicamente. Publicar antes do commit cria evento de disputa que não
+    existe; commitar antes de publicar perde a disputa em silêncio. E foi isso
+    que fez a troca para SQS não mudar uma linha do relay."*
+
+11. *"Sem SSR porque é painel interno atrás de autenticação. O ganho de primeira
+    pintura não paga um quarto processo Node em produção — sem SSR o front é
+    93 kB num CDN e custa praticamente nada."*
