@@ -466,5 +466,8 @@ interview, with every answer grounded in this repository.
 
 - Nothing is deployed anywhere; ECS needs a real account, and the Terraform has
   never been applied or even `validate`d.
-- Merchant webhook secrets still live in `merchants.webhook_secret`. A Secrets Manager
-  entry is provisioned but nothing reads from it yet.
+- `merchants.webhook_secret` still exists, because it is the `database` fallback
+  source. Secrets Manager is the default (`WEBHOOK_SECRET_SOURCE=secretsmanager`)
+  and the ingest service reads from it, but the column is still a place a signing
+  key can be read from — the fallback that makes the project runnable with no AWS
+  is also the exposure the move to Secrets Manager was meant to close.
