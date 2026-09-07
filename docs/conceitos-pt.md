@@ -172,7 +172,225 @@ dá para revisar um clique num pull request.
 
 ---
 
-## 2. Por que Go em vez de Node
+## 2. Todo app precisa de Terraform?
+
+**Não.** E "boa prática" virou desculpa para colocar Terraform em coisa que não
+precisa.
+
+### O teste de três perguntas
+
+Se as três respostas forem não, **pule**:
+
+1. Existe **mais de um ambiente** que precisa ser igual? (staging e produção)
+2. **Mais de uma pessoa** mexe na infraestrutura?
+3. Recriar tudo na mão levaria **mais de um dia**?
+
+Nenhuma das perguntas é sobre o tamanho da aplicação. É sobre **ambientes,
+pessoas e custo de recriar**.
+
+### Quando NÃO precisa
+
+| Situação | Por quê | Use isso |
+| --- | --- | --- |
+| Site estático ou SPA na Vercel, Netlify, Cloudflare Pages | A plataforma *é* a infra: conecta um repo e pronto. São três configurações. | O painel deles, ou `vercel.json` |
+| App inteiro num PaaS — Railway, Render, Fly.io, Heroku | O ponto do PaaS é que infra é um arquivo de config. Terraform em cima é gerenciar os dois. | `fly.toml`, `render.yaml` |
+| Um VPS só, com docker-compose | A infra é uma máquina. | Ansible, ou um script |
+| Protótipo onde você ainda não sabe o formato | Terraform recompensa quem já sabe o que quer. | Console, e importe depois |
+| Serverless com framework — SST, Serverless, SAM, Wrangler | Já geram a infra a partir do código e ficam no loop do desenvolvedor. | O próprio framework |
+| Banco gerenciado — Supabase, Neon, PlanetScale | Clica uma vez, recebe uma URL. | Nada |
+| Projeto solo, um ambiente | O ganho do `plan` é a revisão. Sem PR, sem revisão. | Nada |
+
+O caso mais claro: **um blog em Next.js na Vercel.** Terraform ali seria um state
+file para gerenciar um domínio e duas variáveis de ambiente — você adicionou uma
+ferramenta, um arquivo que guarda segredo e um passo no deploy, para resolver
+problema nenhum.
+
+### Quando SIM
+
+| Situação | Por quê |
+| --- | --- |
+| Staging precisa ser igual a produção | O momento em que divergem em silêncio é o momento em que você paga |
+| Mais de uma pessoa mexe | O `plan` num pull request *é* o produto |
+| Auditoria ou compliance | "Quem mudou esse security group e quando" vira `git log` |
+| Ambientes efêmeros por PR | `destroy` confiável é a killer feature — sem ele você vaza recurso e dinheiro |
+| Múltiplos provedores — AWS, Cloudflare, Datadog, GitHub | Aqui praticamente não tem concorrente |
+| Recuperação de desastre | "Reconstruir a região" deixa de ser heroísmo e vira um comando |
+| IAM não trivial | Permissão é decisão de segurança; merece revisão, não um clique |
+
+O caso mais claro do outro lado: **uma fintech com staging e produção, cinco
+engenheiros, e políticas de IAM que definem quem pode mover dinheiro.** Aqui
+*não* ter Terraform é o erro.
+
+### A escada, do mais leve ao mais pesado
+
+```
+nada / console          →  1 ambiente, solo, protótipo
+arquivo da plataforma   →  PaaS (fly.toml, vercel.json)
+docker-compose          →  uma máquina
+CDK / SAM / SST         →  só AWS, time de TypeScript, muito serverless
+Terraform / OpenTofu    →  multi-ambiente, multi-provedor, time
+Terraform + Atlantis    →  time grande, compliance, aprovação obrigatória
+```
+
+Suba um degrau **quando doer**, não antes.
+
+### E este projeto, sendo honesto
+
+O `dispute-router` tem **um ambiente e uma pessoa**. Pelo teste acima, ele **não
+precisa** de Terraform. Ele tem por dois motivos, e vale saber separá-los:
+
+1. **Legítimo:** são 60 recursos com IAM por serviço. Criar clicando e depois
+   lembrar do que foi clicado é inviável.
+2. **Honesto:** o objetivo é aprender e conseguir falar sobre isso.
+
+Se fosse um projeto real nesse estágio — uma pessoa, um ambiente — a escolha
+defensável seria começar no console ou no CDK e adotar Terraform quando o
+segundo ambiente aparecesse.
+
+### O detalhe que tira a pressão
+
+Dá para adotar depois. `terraform import` traz recursos existentes para o state:
+
+```bash
+terraform import aws_sqs_queue.events https://sqs.../disputes-events
+```
+
+É trabalhoso e manual, mas existe. Então "começar clicando e adotar quando doer"
+é estratégia legítima — e provavelmente o padrão certo.
+
+---
+
+## 3. Os 60 recursos deste projeto, por grupo
+
+O que o `tofu plan` cria. Vale olhar a proporção antes dos detalhes.
+
+### Onde o código roda — ECS (8)
+
+| Quantos | O quê | Para quê |
+| --- | --- | --- |
+| 1 | `aws_ecs_cluster` | Onde as tasks vivem. No Fargate é quase um namespace. |
+| 1 | `aws_ecs_cluster_capacity_providers` | Deixa `FARGATE` e `FARGATE_SPOT` disponíveis |
+| 3 | `aws_ecs_task_definition` | A receita **imutável** de cada container: imagem, cpu, memória, variáveis, roles |
+| 3 | `aws_ecs_service` | Mantém N cópias vivas apontando para uma revisão |
+
+Deploy é o *service* apontando para uma revisão nova. Rollback é apontar para a
+anterior — que nunca foi apagada. Por isso rollback no ECS é um minuto, não um
+build.
+
+### De onde vem a imagem — ECR (6)
+
+| Quantos | O quê | Para quê |
+| --- | --- | --- |
+| 3 | `aws_ecr_repository` | Um registro por serviço, com tag **imutável** |
+| 3 | `aws_ecr_lifecycle_policy` | Guarda as últimas 30 imagens |
+
+Tag imutável é o que faz um git sha significar algo: sem isso alguém empurra uma
+imagem diferente sob a mesma tag e a versão que você acha que está rodando não é
+a que está. E registro cresce para sempre e é cobrado por gigabyte.
+
+### Quem pode fazer o quê — IAM (12)
+
+| Quantos | O quê | Para quê |
+| --- | --- | --- |
+| 1 | `aws_iam_role` execution | Usada pelo **agente do ECS** antes do container subir |
+| 3 | `aws_iam_role` task | Assumida pelo **seu processo**, em tempo de execução |
+| 1 | `aws_iam_role_policy` | Deixa a execution role ler o secret injetado |
+| 3 | `aws_iam_role_policy` | Uma por serviço: ingest, worker, api |
+| 3 | `aws_iam_role_policy` | `ecs-exec`, para abrir shell num container rodando |
+| 1 | `aws_iam_role_policy_attachment` | A policy gerenciada da AWS: puxar imagem, escrever log |
+
+É o maior grupo depois da rede, e é o mais importante. Sem ele os binários sobem
+e não conseguem fazer nada.
+
+### Como o tráfego entra — rede (13)
+
+| Quantos | O quê | Para quê |
+| --- | --- | --- |
+| 1 | `aws_lb` | O load balancer |
+| 1 | `aws_lb_listener` | Porta 443, TLS |
+| 2 | `aws_lb_listener_rule` | `/webhooks/*` vai para o ingest, `/api/*` para a api |
+| 2 | `aws_lb_target_group` | Um para ingest, um para api — **o worker não tem** |
+| 2 | `aws_security_group` | Um para o load balancer, um para as tasks |
+| 3 | `aws_vpc_security_group_ingress_rule` | 443 do mundo no LB, e o LB alcançando ingest e api |
+| 2 | `aws_vpc_security_group_egress_rule` | LB até as tasks, tasks até a AWS |
+
+O worker não aparecer aqui **não é omissão, é o desenho**: nada roteia até ele,
+então nada pode alcançá-lo.
+
+### A fila — SQS (3)
+
+| Quantos | O quê | Para quê |
+| --- | --- | --- |
+| 2 | `aws_sqs_queue` | A fila principal e a dead-letter |
+| 1 | `aws_sqs_queue_redrive_allow_policy` | Permite mover mensagens **de volta** da DLQ |
+
+Sem o terceiro, o `cmd/dlq replay` é um erro de permissão exatamente na hora em
+que alguém precisa que funcione.
+
+### O bucket de evidências — S3 (6)
+
+| Quantos | O quê |
+| --- | --- |
+| 1 | `aws_s3_bucket` — o bucket |
+| 1 | `aws_s3_bucket_public_access_block` — o que separa "tivemos um vazamento" de "tivemos um bucket" |
+| 1 | `aws_s3_bucket_server_side_encryption_configuration` |
+| 1 | `aws_s3_bucket_versioning` — evidência apagada é o que você não pode perder |
+| 1 | `aws_s3_bucket_cors_configuration` — o navegador posta direto aqui |
+| 1 | `aws_s3_bucket_lifecycle_configuration` — expira versões antigas e uploads abandonados |
+
+Um bucket vira seis recursos porque o provider v5 separou cada aspecto. Isso é
+bom: cada um aparece sozinho no diff, então "alguém desligou o bloqueio de acesso
+público" é uma linha vermelha no `plan`.
+
+### Os segredos (2)
+
+| Quantos | O quê |
+| --- | --- |
+| 1 | `aws_secretsmanager_secret` — o recipiente |
+| 1 | `aws_secretsmanager_secret_version` — um **placeholder**, com `ignore_changes` |
+
+O conteúdo é gerenciado fora de propósito. Ver a seção 1.
+
+### Observabilidade (8)
+
+| Quantos | O quê | Para quê |
+| --- | --- | --- |
+| 3 | `aws_cloudwatch_log_group` | Um por serviço, com retenção — o CloudWatch guarda para sempre e cobra por isso |
+| 1 | `aws_cloudwatch_metric_alarm` | Qualquer coisa na DLQ. Não existe número saudável acima de zero |
+| 1 | `aws_cloudwatch_metric_alarm` | **Idade** da mensagem mais velha — a que mapeia para prazo perdido |
+| 3 | `aws_cloudwatch_metric_alarm` | Um por serviço: rodando menos tasks do que deveria |
+
+O teste de um alarme é se alguém consegue fazer algo às três da manhã. CPU alta
+normalmente falha nesse teste; fila que não drena, não.
+
+### Autoscaling (2)
+
+| Quantos | O quê |
+| --- | --- |
+| 1 | `aws_appautoscaling_target` — só o worker escala |
+| 1 | `aws_appautoscaling_policy` — por **profundidade da fila**, não por CPU |
+
+CPU é um proxy para carga; a quantidade de mensagens esperando **é** a carga. Um
+worker travado num banco lento está ocioso e atrasado ao mesmo tempo, e escalar
+por CPU lê isso como "não tem nada para fazer".
+
+### A proporção é o ponto
+
+```
+ 8 recursos rodam o código
+52 recursos são permissão, tráfego, e saber o que aconteceu
+```
+
+Três binários Go precisam de **oito** recursos para existir. Os outros cinquenta
+e dois respondem "quem pode fazer o quê", "por onde entra o tráfego" e "como eu
+descubro que quebrou".
+
+É a resposta mais honesta para "por que infraestrutura é tanto trabalho": rodar o
+código é a parte fácil.
+
+---
+
+## 4. Por que Go em vez de Node
 
 Cuidado: **"Go é mais rápido" está errado** e um entrevistador bom percebe. Node
 é rapidíssimo para I/O — foi feito para isso.
@@ -211,7 +429,7 @@ no banco — funcionaria perfeitamente em Node, sem diferença perceptível.
 
 ---
 
-## 3. HMAC
+## 5. HMAC
 
 **H**ash-based **M**essage **A**uthentication **C**ode. Uma assinatura que prova
 duas coisas ao mesmo tempo:
@@ -250,7 +468,7 @@ rotacionada.
 
 ---
 
-## 4. Processo longo vs serverless (e cold start)
+## 6. Processo longo vs serverless (e cold start)
 
 **Os serviços deste projeto não funcionam como cloud functions.** Eles ficam de
 pé o tempo todo.
@@ -297,7 +515,7 @@ Vale contar numa entrevista, porque mostra que você **mede em vez de supor**.
 
 ---
 
-## 5. Onde cada tecnologia realmente roda
+## 7. Onde cada tecnologia realmente roda
 
 A pergunta direta: **existe um servidor Node rodando o tempo todo?**
 Não. Em produção, zero processos Node.
@@ -392,7 +610,7 @@ detalhe trocável.
 
 ---
 
-## 6. Angular sem SSR, e o peso comparado
+## 8. Angular sem SSR, e o peso comparado
 
 O projeto foi criado com `--ssr=false`. Decisão, não descuido.
 
@@ -432,7 +650,7 @@ Go — para renderizar um painel que cinco pessoas abrem por dia.
 
 ---
 
-## 7. A Fase 2: a API de leitura e o painel
+## 9. A Fase 2: a API de leitura e o painel
 
 ### Por que dois binários Go e não um
 
@@ -548,7 +766,7 @@ no log. Parece que o botão não faz nada.
 
 ---
 
-## 8. A Fase 3: o worker que decide antes do prazo
+## 10. A Fase 3: o worker que decide antes do prazo
 
 O processo que faz disso uma plataforma em vez de um arquivo morto.
 
@@ -671,7 +889,7 @@ indistinguível de um worker travado.**
 
 ---
 
-## 9. As frases para levar
+## 11. As frases para levar
 
 **Terraform**
 
@@ -687,6 +905,17 @@ indistinguível de um worker travado.**
 3b. *"Terraform provisiona, não popula: cria a fila vazia e o bucket vazio. Se
     `destroy` seguido de `apply` recria aquilo, é infraestrutura; se não recria,
     é dado."*
+
+**Quando usar (e quando não)**
+
+3c. *"Três perguntas: mais de um ambiente, mais de uma pessoa, e o custo de
+    recriar na mão. Se as três forem não, é overhead — um blog na Vercel não
+    precisa. O que muda o jogo não é o tamanho do app, é o segundo ambiente e a
+    segunda pessoa. E dá para adotar depois com `import`, então começar sem não
+    é dívida técnica, é sequenciamento."*
+
+3d. *"Neste projeto: 8 recursos rodam o código e 52 são permissão, tráfego e
+    observabilidade. Rodar o código é a parte fácil."*
 
 **Go vs Node**
 
