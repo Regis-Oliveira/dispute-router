@@ -51,6 +51,34 @@ export class FiltersStore {
 
   readonly search = computed(() => this.debouncedSearch().trim());
 
+  /**
+   * States a dispute can never be in while it is still on the clock. Selecting
+   * one of these with "Still on the clock" on asks for something that cannot
+   * exist, and the result is an empty table that looks like missing data.
+   */
+  private readonly settledStates: readonly DisputeState[] = [
+    'represented',
+    'refunded',
+    'won',
+    'lost',
+    'expired',
+  ];
+
+  /**
+   * The filters currently contradict each other: every selected state is one a
+   * dispute reaches after it stops being open, and the open-only filter is on.
+   *
+   * Worth naming rather than leaving the operator to work out. "No disputes
+   * match these filters" is true and useless when 708 of them are one click
+   * away, and the click is a checkbox nobody remembers is ticked.
+   */
+  readonly openOnlyExcludesEverything = computed(
+    () =>
+      this.openOnly() &&
+      this.states().length > 0 &&
+      this.states().every((state) => this.settledStates.includes(state)),
+  );
+
   /** True when anything is narrowing the result set. */
   readonly isFiltered = computed(
     () =>

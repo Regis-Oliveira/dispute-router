@@ -69,6 +69,14 @@
             <td [attr.colspan]="columns.length">
               @if (api.isLoading()) {
                 Loading…
+              } @else if (filters.openOnlyExcludesEverything()) {
+                <!-- Naming the filter that emptied the table, rather than making
+                     an operator find a ticked checkbox they did not tick. -->
+                Nothing here: <strong>Still on the clock</strong> only shows disputes that are
+                still open, and every state selected is one a dispute reaches after it closes.
+                <button type="button" class="link-btn" (click)="filters.setOpenOnly(false)">
+                  Include closed disputes
+                </button>
               } @else if (filters.isFiltered()) {
                 No disputes match these filters.
                 <button type="button" class="link-btn" (click)="filters.clear()">Clear them</button>
