@@ -27,6 +27,7 @@ help:
 	@echo "aws-init    create the queue, dlq and bucket in localstack"
 	@echo "aws-status  queue depths and bucket contents"
 	@echo "dlq         show what is on the dead-letter queue"
+	@echo "mcp-check   verify the MCP server starts and answers a handshake"
 	@echo "tf-check    format and validate the Terraform (needs opentofu)"
 	@echo "tf-plan     plan it against localstack, which resolves the data sources"
 	@echo "dlq-replay  dry-run a replay back onto the main queue"
@@ -139,6 +140,13 @@ tf-check:
 # be stale the first time somebody ran `make reset`.
 tf-plan:
 	@./infra/terraform/plan-against-localstack.sh
+
+# The MCP server speaks JSON-RPC on stdin and stdout, so running it by hand just
+# blocks - it is meant to be launched by a client (see .mcp.json). The tests run
+# a real client against it over the SDK's in-memory transport instead.
+mcp-check:
+	DATABASE_URL=postgres://dispute:dispute@localhost:5433/dispute_router \
+	  go test ./internal/mcpserver/ -v
 
 dlq:
 	go run ./cmd/dlq peek

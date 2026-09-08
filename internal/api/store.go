@@ -394,3 +394,46 @@ func (s *Store) Dispute(ctx context.Context, id int64) (DisputeDetail, error) {
 	}
 	return d, postingRows.Err()
 }
+
+// CustomerHistoryRow is one prior dispute by the same customer.
+type CustomerHistoryRow struct {
+	ID         int64     `json:"id"`
+	ExternalID string    `json:"external_id"`
+	Kind       string    `json:"kind"`
+	State      string    `json:"state"`
+	ReasonCode string    `json:"reason_code"`
+	Amount     Money     `json:"amount"`
+	OpenedAt   time.Time `json:"opened_at"`
+}
+
+// CustomerHistory returns what this customer has disputed before.
+//
+// The single most useful signal when deciding whether to fight a dispute: a
+// first-time claim reads very differently from a fifth. Scoped to one merchant
+// because customer_ref is only unique within one.
+func (s *Store) CustomerHistory(ctx context.Context, merchantExternalID, customerRef string, limit int) ([]CustomerHistoryRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT d.id, d.external_id, d.kind, d.state, d.reason_code,
+		       d.amount_minor, d.currency, d.opened_at
+		  FROM disputes d
+		  JOIN merchants m    ON m.id = d.merchant_id
+		  JOIN transactions t ON t.id = d.transaction_id
+		 WHERE m.external_id = $1 AND t.customer_ref = $2
+		 ORDER BY d.opened_at DESC
+		 LIMIT $3`, merchantExternalID, customerRef, limit)
+	if err != nil {
+		return nil, fmt.Errorf("customer history: %w", err)
+	}
+	defer rows.Close()
+
+	out := []CustomerHistoryRow{}
+	for rows.Next() {
+		var r CustomerHistoryRow
+		if err := rows.Scan(&r.ID, &r.ExternalID, &r.Kind, &r.State, &r.ReasonCode,
+			&r.Amount.AmountMinor, &r.Amount.Currency, &r.OpenedAt); err != nil {
+			return nil, fmt.Errorf("scan customer history: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

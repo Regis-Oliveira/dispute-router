@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "dispute-router": {
+      "command": "go",
+      "args": [
+        "-C",
+        "/Users/regisSoapHealth/StudyProjects/dispute-router",
+        "run",
+        "./cmd/mcp"
+      ],
+      "env": {
+        "DOTENV_PATH": "/Users/regisSoapHealth/StudyProjects/dispute-router/.env"
+      }
+    }
+  }
+}

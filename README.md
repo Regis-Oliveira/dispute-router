@@ -455,6 +455,45 @@ what it made. Terraform says *what*, and `plan` prints the difference before
 anything happens. The cost is a state file, which holds secrets in plaintext and
 is a genuine liability — worth naming rather than glossing over.
 
+## `cmd/mcp/` — the read model over MCP
+
+An MCP server exposing the dispute queue to an assistant, so it can look instead
+of guessing. Point a client at `.mcp.json` and ask *"why did dispute 12458
+escalate?"* — it reads the state history and the ledger and answers from them.
+
+Four tools: `list_disputes`, `get_dispute`, `get_customer_history`,
+`queue_summary`. A thin adapter over the same `internal/api` read model the
+Angular dashboard uses.
+
+**The design is what is missing, not what is there.** Every tool is read-only,
+and the bottom of `internal/mcpserver/server.go` lists what was deliberately left
+out:
+
+- **No tool that writes.** A model decides on its own when to call things,
+  prompted partly by text other people wrote. The blast radius of that should not
+  include money.
+- **No generic `run_query`.** The convenient thing to build and the wrong thing
+  to ship: it collapses every access decision into "can it write SQL".
+- **No presigned evidence URLs.** A presigned URL is a bearer credential with a
+  TTL, and handing one to a model puts it in a transcript that gets logged and
+  pasted into tickets. File names are the useful part.
+- **No unmasked customer emails.** `customer_ref` already answers "is this the
+  same person"; the address itself never needs to leave the database.
+
+Two smaller decisions worth the same scrutiny. Lists are capped at 50 — a context
+limit, not a performance one — and a truncated answer *says so*, because silent
+truncation is how an assistant states a wrong total with confidence. And an
+overdue dispute carries an explicit `overdue: true` rather than leaving it to the
+sign of `hours_to_deadline`: a negative number is easy to skim past, and the
+difference is whether the reader thinks there is time left.
+
+Tested with a real client over the SDK's in-memory transport, including one test
+that fails if a tool ever stops being read-only.
+
+```bash
+make mcp-check
+```
+
 ## Notes in Portuguese
 
 `docs/conceitos-pt.md` — why Terraform exists and what category of thing it is,
