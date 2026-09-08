@@ -29,11 +29,9 @@ type Facts struct {
 
 	// CardholderClaim is the cardholder's own account of what happened.
 	//
-	// There is no column for it yet - the schema carries reason codes and
-	// controlled vocabularies, not free text - so nothing populates this today.
-	// It is declared here because it is the one field on this struct that
-	// arrives from a hostile party, and the handling it needs is structural
-	// rather than something to bolt on once the column exists.
+	// It is the one field on this struct that arrives from a hostile party.
+	// render below lifts it out of the JSON and quarantines it, which is why it
+	// is safe to carry here at all.
 	CardholderClaim string `json:"cardholder_claim,omitempty"`
 }
 
@@ -78,7 +76,7 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 		return Facts{}, ErrNoEvidenceSource
 	}
 
-	dispute, err := f.tools.GetDispute(ctx, disputetools.GetDisputeInput{ID: disputeID})
+	dispute, claim, err := f.tools.DisputeWithClaim(ctx, disputetools.GetDisputeInput{ID: disputeID})
 	if err != nil {
 		return Facts{}, fmt.Errorf("dispute %d: %w", disputeID, err)
 	}
@@ -97,9 +95,10 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 	}
 
 	facts := Facts{
-		Dispute:  dispute,
-		History:  history.Disputes,
-		Evidence: make([]EvidenceRef, 0, len(files)),
+		Dispute:         dispute,
+		History:         history.Disputes,
+		CardholderClaim: claim,
+		Evidence:        make([]EvidenceRef, 0, len(files)),
 	}
 	for _, file := range files {
 		facts.Evidence = append(facts.Evidence, EvidenceRef{

@@ -302,6 +302,13 @@ type DisputeDetail struct {
 	RefundedMinor  int64           `json:"refunded_minor"`
 	Events         []DisputeEvent  `json:"events"`
 	LedgerPostings []LedgerPosting `json:"ledger_postings"`
+
+	// CardholderClaim is the cardholder's own account, stored raw. It is the
+	// only free text on a dispute and the only field written by the party
+	// trying to reverse the charge, which is why it is deliberately absent
+	// from the MCP tool output - that surface has nowhere to mark it as
+	// untrusted. Reached through disputetools.DisputeWithClaim instead.
+	CardholderClaim string `json:"cardholder_claim"`
 }
 
 func (s *Store) Dispute(ctx context.Context, id int64) (DisputeDetail, error) {
@@ -318,7 +325,7 @@ func (s *Store) Dispute(ctx context.Context, id int64) (DisputeDetail, error) {
 		       t.external_id, t.card_last4, t.customer_ref,
 		       EXTRACT(EPOCH FROM (d.deadline_at - now()))::bigint,
 		       t.customer_email, t.descriptor, t.captured_at,
-		       t.amount_minor, t.refunded_minor
+		       t.amount_minor, t.refunded_minor, d.cardholder_claim
 		  FROM disputes d
 		  JOIN merchants m    ON m.id = d.merchant_id
 		  JOIN transactions t ON t.id = d.transaction_id
@@ -332,7 +339,7 @@ func (s *Store) Dispute(ctx context.Context, id int64) (DisputeDetail, error) {
 		&d.TransactionRef, &d.CardLast4, &d.CustomerRef,
 		&d.SecondsToDeadline,
 		&d.CustomerEmail, &d.Descriptor, &d.CapturedAt,
-		&d.OriginalAmount.AmountMinor, &d.RefundedMinor,
+		&d.OriginalAmount.AmountMinor, &d.RefundedMinor, &d.CardholderClaim,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return DisputeDetail{}, ErrNotFound

@@ -248,15 +248,36 @@ tried it" is not a claim about a system.
    faster and more certain than a second model call, and it runs before a
    verifier call is paid for. The verifier is left with what actually needs
    reading.
-5. **Migration `000003_agent.up.sql`** — `agent_runs` (dispute, attempt, model,
-   tokens, cost, verdict, draft, trace jsonb) + the `draft_ready` state.
+5. ~~**Migration `000003_agent.up.sql`**~~ **DONE.** `agent_runs`, the
+   `draft_ready` state, and `disputes.cardholder_claim`.
 
-   It also has to add **`disputes.cardholder_claim`**. There is no free-text
-   field anywhere in the schema today — reason codes and controlled vocabularies
-   only — so the one input that arrives from a hostile party has no column to
-   arrive in. `Facts.CardholderClaim` is declared and unpopulated until this
-   lands, and until then the injection case in the eval set has nothing to
-   inject into.
+   `agent_runs` is append-only, enforced by triggers, with the three review
+   columns exempt. This table exists to answer "why did the system say that",
+   and a table whose rows can be edited afterwards cannot answer it. Verified by
+   trying: rewriting the letter and lowering the cost both raise; recording a
+   human decision succeeds; half a decision fails a CHECK; a repeated attempt
+   collides on the unique key; a delete raises. The down migration round-trips
+   on a scratch database.
+
+   The claim is stored raw and quarantined where it is read, not sanitised on
+   the way in - sanitising would mean the record no longer says what was
+   actually claimed, and the record is the point.
+
+   It is deliberately **not** in the MCP tool output. That surface has no way to
+   mark a span as untrusted, and it is read by a model told that everything in
+   it is the record. `disputetools.DisputeWithClaim` returns it as a separate
+   value, so a caller cannot pass it on without having decided what to do with
+   it; `GetDispute` drops it. Both directions are tested against real seeded
+   rows.
+
+   `db/seed/070_cardholder_claims.sql` populates about one dispute in eight,
+   assigned by reason code so claims support or contradict the record the way
+   real ones do, and leaves the rest empty because most cardholders file through
+   their bank and say nothing. Three disputes carry a prompt-injection attempt -
+   three, not a percentage: assigning it by the same modulo rule as the rest put
+   it on two hundred, which is both unrealistic and useless as a fixture, since
+   a test needs to name the dispute it is about.
+
 6. **`cmd/agent/main.go`** — one dispute by id, or drain the `draft_ready`
    candidates.
 7. **`internal/agent/eval/`** — the eval set, the runner, the report.

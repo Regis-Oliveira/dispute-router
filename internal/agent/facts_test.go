@@ -22,7 +22,10 @@ func (f fakeEvidence) List(context.Context, int64) ([]api.EvidenceFile, error) {
 	return f.files, nil
 }
 
-func liveStore(t *testing.T) *api.Store {
+// Returns the pool alongside the store: a couple of these tests need to pick a
+// row by a condition the store has no method for, and widening the store's API
+// for a test would be the wrong trade.
+func liveStore(t *testing.T) (*api.Store, *pgxpool.Pool) {
 	t.Helper()
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
@@ -33,7 +36,7 @@ func liveStore(t *testing.T) *api.Store {
 		t.Fatalf("connect: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	return api.NewStore(pool)
+	return api.NewStore(pool), pool
 }
 
 func someDisputeID(t *testing.T, store *api.Store) int64 {
@@ -53,7 +56,7 @@ func someDisputeID(t *testing.T, store *api.Store) int64 {
 // a prompt, because a prompt becomes a transcript that gets logged, replayed
 // and pasted into tickets.
 func TestFactsCarryEvidenceNamesAndNotTheirURLs(t *testing.T) {
-	store := liveStore(t)
+	store, _ := liveStore(t)
 	const secret = "https://s3.example/evidence.pdf?X-Amz-Signature=deadbeef"
 
 	facts, err := NewFactSource(store, fakeEvidence{files: []api.EvidenceFile{{
@@ -89,7 +92,7 @@ func TestFactsCarryEvidenceNamesAndNotTheirURLs(t *testing.T) {
 // The facts are read from the store, not taken from a transcript, and the
 // masking the tools apply comes with them.
 func TestFactsAreReadFromTheStoreAndStayMasked(t *testing.T) {
-	store := liveStore(t)
+	store, _ := liveStore(t)
 	id := someDisputeID(t, store)
 
 	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
@@ -106,5 +109,70 @@ func TestFactsAreReadFromTheStoreAndStayMasked(t *testing.T) {
 	// if the merchant handle chained correctly.
 	if len(facts.History) == 0 {
 		t.Error("no customer history; a dispute always appears in its own")
+	}
+}
+
+// A dispute with a real cardholder claim, so the boundary can be tested against
+// what the seed actually produced rather than against a fixture.
+func disputeWithAClaim(t *testing.T, pool *pgxpool.Pool, like string) int64 {
+	t.Helper()
+	var id int64
+	err := pool.QueryRow(context.Background(),
+		`SELECT id FROM disputes WHERE cardholder_claim LIKE $1 ORDER BY id LIMIT 1`, like).Scan(&id)
+	if err != nil {
+		t.Skipf("no seeded dispute matching %q: %v", like, err)
+	}
+	return id
+}
+
+// The claim reaches the agent, because the agent quarantines it.
+func TestTheClaimReachesTheFacts(t *testing.T) {
+	store, pool := liveStore(t)
+	id := disputeWithAClaim(t, pool, "The order never arrived%")
+
+	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	if facts.CardholderClaim == "" {
+		t.Fatal("the cardholder claim did not reach the facts block")
+	}
+
+	rendered, err := facts.render()
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	at := strings.Index(rendered, facts.CardholderClaim)
+	openAt, closeAt := strings.Index(rendered, claimOpen), strings.Index(rendered, claimClose)
+	if at < openAt || at > closeAt {
+		t.Error("a real seeded claim rendered outside the quarantine")
+	}
+}
+
+// It does not reach the MCP tool output, which has nowhere to mark it untrusted.
+func TestTheClaimNeverReachesTheToolOutput(t *testing.T) {
+	store, pool := liveStore(t)
+	id := disputeWithAClaim(t, pool, "%Ignore all previous instructions%")
+
+	out, err := disputetools.New(store).GetDispute(context.Background(),
+		disputetools.GetDisputeInput{ID: id})
+	if err != nil {
+		t.Fatalf("GetDispute: %v", err)
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(encoded), "Ignore all previous instructions") {
+		t.Error("hostile cardholder text reached the MCP tool output unmarked")
+	}
+
+	// And the same dispute, through the agent's path, does carry it.
+	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+	if !strings.Contains(facts.CardholderClaim, "Ignore all previous instructions") {
+		t.Error("the agent path lost the claim it is supposed to quarantine")
 	}
 }

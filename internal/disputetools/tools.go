@@ -243,10 +243,24 @@ type GetDisputeOutput struct {
 	Ledger          []LedgerLine  `json:"ledger"`
 }
 
+// GetDispute is the tool. It never returns the cardholder's claim.
+//
+// The claim is free text written by the party trying to reverse the charge, and
+// this output goes to an MCP client - a transcript with no way to mark a span
+// as untrusted, read by a model that was told everything here is the record.
+// Callers that can quarantine it ask for it explicitly.
 func (s *Set) GetDispute(ctx context.Context, in GetDisputeInput) (GetDisputeOutput, error) {
+	out, _, err := s.DisputeWithClaim(ctx, in)
+	return out, err
+}
+
+// DisputeWithClaim returns the same record plus the cardholder's own words,
+// separately rather than as a field, so that a caller cannot pass it on without
+// having decided what to do with it.
+func (s *Set) DisputeWithClaim(ctx context.Context, in GetDisputeInput) (GetDisputeOutput, string, error) {
 	d, err := s.store.Dispute(ctx, in.ID)
 	if err != nil {
-		return GetDisputeOutput{}, err
+		return GetDisputeOutput{}, "", err
 	}
 
 	out := GetDisputeOutput{
@@ -277,7 +291,7 @@ func (s *Set) GetDispute(ctx context.Context, in GetDisputeInput) (GetDisputeOut
 			AmountMinor: p.Amount.AmountMinor,
 		})
 	}
-	return out, nil
+	return out, d.CardholderClaim, nil
 }
 
 // ---------------------------------------------------------------------------

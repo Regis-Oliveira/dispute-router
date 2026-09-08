@@ -273,6 +273,10 @@ export async function seed(): Promise<void> {
     await runSqlFile(client, "050_backfill_refund_totals.sql");
     await runSqlFile(client, "060_dispute_events.sql");
     await analyze(client, "dispute_events");
+
+    // The one untrusted field on a dispute. Last, because it reads dispute ids
+    // and every one of them has to exist first.
+    await runSqlFile(client, "070_cardholder_claims.sql");
   });
 
   console.log(`done in ${elapsed(startedAll)}`);
