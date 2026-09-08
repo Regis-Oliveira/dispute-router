@@ -204,12 +204,32 @@ tried it" is not a claim about a system.
    than silently handed every merchant's disputes.
 2. **`internal/agent/loop.go`** — the manual loop. Turn ceiling, token
    accounting, tool dispatch, structured trace out.
-3. **`internal/agent/verify.go`** — the second call, no tools, structured
-   verdict.
+3. ~~**`internal/agent/verify.go`** — the second call, no tools, structured
+   verdict.~~ **DONE**, along with `internal/agent/facts.go`, which turned out to
+   be the load-bearing half: the record is read from the store by host code, so a
+   fact the generator hallucinated into its own context cannot become the
+   standard it is measured against. `Check(ctx, facts, draft)` has no parameter
+   through which the transcript could arrive.
+
+   The verifier is given exactly one tool and it fetches nothing — a forced
+   `record_verdict` call is a shape to answer in, not a capability, and it is how
+   the answer arrives as a structure rather than prose that has to be
+   interpreted. Everything fails closed: `Verdict.checked` is unexported and set
+   only by a parsed verdict, so a zero value — what a caller holds after an error
+   it forgot to check — can never be approved. And "any finding means no pass" is
+   enforced by the host as well as stated in the prompt, because a rule that
+   lives only in a prompt is a request.
 4. **`internal/agent/prompt.go`** — system prompt, the facts block, the delimited
    untrusted claim.
 5. **Migration `000003_agent.up.sql`** — `agent_runs` (dispute, attempt, model,
    tokens, cost, verdict, draft, trace jsonb) + the `draft_ready` state.
+
+   It also has to add **`disputes.cardholder_claim`**. There is no free-text
+   field anywhere in the schema today — reason codes and controlled vocabularies
+   only — so the one input that arrives from a hostile party has no column to
+   arrive in. `Facts.CardholderClaim` is declared and unpopulated until this
+   lands, and until then the injection case in the eval set has nothing to
+   inject into.
 6. **`cmd/agent/main.go`** — one dispute by id, or drain the `draft_ready`
    candidates.
 7. **`internal/agent/eval/`** — the eval set, the runner, the report.

@@ -52,6 +52,17 @@ type Request struct {
 	// Temperature is a pointer so that "unset" is distinguishable from 0,
 	// which is a temperature someone may well want.
 	Temperature *float64 `json:"temperature,omitempty"`
+
+	ToolChoice *ToolChoice `json:"tool_choice,omitempty"`
+}
+
+// ToolChoice constrains what the model may do with the tools it was given.
+// "auto" lets it decide, "any" forces some tool, and "tool" with a Name forces
+// one particular tool - which is how a caller gets a structured answer instead
+// of prose it has to parse.
+type ToolChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
 }
 
 type Usage struct {
