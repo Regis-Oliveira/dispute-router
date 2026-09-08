@@ -111,9 +111,14 @@ type ListDisputesInput struct {
 }
 
 type DisputeSummary struct {
-	ID              int64  `json:"id"`
-	Reference       string `json:"reference"`
+	ID        int64  `json:"id"`
+	Reference string `json:"reference"`
+	// Merchant is the external id, because it is what every tool that takes a
+	// merchant expects. Returning only the display name here meant a model
+	// could read "Northwind Supply" out of one tool and pass it to another that
+	// matches on m.external_id, which quietly answers with nothing at all.
 	Merchant        string `json:"merchant"`
+	MerchantName    string `json:"merchant_name"`
 	Kind            string `json:"kind"`
 	State           string `json:"state"`
 	ReasonCode      string `json:"reason_code"`
@@ -163,7 +168,8 @@ func (s *Set) ListDisputes(ctx context.Context, in ListDisputesInput) (ListDispu
 		out.Disputes = append(out.Disputes, DisputeSummary{
 			ID:              row.ID,
 			Reference:       row.ExternalID,
-			Merchant:        row.MerchantName,
+			Merchant:        row.MerchantID,
+			MerchantName:    row.MerchantName,
 			Kind:            row.Kind,
 			State:           row.State,
 			ReasonCode:      row.ReasonCode,
@@ -216,6 +222,7 @@ type GetDisputeOutput struct {
 	ID              int64         `json:"id"`
 	Reference       string        `json:"reference"`
 	Merchant        string        `json:"merchant"`
+	MerchantName    string        `json:"merchant_name"`
 	Kind            string        `json:"kind"`
 	State           string        `json:"state"`
 	ReasonCode      string        `json:"reason_code"`
@@ -243,7 +250,7 @@ func (s *Set) GetDispute(ctx context.Context, in GetDisputeInput) (GetDisputeOut
 	}
 
 	out := GetDisputeOutput{
-		ID: d.ID, Reference: d.ExternalID, Merchant: d.MerchantName,
+		ID: d.ID, Reference: d.ExternalID, Merchant: d.MerchantID, MerchantName: d.MerchantName,
 		Kind: d.Kind, State: d.State, ReasonCode: d.ReasonCode, CardNetwork: d.CardNetwork,
 		AmountMinor: d.Amount.AmountMinor, Currency: d.Amount.Currency,
 		OriginalCharge: d.OriginalAmount.AmountMinor, RefundedMinor: d.RefundedMinor,
@@ -279,7 +286,8 @@ func (s *Set) GetDispute(ctx context.Context, in GetDisputeInput) (GetDisputeOut
 
 const DescCustomerHistory = "Prior disputes filed by the same customer at the same merchant. The " +
 	"single most useful signal when judging whether a dispute is worth fighting: a " +
-	"first-time claim reads very differently from a fifth."
+	"first-time claim reads very differently from a fifth. Pass the merchant field from " +
+	"list_disputes or get_dispute, not the merchant_name."
 
 type CustomerHistoryInput struct {
 	Merchant    string `json:"merchant" jsonschema:"Merchant external id, for example mrc_northwind"`

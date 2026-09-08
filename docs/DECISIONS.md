@@ -252,6 +252,15 @@ into tickets.
 **No unmasked customer emails.** `customer_ref` already answers "is this the same
 person".
 
+**A field a tool returns has to be a value the tools that take it accept.**
+`get_dispute` returned the merchant's display name while `get_customer_history`
+matches on the external id, so the obvious chain — look up a dispute, then ask
+what else this customer has filed — answered "nothing" for every customer,
+including repeat filers. Nothing errored: the query was valid and the result was
+empty, which is the worst shape a wrong answer can take. Both are returned now,
+`merchant` being the handle and `merchant_name` the label, and a test drives the
+chain rather than checking either tool alone.
+
 **Truncation says so, and overdue is an explicit boolean.** Designing tools for a
 model is not designing an API for code: code never forgets to check the sign of a
 number, and silent truncation is how an assistant states a wrong total with
