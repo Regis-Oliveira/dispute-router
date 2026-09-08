@@ -60,7 +60,7 @@ func NewAssistant(facts *FactSource, generator *Generator, verifier *Verifier, r
 		maxAttempts:   opts.MaxAttempts,
 		// Recorded per run rather than assumed from the code, because the code
 		// changes and the row has to stay true about the run it describes.
-		toolSurface: []string{representmentTool, verdictTool},
+		toolSurface: []string{RepresentmentTool, VerdictTool},
 	}
 }
 

@@ -17,7 +17,7 @@ func draftResponse(t *testing.T, in draftInput, usage Usage) Response {
 		StopReason: "tool_use",
 		Usage:      usage,
 		Content: []ContentBlock{{
-			Type: "tool_use", ID: "toolu_d", Name: representmentTool, Input: encoded,
+			Type: "tool_use", ID: "toolu_d", Name: RepresentmentTool, Input: encoded,
 		}},
 	}
 }
@@ -85,10 +85,10 @@ func TestEveryGeneratorFailureProducesNoDraft(t *testing.T) {
 			{Type: "text", Text: "Here is a letter."},
 		}},
 		"unreadable": {StopReason: "tool_use", Content: []ContentBlock{
-			{Type: "tool_use", Name: representmentTool, Input: json.RawMessage(`{"letter":`)},
+			{Type: "tool_use", Name: RepresentmentTool, Input: json.RawMessage(`{"letter":`)},
 		}},
 		"unknown recommendation": {StopReason: "tool_use", Content: []ContentBlock{
-			{Type: "tool_use", Name: representmentTool,
+			{Type: "tool_use", Name: RepresentmentTool,
 				Input: json.RawMessage(`{"recommendation":"concede","letter":"we give up"}`)},
 		}},
 	}
@@ -130,10 +130,10 @@ func TestTheGeneratorCannotFetchAnything(t *testing.T) {
 	}
 
 	req := script.Requests[0]
-	if len(req.Tools) != 1 || req.Tools[0].Name != representmentTool {
+	if len(req.Tools) != 1 || req.Tools[0].Name != RepresentmentTool {
 		t.Fatalf("the generator was given %d tools: %+v", len(req.Tools), req.Tools)
 	}
-	if req.ToolChoice == nil || req.ToolChoice.Name != representmentTool {
+	if req.ToolChoice == nil || req.ToolChoice.Name != RepresentmentTool {
 		t.Errorf("tool_choice = %+v; the draft has to arrive as a structure", req.ToolChoice)
 	}
 }

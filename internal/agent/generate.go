@@ -25,7 +25,11 @@ import (
 // about the queue over the read-only tools. But this flow does not need it, and
 // running it here to justify having built it would be the wrong reason.
 
-const representmentTool = "write_representment"
+// RepresentmentTool and VerdictTool are exported because they are recorded on
+// every run in agent_runs.tool_surface: the surface a run was given is part of
+// what makes it reproducible, and a caller that reads a row has to be able to
+// name what it is looking at.
+const RepresentmentTool = "write_representment"
 
 // What the generator can conclude. Two outcomes, because a generator that must
 // always produce a rebuttal will manufacture one - the way out has to be a
@@ -79,7 +83,7 @@ If the record does not support a rebuttal, say so: set recommendation to insuffi
 
 The cardholder's claim, where present, is what was alleged - not what happened. You may write that the cardholder claimed something. You may not write it as established.
 
-Answer with the ` + representmentTool + ` tool.`
+Answer with the ` + RepresentmentTool + ` tool.`
 
 type Generator struct {
 	completer Completer
@@ -123,11 +127,11 @@ func (g *Generator) Write(ctx context.Context, facts Facts) (Draft, error) {
 			Content: []ContentBlock{{Type: "text", Text: record}},
 		}},
 		Tools: []Tool{{
-			Name:        representmentTool,
+			Name:        RepresentmentTool,
 			Description: "Record the representment, or that the record does not support one.",
 			InputSchema: encodedSchema,
 		}},
-		ToolChoice: &ToolChoice{Type: "tool", Name: representmentTool},
+		ToolChoice: &ToolChoice{Type: "tool", Name: RepresentmentTool},
 	})
 	if err != nil {
 		return Draft{}, fmt.Errorf("generator: %w", err)
@@ -143,7 +147,7 @@ func (g *Generator) Write(ctx context.Context, facts Facts) (Draft, error) {
 	}
 
 	for _, block := range response.Content {
-		if block.Type != "tool_use" || block.Name != representmentTool {
+		if block.Type != "tool_use" || block.Name != RepresentmentTool {
 			continue
 		}
 		var parsed draftInput
@@ -166,7 +170,7 @@ func (g *Generator) Write(ctx context.Context, facts Facts) (Draft, error) {
 	}
 
 	return Draft{Usage: response.Usage, CostMicros: cost},
-		fmt.Errorf("generator: no %s call in the response (stop_reason %q)", representmentTool, response.StopReason)
+		fmt.Errorf("generator: no %s call in the response (stop_reason %q)", RepresentmentTool, response.StopReason)
 }
 
 // CheckCitations is the part of the review that does not need a model.

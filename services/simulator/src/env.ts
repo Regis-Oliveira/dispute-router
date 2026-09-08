@@ -2,6 +2,8 @@ import { config } from "dotenv";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { MERCHANT_PROFILES } from "./catalog.js";
+
 const here = dirname(fileURLToPath(import.meta.url));
 
 // The repo root .env is the single source of truth; each service reads it.
@@ -27,7 +29,10 @@ export const env = {
   ingestUrl: process.env.INGEST_URL ?? "http://localhost:8080/webhooks/processor",
 
   seed: num("SEED", 42),
-  merchants: num("SEED_MERCHANTS", 8),
+  // Defaults to every profile in the catalog, not a number that has to be
+  // remembered. A hardcoded count silently drops any profile added after it -
+  // the new merchant simply never appears, no error, no warning.
+  merchants: num("SEED_MERCHANTS", MERCHANT_PROFILES.length),
   transactions: num("SEED_TRANSACTIONS", 500_000),
   disputeRate: num("SEED_DISPUTE_RATE", 0.02),
 } as const;

@@ -10,7 +10,7 @@ import (
 func aRun(outcome string, escalated bool) Run {
 	return Run{
 		Model: "test-model", PromptFingerprint: "sha256:test",
-		ToolSurface: []string{representmentTool, verdictTool},
+		ToolSurface: []string{RepresentmentTool, VerdictTool},
 		Outcome:     outcome, Recommendation: RecommendRepresent,
 		Letter:     "a letter",
 		Escalated:  escalated,

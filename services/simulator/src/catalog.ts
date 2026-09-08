@@ -97,6 +97,10 @@ export const MERCHANT_PROFILES: readonly MerchantProfile[] = [
   { externalId: "mrc_orbital",    name: "Orbital Gear",          currency: "USD", descriptor: "ORBITAL GEAR",      disputeMultiplier: 0.9, medianTicket: 210, autoRefundCeiling: null },
   { externalId: "mrc_bellweather",name: "Bellweather Travel",    currency: "EUR", descriptor: "BELLWEATHER TRVL",  disputeMultiplier: 1.9, medianTicket: 430, autoRefundCeiling: null },
   { externalId: "mrc_kestrel",    name: "Kestrel Audio",         currency: "GBP", descriptor: "KESTREL AUDIO",     disputeMultiplier: 1.3, medianTicket: 95,  autoRefundCeiling: 75 },
+  // Yen has no minor unit. This merchant exists so that the one assumption
+  // hiding in every money formatter - that an amount has two decimal places -
+  // is wrong somewhere in the dataset rather than only in a comment.
+  { externalId: "mrc_sakura",     name: "Sakura Stationery",     currency: "JPY", descriptor: "SAKURA STATIONERY", disputeMultiplier: 1.0, medianTicket: 4200, autoRefundCeiling: 3000 },
 ];
 
 const FIRST_NAMES = ["ana","bruno","clara","diego","elena","felix","gina","hugo","iris","joao","kira","luca","mara","nuno","olga","paulo","rita","sofia","tomas","vera","wes","yara","zeca","noah","mia","liam","emma","oliver","ava","ethan"] as const;

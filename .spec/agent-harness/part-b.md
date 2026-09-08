@@ -311,9 +311,41 @@ tried it" is not a claim about a system.
    `agent_runs` cannot be deleted - the append-only trigger doing its job means
    a test cannot clean up after itself, and disabling the trigger would test a
    table that behaves differently from the one that ships.
-7. **`internal/agent/eval/`** — the eval set, the runner, the report.
+7. ~~**`internal/agent/eval/`** — the eval set, the runner, the report.~~
+   **DONE**, plus `cmd/eval`.
+
+   The split that matters: the graders are pure functions over the record and
+   the draft, with their own tests that run in CI for nothing. They answer "is
+   the harness correct". `cmd/eval` answers "is the model good enough", and
+   there is no free way to ask it - every case is a real call. Collapsing the
+   two would mean a harness that can only be proven by spending money, which
+   means it is not proven in CI.
+
+   Scripted mode cannot test detection. With a scripted completer the verifier's
+   verdict is also scripted, so "does the verifier catch a wrong amount" is a
+   model-capability question and not answerable for free. The graders are what
+   is answerable, and a grader that does not catch a bad draft makes every
+   number the eval reports meaningless - which is why they are the part with
+   tests.
+
+   Cases select disputes by SQL rather than by id, because ids move on every
+   reseed and a fixture that breaks on every reseed stops being run. `-cases`
+   resolves them without spending anything, and it earned its keep immediately:
+   it caught `fraud_no_history` and `planted_instruction_2` selecting the *same*
+   dispute, which would have graded the ordinary case against an attack it was
+   never meant to face.
+
+   `gradeFigures` only sees amounts, not dates or order numbers - those come in
+   too many formats to extract without inventing failures. A pass is one
+   specific way of lying that did not happen, not a clean bill of health.
 8. **Dashboard** — a review queue: draft on the left, facts and verifier verdict
    on the right, approve/reject. Approve is the only thing that changes state.
+
+   Note for whoever builds it: `agent_runs_awaiting_review_idx` covers
+   `outcome = 'drafted'` only. An escalated run is recorded as `rejected` and
+   still reaches `draft_ready`, so the queue query wants
+   `outcome IN ('drafted','rejected','insufficient_evidence')` and the index
+   covers one third of it. Small set, so it is a note rather than a migration.
 9. *(optional)* Port the loop to the SDK Tool Runner as a separate commit, so
    both exist side by side.
 
@@ -327,6 +359,24 @@ Steps 1–4 are the harness. Step 7 is what makes it credible. Step 8 is what ma
 it a product.
 
 ---
+
+## Dataset gaps this surfaced
+
+- **No double-dip case.** A chargeback on a charge already refunded does not
+  exist in the dataset: refunds land on alerts, which is the correct domain
+  model. `refund_already_given` reports itself unmatched rather than being
+  dropped, because a case that disappears quietly is a rule nobody is checking.
+  Faking it by writing `refunded_minor` directly would put the ledger and the
+  column out of step, which is the one inconsistency this schema exists to
+  prevent.
+
+- **JPY was missing and now is not.** The whole minor-units discipline had no
+  zero-decimal currency in its data, so the reasoning had never run. Adding
+  Sakura Stationery exposed a real bug in the simulator's formatter - with zero
+  digits it produced `5,000. JPY`, a separator with nothing after it - and a
+  second one in the seeder, where `SEED_MERCHANTS` was a hardcoded 8 that
+  silently dropped any profile added after it. The 11 money invariants still
+  pass with yen in the books.
 
 ## Para a entrevista (PT)
 

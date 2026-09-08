@@ -18,7 +18,7 @@ func verdictResponse(t *testing.T, in verdictInput, usage Usage) Response {
 		StopReason: "tool_use",
 		Usage:      usage,
 		Content: []ContentBlock{{
-			Type: "tool_use", ID: "toolu_v", Name: verdictTool, Input: encoded,
+			Type: "tool_use", ID: "toolu_v", Name: VerdictTool, Input: encoded,
 		}},
 	}
 }
@@ -108,7 +108,7 @@ func TestEveryFailureFailsClosed(t *testing.T) {
 			{Type: "text", Text: "Looks fine to me."},
 		}},
 		"unreadable verdict": {StopReason: "tool_use", Content: []ContentBlock{
-			{Type: "tool_use", ID: "toolu_v", Name: verdictTool, Input: json.RawMessage(`{"pass":`)},
+			{Type: "tool_use", ID: "toolu_v", Name: VerdictTool, Input: json.RawMessage(`{"pass":`)},
 		}},
 		"a different tool": {StopReason: "tool_use", Content: []ContentBlock{
 			{Type: "tool_use", ID: "toolu_v", Name: "something_else", Input: json.RawMessage(`{"pass":true}`)},
@@ -152,10 +152,10 @@ func TestTheVerifierHasNoFetchingToolsAndIsForced(t *testing.T) {
 	}
 
 	req := script.Requests[0]
-	if len(req.Tools) != 1 || req.Tools[0].Name != verdictTool {
+	if len(req.Tools) != 1 || req.Tools[0].Name != VerdictTool {
 		t.Fatalf("verifier was given %d tools: %+v", len(req.Tools), req.Tools)
 	}
-	if req.ToolChoice == nil || req.ToolChoice.Type != "tool" || req.ToolChoice.Name != verdictTool {
+	if req.ToolChoice == nil || req.ToolChoice.Type != "tool" || req.ToolChoice.Name != VerdictTool {
 		t.Errorf("tool_choice = %+v; the verdict has to be forced", req.ToolChoice)
 	}
 }
