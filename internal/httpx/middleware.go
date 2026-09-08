@@ -88,10 +88,17 @@ func Middleware(logger *slog.Logger) func(http.Handler) http.Handler {
 						http.Error(recorder, `{"error":"internal error"}`, http.StatusInternalServerError)
 					}
 				}
+				// The query is logged, not only the path. Every filter this API
+				// takes lives in the query string, so a log without it cannot
+				// answer the one question worth asking of a read endpoint:
+				// what was actually asked for. It is safe here because these
+				// filters carry states and merchant ids - if a parameter ever
+				// carries something personal, this line is where to redact it.
 				logger.InfoContext(ctx, "request",
 					"request_id", id,
 					"method", r.Method,
 					"path", r.URL.Path,
+					"query", r.URL.RawQuery,
 					"status", recorder.status,
 					"duration_ms", time.Since(started).Milliseconds())
 			}()
