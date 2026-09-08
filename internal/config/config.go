@@ -64,6 +64,20 @@ type Config struct {
 	SQSMaxMessages      int
 	SQSWaitSeconds      int
 
+	// The representment assistant. Bedrock is not emulated by LocalStack, so
+	// unlike every other AWS client here this one always reaches the real
+	// thing and every run costs money - which is why the ceilings are
+	// configuration rather than constants.
+	BedrockModelID string
+	// AgentMaxCostMicros bounds one dispute across the generator and the
+	// verifier, in micro-dollars. An automation that costs more than the
+	// chargeback it works on has inverted its own business case.
+	AgentMaxCostMicros int64
+	AgentMaxAttempts   int
+	AgentBatchSize     int
+	AgentInputPerMTok  int64
+	AgentOutputPerMTok int64
+
 	// Read API.
 	APIAddr        string
 	CORSOrigins    []string
@@ -118,6 +132,13 @@ func Load(dotenvPath string) (Config, error) {
 		WebhookSecretTTL: dur("WEBHOOK_SECRET_TTL", 5*time.Minute),
 		SQSMaxMessages:   integer("SQS_MAX_MESSAGES", 10),
 		SQSWaitSeconds:   integer("SQS_WAIT_SECONDS", 20),
+
+		BedrockModelID:     str("BEDROCK_MODEL_ID", ""),
+		AgentMaxCostMicros: int64(integer("AGENT_MAX_COST_MICROS", 250_000)),
+		AgentMaxAttempts:   integer("AGENT_MAX_ATTEMPTS", 2),
+		AgentBatchSize:     integer("AGENT_BATCH_SIZE", 5),
+		AgentInputPerMTok:  int64(integer("AGENT_INPUT_MICROS_PER_MTOK", 3_000_000)),
+		AgentOutputPerMTok: int64(integer("AGENT_OUTPUT_MICROS_PER_MTOK", 15_000_000)),
 
 		APIAddr: str("API_ADDR", ":8081"),
 		// Named origins only. A reflected Origin or a bare "*" would let any

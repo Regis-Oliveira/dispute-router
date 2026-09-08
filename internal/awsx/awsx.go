@@ -14,6 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -48,6 +49,15 @@ func Load(ctx context.Context, cfg Config) (aws.Config, error) {
 		return aws.Config{}, fmt.Errorf("load aws config: %w", err)
 	}
 	return loaded, nil
+}
+
+// Bedrock returns a runtime client.
+//
+// No endpoint override: LocalStack does not emulate Bedrock, so this is the one
+// client in this file that always talks to the real AWS. A run against it costs
+// money, which is why nothing in the test suite reaches it.
+func Bedrock(cfg aws.Config) *bedrockruntime.Client {
+	return bedrockruntime.NewFromConfig(cfg)
 }
 
 // SQS returns a client, pointed at the endpoint when one is set.

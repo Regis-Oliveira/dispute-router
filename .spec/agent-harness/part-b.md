@@ -278,8 +278,39 @@ tried it" is not a claim about a system.
    it on two hundred, which is both unrealistic and useless as a fixture, since
    a test needs to name the dispute it is about.
 
-6. **`cmd/agent/main.go`** — one dispute by id, or drain the `draft_ready`
-   candidates.
+6. ~~**`cmd/agent/main.go`** — one dispute by id, or drain the candidates.~~
+   **DONE**, with `internal/agent/assist.go` (the flow), `store.go` (the writes)
+   and `bedrock.go` (the first real `Completer`).
+
+   The hold comes before any spending. Everything after it costs tokens, so the
+   race is settled by the dispute's optimistic version - the same guard the
+   worker uses - and the loser has paid for nothing. Settling it afterwards on
+   the unique key would be correct in the database and wasteful everywhere else.
+
+   The run and the state move are one transaction. A run recorded against a
+   dispute that never moved is a draft nobody will look at; a dispute moved with
+   no run behind it is a state change with no explanation, which is the thing
+   `agent_runs` exists to prevent.
+
+   **Escalation routes; it does not relabel.** A draft the verifier rejected on
+   the last allowed attempt goes in front of a person with its findings
+   attached, and is still recorded as `rejected`. Renaming it to `drafted` would
+   put a letter the verifier refused into a queue labelled as checked - the same
+   conflation `Halt.Done` and `Verdict.Approved` exist to prevent.
+
+   The checks are ordered by cost: citations in host code, then the budget, then
+   the verifier. A draft citing a file that is not on the dispute is already
+   rejected, and paying a model to read it to discover that is slower, dearer
+   and less certain. `insufficient_evidence` skips the verifier entirely - there
+   is no claim about the merchant's case to check.
+
+   `-dry-run` builds no AWS client and needs no model id, so "what would this
+   touch" is answerable without being in a position to touch anything.
+
+   Tests run against a scratch database created and dropped per run, because
+   `agent_runs` cannot be deleted - the append-only trigger doing its job means
+   a test cannot clean up after itself, and disabling the trigger would test a
+   table that behaves differently from the one that ships.
 7. **`internal/agent/eval/`** — the eval set, the runner, the report.
 8. **Dashboard** — a review queue: draft on the left, facts and verifier verdict
    on the right, approve/reject. Approve is the only thing that changes state.
