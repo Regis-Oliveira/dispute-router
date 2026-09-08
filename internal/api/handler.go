@@ -38,6 +38,11 @@ func (h *Handler) Routes() *http.ServeMux {
 	// a presigned URL reads a credential, it does not change any state. The
 	// service stays read-only with respect to Postgres.
 	mux.HandleFunc("POST /api/disputes/{id}/evidence", h.presignEvidence)
+	mux.HandleFunc("GET /api/reviews", h.listReviews)
+	mux.HandleFunc("GET /api/reviews/{id}", h.getReview)
+	// The only endpoint in this service that changes a dispute, and the only
+	// path in the system that reaches 'represented'. See decideReview.
+	mux.HandleFunc("POST /api/reviews/{id}/decision", h.decideReview)
 	mux.HandleFunc("GET /api/summary", h.summary)
 	mux.HandleFunc("GET /api/merchants", h.merchants)
 	mux.HandleFunc("GET /api/stream", h.stream)
@@ -335,4 +340,84 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+// ---------------------------------------------------------------------------
+// review queue
+// ---------------------------------------------------------------------------
+
+func (h *Handler) listReviews(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	rows, err := h.store.Reviews(r.Context(), limit)
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "list reviews failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func (h *Handler) getReview(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be an integer")
+		return
+	}
+
+	detail, err := h.store.Review(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "no such run")
+		return
+	}
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "load review failed", "error", err, "run", id)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+// decideReview is the write.
+//
+// There is no authentication in front of it, which is worth stating plainly
+// rather than leaving to be discovered: the reviewer is a name in a request
+// body, and "reviewed_by" records who a caller CLAIMED to be. That is enough
+// for a local dashboard nobody else can reach, and nowhere near enough for
+// anything exposed. Before this service is deployed, this endpoint needs an
+// identity it did not get from the client - the audit trail is only worth what
+// the identity in it is worth.
+func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "id must be an integer")
+		return
+	}
+
+	var body struct {
+		Decision string `json:"decision"`
+		Reviewer string `json:"reviewer"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "body must be JSON with decision and reviewer")
+		return
+	}
+
+	err = h.store.Decide(r.Context(), id, body.Decision, body.Reviewer)
+	switch {
+	case errors.Is(err, ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ErrNotReviewable):
+		// 409 rather than 404: the run exists, somebody else already decided,
+		// and the page in front of this caller is out of date. Telling them it
+		// is missing would send them looking for the wrong problem.
+		writeError(w, http.StatusConflict, "this run has already been decided, or the dispute moved on")
+	case err != nil:
+		h.logger.ErrorContext(r.Context(), "decide failed", "error", err, "run", id)
+		writeError(w, http.StatusInternalServerError, "could not record the decision")
+	default:
+		h.logger.InfoContext(r.Context(), "review decided",
+			"run", id, "decision", body.Decision, "reviewer", body.Reviewer)
+		w.WriteHeader(http.StatusNoContent)
+	}
 }

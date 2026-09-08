@@ -1,0 +1,43 @@
+:host {
+  display: block;
+  padding: 1.25rem 1.5rem 3rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+.masthead__id { display: flex; align-items: baseline; gap: 0.6rem; }
+.masthead h1 { margin: 0; font-size: 1.15rem; letter-spacing: -0.01em; }
+.masthead__sub { color: var(--ink-muted); font-size: 0.8rem; }
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.9rem 0 1rem;
+  font-size: 0.82rem;
+}
+.who label { color: var(--ink-2); }
+.who input {
+  font: inherit;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--ink);
+  min-width: 12rem;
+}
+.who__note { color: var(--ink-muted); }
+
+.split { display: grid; grid-template-columns: 1fr; gap: 1rem; }
+.split--open { grid-template-columns: minmax(0, 1fr) minmax(0, 30rem); }
+@media (max-width: 1100px) {
+  .split--open { grid-template-columns: 1fr; }
+}

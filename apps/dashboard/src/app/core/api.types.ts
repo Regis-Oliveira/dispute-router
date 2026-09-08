@@ -167,3 +167,71 @@ export interface UploadTarget {
   max_bytes: number;
   content_type: string;
 }
+
+/**
+ * A rule the draft broke, from the verifier or from the host-side citation
+ * check. The two are indistinguishable here on purpose: a reviewer cares what
+ * is wrong with the letter, not which stage noticed.
+ */
+export interface ReviewFinding {
+  check: string;
+  quote: string;
+  why: string;
+}
+
+/** One entry in the review queue. */
+export interface ReviewRow {
+  run_id: number;
+  dispute_id: number;
+  reference: string;
+  merchant: string;
+  reason_code: string;
+  amount: Money;
+
+  /**
+   * 'drafted' means the verifier passed it. 'rejected' means it did not, and
+   * the run reached this queue by escalation - the retries ran out and the
+   * deadline did not stop moving. The distinction has to survive to the screen:
+   * a letter the verifier refused must never look checked.
+   */
+  outcome: string;
+  recommendation: string;
+  findings: number;
+  cost_micros: number;
+  attempt: number;
+
+  seconds_to_deadline: number;
+  finished_at: string;
+}
+
+/** Everything a reviewer needs on one screen. */
+export interface ReviewDetail {
+  run_id: number;
+  dispute_id: number;
+  attempt: number;
+
+  outcome: string;
+  recommendation: string;
+  letter: string;
+
+  cited_evidence: string[];
+  findings: ReviewFinding[];
+
+  model: string;
+  prompt_fingerprint: string;
+  tool_surface: string[];
+  input_tokens: number;
+  output_tokens: number;
+  cost_micros: number;
+
+  started_at: string;
+  finished_at: string;
+
+  decided?: string;
+  decided_by?: string;
+  decided_at?: string;
+
+  /** Read fresh, not stored on the run: the record can move between drafting and reviewing. */
+  dispute: DisputeDetail;
+}
+

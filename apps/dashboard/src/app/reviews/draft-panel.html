@@ -1,0 +1,112 @@
+@if (loading()) {
+  <p class="empty">Loading…</p>
+} @else if (detail(); as run) {
+  <div class="head">
+    <h2>Dispute {{ run.dispute.external_id }}</h2>
+    <button type="button" class="ghost" (click)="api.close()">close</button>
+  </div>
+
+  <!-- Findings come before the letter. A reviewer who reads the letter first has
+       already started agreeing with it. -->
+  @if (run.findings.length > 0) {
+    <div class="findings">
+      <h3>@if (wasRejected()) { The verifier rejected this draft } @else { Flagged }</h3>
+      @if (wasRejected()) {
+        <p class="findings__why">
+          It is here because the retries ran out and the deadline has not. Nothing has
+          approved it.
+        </p>
+      }
+      <ul>
+        @for (finding of run.findings; track $index) {
+          <li>
+            <code>{{ finding.check }}</code>
+            <blockquote>{{ finding.quote }}</blockquote>
+            <span>{{ finding.why }}</span>
+          </li>
+        }
+      </ul>
+    </div>
+  }
+
+  @if (noRepresentment()) {
+    <div class="notice">
+      The agent found nothing in the record to argue with. The letter says what would need
+      to be on file.
+    </div>
+  }
+
+  <h3>Draft</h3>
+  <pre class="letter">{{ run.letter }}</pre>
+  @if (run.cited_evidence.length > 0) {
+    <p class="cited">Cites: @for (file of run.cited_evidence; track file) {<code>{{ file }}</code>}</p>
+  }
+
+  <h3>The record</h3>
+  <dl>
+    <dt>Reason code</dt><dd class="mono">{{ run.dispute.reason_code }}</dd>
+    <dt>Disputed</dt><dd class="mono">{{ run.dispute.amount | money }}</dd>
+    <dt>Original charge</dt><dd class="mono">{{ run.dispute.original_amount | money }}</dd>
+    <dt>Customer</dt><dd class="mono">{{ run.dispute.customer_ref }}</dd>
+    <dt>Card</dt><dd class="mono">•••• {{ run.dispute.card_last4 }}</dd>
+    <dt>Descriptor</dt><dd class="mono">{{ run.dispute.descriptor }}</dd>
+  </dl>
+
+  <h3>How this was produced</h3>
+  <dl>
+    <dt>Model</dt><dd class="mono">{{ run.model }}</dd>
+    <dt>Prompts</dt><dd class="mono">{{ run.prompt_fingerprint }}</dd>
+    <dt>Tools</dt><dd class="mono">{{ run.tool_surface.join(', ') }}</dd>
+    <dt>Tokens</dt><dd class="mono">{{ run.input_tokens }} in / {{ run.output_tokens }} out</dd>
+    <dt>Cost</dt><dd class="mono">{{ dollars(run.cost_micros) }}</dd>
+    <dt>Attempt</dt><dd class="mono">{{ run.attempt }}</dd>
+  </dl>
+
+  @if (run.decided) {
+    <div class="decided">Already {{ run.decided }} by {{ run.decided_by }}.</div>
+  } @else {
+    <div class="actions">
+      @if (api.error()) {
+        <p class="actions__error">{{ api.error() }}</p>
+      }
+
+      @if (confirming()) {
+        <p class="actions__confirm">
+          @if (wasRejected()) {
+            This draft was <strong>rejected by the verifier</strong>. Sending it means
+            overriding that.
+          } @else {
+            This sends the letter to the card network.
+          }
+        </p>
+        <div class="actions__row">
+          <button type="button" class="danger" [disabled]="!canDecide()" (click)="decide('submitted')">
+            Yes, send it
+          </button>
+          <button type="button" class="ghost" (click)="cancel()">Cancel</button>
+        </div>
+      } @else {
+        <div class="actions__row">
+          <button type="button" class="primary" [disabled]="!canDecide()" (click)="ask('submitted')">
+            Approve and send
+          </button>
+          <button type="button" class="ghost" [disabled]="!canDecide()" (click)="ask('discarded')">
+            Discard draft
+          </button>
+        </div>
+        @if (!api.reviewer().trim()) {
+          <!-- A disabled button cannot be clicked, so an error that only appears
+               after a click never appears at all. The reason has to be visible
+               while the buttons are still dead. -->
+          <p class="actions__blocked">
+            Enter your name above to decide. Every decision is recorded against it.
+          </p>
+        }
+        <p class="actions__note">
+          Discarding returns the dispute to the queue. There is no button for giving up on a
+          dispute: writing off money is not a decision this system makes.
+        </p>
+      }
+    </div>
+  }
+}

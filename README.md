@@ -513,6 +513,14 @@ deleted — git is the archive.
 
 ## Known gaps
 
+- **`POST /api/reviews/{id}/decision` is unauthenticated**, and it is the one
+  endpoint that moves a dispute to `represented`. The reviewer is a name in a
+  request body, so `reviewed_by` records who a caller *claimed* to be. Fine for
+  a local dashboard, and the first thing that has to change before this service
+  is exposed: an audit trail is worth what the identity in it is worth.
+- The agent has never run against Bedrock. LocalStack does not emulate it, so
+  `cmd/agent` and `cmd/eval` are the only code here with no proven execution -
+  everything above the `Completer` interface is exercised against a script.
 - Nothing is deployed anywhere; ECS needs a real AWS account. The Terraform is
   `fmt`-clean, `validate`s, and `plan`s to 60 resources under OpenTofu, but has
   never been applied.

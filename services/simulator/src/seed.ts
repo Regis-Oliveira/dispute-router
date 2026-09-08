@@ -23,6 +23,10 @@ const SEED_SQL_DIR = resolve(here, "../../../db/seed");
 const VOLUME_WEIGHTS = [30, 22, 14, 10, 8, 7, 5, 4] as const;
 
 const TRUNCATE_TABLES = [
+  // agent_runs cascades from disputes anyway, but naming it here is the point:
+  // a reader of this list should be able to see everything a reseed destroys
+  // without tracing foreign keys to find out.
+  "agent_runs",
   "ledger_entries",
   "ledger_transactions",
   "ledger_accounts",

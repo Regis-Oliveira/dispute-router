@@ -1,0 +1,26 @@
+<header class="masthead">
+  <div class="masthead__id">
+    <h1>Review queue</h1>
+    <span class="masthead__sub">drafts awaiting a person</span>
+  </div>
+</header>
+
+<div class="who">
+  <label for="reviewer">Reviewing as</label>
+  <input
+    id="reviewer"
+    type="text"
+    placeholder="your name"
+    autocomplete="off"
+    [value]="api.reviewer()"
+    (input)="onReviewer($event)"
+  />
+  <span class="who__note">Recorded against every decision. There is no login here.</span>
+</div>
+
+<div class="split" [class.split--open]="hasSelection()">
+  <app-review-queue />
+  @if (hasSelection()) {
+    <app-draft-panel />
+  }
+</div>

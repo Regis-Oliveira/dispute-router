@@ -1,0 +1,45 @@
+:host {
+  display: block;
+  /* Without this the grid stretches the box to the panel's height, and two rows
+     sit at the top of an empty rectangle four screens tall. */
+  align-self: start;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+th, td { padding: 0.5rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); }
+th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  font-weight: 600;
+  background: var(--surface-2);
+}
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--surface-2); }
+tbody .row--selected, tbody .row--selected:hover { background: var(--accent-soft); }
+
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 0.78rem; }
+
+[data-urgency='overdue'], [data-urgency='critical'] { color: var(--crit); font-weight: 600; }
+[data-urgency='soon'] { color: var(--warn); }
+
+.tag {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-right: 0.3rem;
+}
+.tag--ok { background: var(--ok-soft); color: var(--ok) }
+.tag--warn { background: var(--warn-soft); color: var(--warn) }
+.tag--crit { background: var(--crit-soft); color: var(--crit) }
+.tag--quiet { background: var(--surface-2); color: var(--ink-muted) }
+
+.empty { color: var(--ink-muted); padding: 1.5rem; font-size: 0.85rem; }

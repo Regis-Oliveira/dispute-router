@@ -1,0 +1,55 @@
+@if (api.isLoading()) {
+  <p class="empty">Loading…</p>
+} @else if (api.rows().length === 0) {
+  <p class="empty">Nothing is waiting. The agent drafts for open chargebacks only.</p>
+} @else {
+  <table>
+    <thead>
+      <tr>
+        <th>Dispute</th>
+        <th>Merchant</th>
+        <th class="num">Amount</th>
+        <th>Reason</th>
+        <th>Draft</th>
+        <th class="num">Due in</th>
+      </tr>
+    </thead>
+    <tbody>
+      @for (row of api.rows(); track row.run_id) {
+        <tr
+          [class.row--selected]="row.run_id === api.selectedId()"
+          (click)="select(row)"
+          tabindex="0"
+          (keydown.enter)="select(row)"
+        >
+          <td class="mono">{{ row.reference }}</td>
+          <td>{{ row.merchant }}</td>
+          <td class="num mono">{{ row.amount | money }}</td>
+          <td class="mono">{{ row.reason_code }}</td>
+          <td>
+            <!-- standingOf, not conditions written here: 'rejected' means the
+                 verifier refused this letter and it reached the queue by
+                 escalation, and that rule lives in one place. -->
+            @switch (standing(row)) {
+              @case ('rejected') {
+                <span class="tag tag--crit">rejected · {{ row.findings }} finding(s)</span>
+              }
+              @case ('no-case') {
+                <span class="tag tag--warn">no case</span>
+              }
+              @default {
+                <span class="tag tag--ok">checked</span>
+              }
+            }
+            @if (row.attempt > 1) {
+              <span class="tag tag--quiet">attempt {{ row.attempt }}</span>
+            }
+          </td>
+          <td class="num mono" [attr.data-urgency]="urgency(row.seconds_to_deadline)">
+            {{ countdown(row.seconds_to_deadline) }}
+          </td>
+        </tr>
+      }
+    </tbody>
+  </table>
+}

@@ -338,27 +338,37 @@ tried it" is not a claim about a system.
    `gradeFigures` only sees amounts, not dates or order numbers - those come in
    too many formats to extract without inventing failures. A pass is one
    specific way of lying that did not happen, not a clean bill of health.
-8. **Dashboard** — a review queue: draft on the left, facts and verifier verdict
-   on the right, approve/reject. Approve is the only thing that changes state.
+8. ~~**Dashboard** — a review queue.~~ **DONE.** `internal/api/reviews.go`,
+   `/reviews` in the dashboard.
 
-   Note for whoever builds it: `agent_runs_awaiting_review_idx` covers
-   `outcome = 'drafted'` only. An escalated run is recorded as `rejected` and
-   still reaches `draft_ready`, so the queue query wants
-   `outcome IN ('drafted','rejected','insufficient_evidence')` and the index
-   covers one third of it. Small set, so it is a note rather than a migration.
-9. *(optional)* Port the loop to the SDK Tool Runner as a separate commit, so
-   both exist side by side.
+   `Decide` is the only write in the read API and the only path in the system
+   that reaches `represented`. Submitting sends the letter; discarding returns
+   the dispute to the queue. There is deliberately no button for giving up on a
+   dispute - writing off money is not a decision this system makes, in the UI
+   any more than in the worker.
 
-No Anthropic SDK was added. The wire types are written out in
-`internal/agent/tools.go` because Bedrock's `InvokeModel` takes this JSON
-verbatim and the AWS SDK is already a dependency — and because it keeps the
-package testable with no network call and no API key, which is what makes the
-eval set in step 7 possible.
+   `standingOf` is one function rather than a pair of conditions in two
+   templates, because it carries the rule the screen exists to protect: a run
+   with outcome `rejected` was refused by the verifier and reached the queue by
+   escalation, and it must never be presented like one that passed. Duplicated
+   across templates, that rule survives until somebody edits one of them. The
+   findings sit above the letter for the same reason - a reviewer who reads the
+   letter first has already started agreeing with it - and approving a rejected
+   draft takes a second click that says what is being overridden.
 
-Steps 1–4 are the harness. Step 7 is what makes it credible. Step 8 is what makes
-it a product.
+   The detail reads the dispute fresh rather than from a snapshot on the run.
+   The record can move between drafting and reviewing, and deciding against a
+   stale copy is deciding against something no longer true.
 
----
+   A second decision returns 409, not 404. The run exists; the page in front of
+   the caller is stale, and telling them it is missing sends them looking for
+   the wrong problem.
+
+   **This endpoint has no authentication.** `reviewed_by` records who a caller
+   claimed to be. That is enough for a dashboard nobody else can reach and
+   nowhere near enough for a deployed one - an audit trail is worth exactly what
+   the identity in it is worth. Stated in the handler and in the README rather
+   than left to be discovered.
 
 ## Dataset gaps this surfaced
 

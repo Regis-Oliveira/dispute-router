@@ -8,6 +8,11 @@ export const routes: Routes = [
     loadComponent: () => import('./disputes/disputes-page').then((m) => m.DisputesPage),
     title: 'Disputes · Dispute Router',
   },
+  {
+    path: 'reviews',
+    loadComponent: () => import('./reviews/reviews-page').then((m) => m.ReviewsPage),
+    title: 'Review queue · Dispute Router',
+  },
   { path: '', pathMatch: 'full', redirectTo: 'disputes' },
   { path: '**', redirectTo: 'disputes' },
 ];
