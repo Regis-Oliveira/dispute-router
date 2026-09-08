@@ -1,0 +1,137 @@
+<header class="masthead">
+  <div class="masthead__id">
+    <h1>Decisions</h1>
+    <span class="masthead__sub">what people did with the drafts</span>
+  </div>
+</header>
+
+<div class="filters">
+  <div class="group" role="group" aria-label="Reviewer">
+    <span class="group__label">Reviewer</span>
+    @for (who of api.reviewers(); track who) {
+      <!-- The identity, matched exactly. A name today, a user id once there is
+           a login - the control does not care which. -->
+      <button
+        type="button"
+        class="chip"
+        [class.chip--on]="api.reviewer() === who"
+        [attr.aria-pressed]="api.reviewer() === who"
+        (click)="api.toggleReviewer(who)"
+      >
+        {{ who }}
+      </button>
+    } @empty {
+      <span class="chip chip--ghost">nobody has decided anything yet</span>
+    }
+  </div>
+
+  <div class="group" role="group" aria-label="Decision">
+    <span class="group__label">Decision</span>
+    <button
+      type="button"
+      class="chip"
+      [class.chip--on]="api.decision() === 'submitted'"
+      (click)="api.toggleDecision('submitted')"
+    >
+      submitted
+    </button>
+    <button
+      type="button"
+      class="chip"
+      [class.chip--on]="api.decision() === 'discarded'"
+      (click)="api.toggleDecision('discarded')"
+    >
+      discarded
+    </button>
+  </div>
+
+  <button
+    type="button"
+    class="chip chip--override"
+    [class.chip--on]="api.onlyOverrides()"
+    (click)="api.toggleOverrides()"
+  >
+    overrides only
+  </button>
+
+  @if (isFiltered()) {
+    <button type="button" class="link-btn" (click)="api.clear()">Clear</button>
+  }
+</div>
+
+<div class="table">
+  <div class="table__head">
+    <span><strong>{{ api.total() }}</strong> decision(s)</span>
+    @if (overrideCount() > 0) {
+      <span class="warn">{{ overrideCount() }} on this page overrode the verifier</span>
+    }
+  </div>
+
+  @if (api.rows().length === 0 && !api.isLoading()) {
+    <p class="empty">
+      @if (isFiltered()) {
+        No decisions match. <button type="button" class="link-btn" (click)="api.clear()">Clear</button>
+      } @else {
+        Nothing has been decided yet. Drafts wait in the
+        <a routerLink="/reviews">review queue</a> until somebody acts on one.
+      }
+    </p>
+  } @else {
+    <!-- Rendered while loading too, dimmed rather than replaced: swapping the
+         table for a spinner on every filter click is the flash. -->
+    <table [class.stale]="api.isLoading()">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Reviewer</th>
+          <th>Dispute</th>
+          <th class="num">Amount</th>
+          <th>Agent said</th>
+          <th>Person did</th>
+          <th>Dispute now</th>
+          <th class="num">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of api.rows(); track row.run_id) {
+          <tr [class.row--override]="row.override">
+            <td class="mono dim">{{ when(row.reviewed_at) }}</td>
+            <td>{{ row.reviewed_by }}</td>
+            <td class="mono">{{ row.reference }}<br /><span class="dim">{{ row.merchant }}</span></td>
+            <td class="num mono">{{ row.amount | money }}</td>
+            <td>
+              @if (row.outcome === 'rejected') {
+                <span class="tag tag--crit">rejected</span>
+                <span class="dim">{{ row.findings }} finding(s)</span>
+              } @else if (row.outcome === 'insufficient_evidence') {
+                <span class="tag tag--warn">no case</span>
+              } @else {
+                <span class="tag tag--ok">checked</span>
+              }
+            </td>
+            <td>
+              @if (row.review === 'submitted') {
+                <span class="tag tag--sent">submitted</span>
+              } @else {
+                <span class="tag tag--quiet">discarded</span>
+              }
+              @if (row.override) {
+                <!-- The whole reason this screen exists. -->
+                <span class="tag tag--override">override</span>
+              }
+            </td>
+            <td class="mono dim">{{ row.dispute_state }}</td>
+            <td class="num mono dim">{{ cost(row.cost_micros) }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  }
+</div>
+
+<p class="caveat">
+  Every decision here was made by a name typed into a box. There is no login, so
+  <strong>reviewed_by records who somebody claimed to be</strong> — it is an identity this
+  system cannot verify. When there is authentication it becomes a user id, and only the
+  name shown here changes.
+</p>

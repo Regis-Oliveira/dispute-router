@@ -13,6 +13,11 @@ export const routes: Routes = [
     loadComponent: () => import('./reviews/reviews-page').then((m) => m.ReviewsPage),
     title: 'Review queue · Dispute Router',
   },
+  {
+    path: 'decisions',
+    loadComponent: () => import('./reviews/decisions-page').then((m) => m.DecisionsPage),
+    title: 'Decisions · Dispute Router',
+  },
   { path: '', pathMatch: 'full', redirectTo: 'disputes' },
   { path: '**', redirectTo: 'disputes' },
 ];

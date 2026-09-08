@@ -1,0 +1,125 @@
+:host {
+  display: block;
+  padding: 1.25rem 1.5rem 3rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+.masthead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--rule);
+}
+.masthead__id { display: flex; align-items: baseline; gap: 0.6rem; }
+.masthead h1 { margin: 0; font-size: 1.15rem; letter-spacing: -0.01em; }
+.masthead__sub { color: var(--ink-muted); font-size: 0.8rem; }
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.8rem;
+  margin: 0.9rem 0 1rem;
+}
+.group { display: flex; align-items: center; gap: 0.3rem; }
+.group__label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  margin-right: 0.2rem;
+}
+
+.chip {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.22rem 0.6rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.chip:hover { color: var(--ink); }
+.chip--on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.chip--ghost { opacity: 0.6; cursor: default; }
+.chip--override.chip--on { background: var(--crit); border-color: var(--crit); color: #fff; }
+
+.link-btn {
+  font: inherit;
+  font-size: 0.78rem;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink-2);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.table {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.table__head {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--rule);
+}
+.warn { color: var(--crit); font-weight: 600; }
+
+table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+/* Stale, not gone. The delay is usually too short to see, and the point is
+   that nothing moves when it is not. */
+table.stale { opacity: 0.55; transition: opacity 120ms ease-out; }
+@media (prefers-reduced-motion: reduce) { table.stale { transition: none; } }
+th, td { padding: 0.5rem 0.7rem; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  font-weight: 600;
+  background: var(--surface-2);
+}
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--mono); font-size: 0.78rem; }
+.dim { color: var(--ink-muted); }
+
+/* An override is the row worth finding, so it is marked on the row and not
+   only in a cell somebody has to scan across to. */
+.row--override { background: color-mix(in srgb, var(--crit-soft) 55%, transparent); }
+.row--override td:first-child { box-shadow: inset 3px 0 0 var(--crit); }
+
+.tag {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  margin-right: 0.3rem;
+}
+.tag--ok { background: var(--ok-soft); color: var(--ok) }
+.tag--warn { background: var(--warn-soft); color: var(--warn) }
+.tag--crit { background: var(--crit-soft); color: var(--crit) }
+.tag--quiet { background: var(--surface-2); color: var(--ink-muted) }
+.tag--sent { background: var(--accent-soft); color: var(--accent) }
+.tag--override { background: var(--crit); color: #fff }
+
+.empty { color: var(--ink-muted); padding: 1.5rem; font-size: 0.85rem; }
+.empty a { color: var(--ink-2); }
+
+.caveat {
+  margin: 1rem 0 0;
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  max-width: 60ch;
+  line-height: 1.5;
+}

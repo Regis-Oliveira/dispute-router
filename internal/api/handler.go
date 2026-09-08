@@ -43,6 +43,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	// The only endpoint in this service that changes a dispute, and the only
 	// path in the system that reaches 'represented'. See decideReview.
 	mux.HandleFunc("POST /api/reviews/{id}/decision", h.decideReview)
+	mux.HandleFunc("GET /api/decisions", h.listDecisions)
 	mux.HandleFunc("GET /api/summary", h.summary)
 	mux.HandleFunc("GET /api/merchants", h.merchants)
 	mux.HandleFunc("GET /api/stream", h.stream)
@@ -420,4 +421,31 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
 			"run", id, "decision", body.Decision, "reviewer", body.Reviewer)
 		w.WriteHeader(http.StatusNoContent)
 	}
+}
+
+func (h *Handler) listDecisions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	decision := q.Get("decision")
+	if decision != "" && decision != "submitted" && decision != "discarded" {
+		writeError(w, http.StatusBadRequest, "decision must be submitted or discarded")
+		return
+	}
+
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	list, err := h.store.Decisions(r.Context(), DecisionFilters{
+		Reviewer:      q.Get("reviewer"),
+		Decision:      decision,
+		OnlyOverrides: q.Get("overrides") == "true",
+		Limit:         limit,
+		Offset:        offset,
+	})
+	if err != nil {
+		h.logger.ErrorContext(r.Context(), "list decisions failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "query failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
 }

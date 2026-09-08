@@ -235,3 +235,43 @@ export interface ReviewDetail {
   dispute: DisputeDetail;
 }
 
+/** One decision a person made about one draft. */
+export interface DecisionRow {
+  run_id: number;
+  dispute_id: number;
+  reference: string;
+  merchant: string;
+  amount: Money;
+
+  /** What the agent concluded. */
+  outcome: string;
+  recommendation: string;
+  findings: number;
+  attempt: number;
+  cost_micros: number;
+
+  /** What the person decided. */
+  review: string;
+  reviewed_by: string;
+  reviewed_at: string;
+
+  /**
+   * The verifier refused this letter and a person sent it anyway. Computed by
+   * the API, not derived here, so every reader agrees on what one is.
+   */
+  override: boolean;
+
+  dispute_state: string;
+}
+
+export interface DecisionList {
+  rows: DecisionRow[];
+  page: Page;
+  /**
+   * Every identity that has ever decided, over the whole history rather than
+   * the current page or filter - a control built from filtered results removes
+   * the people who selected it.
+   */
+  reviewers: string[];
+  took_ms: number;
+}
