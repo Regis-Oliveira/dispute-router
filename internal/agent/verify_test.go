@@ -177,10 +177,20 @@ func TestTheVerifierNeverSeesTheGeneratorsTranscript(t *testing.T) {
 		t.Fatalf("verifier received %d messages: %+v", len(req.Messages), req.Messages)
 	}
 	prompt := req.Messages[0].Content[0].Text
-	for _, want := range []string{"FACTS", "DRAFT", "THE DRAFT TEXT", "the item never arrived"} {
+	for _, want := range []string{"RECORD", "DRAFT", "THE DRAFT TEXT"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt is missing %q", want)
 		}
+	}
+	// The cardholder's words have to reach the verifier, and they have to
+	// reach it inside the quarantine rather than loose among the amounts.
+	claimAt := strings.Index(prompt, "the item never arrived")
+	if claimAt < 0 {
+		t.Fatal("the cardholder claim never reached the verifier")
+	}
+	openAt, closeAt := strings.Index(prompt, claimOpen), strings.Index(prompt, claimClose)
+	if openAt < 0 || closeAt < 0 || claimAt < openAt || claimAt > closeAt {
+		t.Error("the cardholder claim reached the verifier outside the quarantine markers")
 	}
 	if !strings.Contains(req.System, "You did not write the draft") {
 		t.Error("the verifier was not told it is checking someone else's work")

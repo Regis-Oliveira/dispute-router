@@ -219,8 +219,35 @@ tried it" is not a claim about a system.
    it forgot to check — can never be approved. And "any finding means no pass" is
    enforced by the host as well as stated in the prompt, because a rule that
    lives only in a prompt is a request.
-4. **`internal/agent/prompt.go`** — system prompt, the facts block, the delimited
-   untrusted claim.
+4. ~~**`internal/agent/prompt.go`** — system prompt, the facts block, the
+   delimited untrusted claim.~~ **DONE**, as `internal/agent/generate.go` plus
+   `Facts.render()` in facts.go.
+
+   **The generator gets no fetching tools, which changes the diagram above.**
+   If it could look things up it could cite something true that the verifier -
+   working from a record fixed before either call ran - has never seen, and a
+   correct draft would come back rejected as unsupported. Two judges need one
+   record. It also makes the run single-turn and deterministic, which is what
+   lets the eval set attribute a change to the prompt rather than to what the
+   model happened to fetch. If exploration is ever wanted, the rule that comes
+   with it is that everything fetched must be appended to the record the
+   verifier sees.
+
+   This means the representment flow does not use the loop from step 2. That
+   loop is the general harness and `cmd/agent` will use it for the
+   operator-facing surface that answers questions about the queue over the
+   read-only tools; running it here to justify having built it would be the
+   wrong reason.
+
+   Two outcomes, not one: `insufficient_evidence` is a first-class answer,
+   because a generator that can only ever produce a rebuttal will manufacture
+   one when the record does not support it.
+
+   `CheckCitations` decides in host code what does not need a model. Whether a
+   filename is in `evidence_on_file` is a lookup, not a judgement - cheaper,
+   faster and more certain than a second model call, and it runs before a
+   verifier call is paid for. The verifier is left with what actually needs
+   reading.
 5. **Migration `000003_agent.up.sql`** — `agent_runs` (dispute, attempt, model,
    tokens, cost, verdict, draft, trace jsonb) + the `draft_ready` state.
 
