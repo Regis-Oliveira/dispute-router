@@ -202,8 +202,23 @@ tried it" is not a claim about a system.
    retry that bills for nothing); and argument decoding is strict, so a model
    that filters on `merchant_id` when the field is `merchant` is refused rather
    than silently handed every merchant's disputes.
-2. **`internal/agent/loop.go`** — the manual loop. Turn ceiling, token
-   accounting, tool dispatch, structured trace out.
+2. ~~**`internal/agent/loop.go`** — the manual loop.~~ **DONE.** Turn ceiling,
+   token accounting, tool dispatch, structured trace.
+
+   `Halt` separates a model that finished from one a ceiling stopped, and
+   `Halt.Done()` is the only honest way to ask. Two ceilings, because turns
+   alone does not stop a model reading enormous results and cost alone does not
+   stop one that ping-pongs cheaply. Cost is checked before each call so the
+   budget is never knowingly exceeded, and `MaxTokens` bounds the one response
+   that can still overshoot it - what is known before a call is not its price.
+
+   Cost is micro-dollars in an int64, for the same reason the ledger uses minor
+   units: a ceiling compared in floating point drifts, and a ceiling that drifts
+   is not a ceiling.
+
+   The representment flow ended up not using it (see step 4). It is the general
+   harness, and what `cmd/agent` would use for an operator-facing surface over
+   the read-only tools.
 3. ~~**`internal/agent/verify.go`** — the second call, no tools, structured
    verdict.~~ **DONE**, along with `internal/agent/facts.go`, which turned out to
    be the load-bearing half: the record is read from the store by host code, so a
@@ -369,6 +384,21 @@ tried it" is not a claim about a system.
    nowhere near enough for a deployed one - an audit trail is worth exactly what
    the identity in it is worth. Stated in the handler and in the README rather
    than left to be discovered.
+
+## Status
+
+All eight steps are built, plus a decision-history screen that was not planned.
+
+**Nothing has ever run against a real model.** LocalStack does not emulate
+Bedrock, so every draft this system has produced was written by hand as demo
+data. The loop, the generator, the verifier, the orchestrator and the eval
+runner have all been exercised only against `ScriptedCompleter`. That is what
+the seam was for and it is why the harness has tests at all - but it means the
+question the eval exists to answer, "is the model good enough", has never been
+asked. A run needs an AWS account with model access; nine cases with the
+verifier on costs roughly $0.15-$0.25.
+
+So: the harness is finished. The assistant is unproven.
 
 ## Dataset gaps this surfaced
 
