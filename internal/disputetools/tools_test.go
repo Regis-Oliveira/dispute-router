@@ -1,4 +1,4 @@
-package mcpserver
+package disputetools
 
 import "testing"
 
@@ -78,7 +78,7 @@ func TestSplitCSV(t *testing.T) {
 // The cap is a context limit, not a performance one, so it has to be small
 // enough that a full page still leaves room to reason about the results.
 func TestRowCapIsSane(t *testing.T) {
-	if maxRows <= 0 || maxRows > 100 {
-		t.Errorf("maxRows = %d; a list tool that can return more than ~100 rows fills the context it was meant to inform", maxRows)
+	if MaxRows <= 0 || MaxRows > 100 {
+		t.Errorf("MaxRows = %d; a list tool that can return more than ~100 rows fills the context it was meant to inform", MaxRows)
 	}
 }

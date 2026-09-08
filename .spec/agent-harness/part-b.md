@@ -186,9 +186,22 @@ tried it" is not a claim about a system.
 
 ## Build order
 
-1. **`internal/agent/tools.go`** — adapt the four MCP tools to the API tool
-   schema. Same `internal/api.Store`, same masking. The tool definitions are
-   already correct; only the envelope differs.
+1. ~~**`internal/agent/tools.go`** — adapt the four MCP tools to the API tool
+   schema.~~ **DONE.** Went further than planned, and the extra step was the
+   right one: rather than copy the four tools into a second envelope, they moved
+   into a new `internal/disputetools` package that neither transport owns.
+   `internal/mcpserver` is now a thin MCP adapter over it, and
+   `internal/agent/tools.go` is the Messages API adapter. Both derive their
+   schemas from the same Go structs with the same library, so the description a
+   model reads sits next to the field it describes and cannot drift.
+
+   Two decisions worth keeping: errors are sorted into ones the model can act on
+   (bad arguments, unknown tool, unknown dispute — returned as `tool_result`
+   with `is_error`) and ones it cannot (a database that is down — returned as a
+   Go error that aborts the run, because telling a model about it only buys a
+   retry that bills for nothing); and argument decoding is strict, so a model
+   that filters on `merchant_id` when the field is `merchant` is refused rather
+   than silently handed every merchant's disputes.
 2. **`internal/agent/loop.go`** — the manual loop. Turn ceiling, token
    accounting, tool dispatch, structured trace out.
 3. **`internal/agent/verify.go`** — the second call, no tools, structured
@@ -204,6 +217,12 @@ tried it" is not a claim about a system.
    on the right, approve/reject. Approve is the only thing that changes state.
 9. *(optional)* Port the loop to the SDK Tool Runner as a separate commit, so
    both exist side by side.
+
+No Anthropic SDK was added. The wire types are written out in
+`internal/agent/tools.go` because Bedrock's `InvokeModel` takes this JSON
+verbatim and the AWS SDK is already a dependency — and because it keeps the
+package testable with no network call and no API key, which is what makes the
+eval set in step 7 possible.
 
 Steps 1–4 are the harness. Step 7 is what makes it credible. Step 8 is what makes
 it a product.

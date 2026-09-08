@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/regisoliveira/dispute-router/internal/api"
+	"github.com/regisoliveira/dispute-router/internal/disputetools"
 )
 
 // Runs a real client against a real server over the SDK's in-memory transport.
@@ -92,11 +93,11 @@ func TestListDisputesRespectsTheCap(t *testing.T) {
 		t.Fatalf("tool returned an error: %v", result.Content)
 	}
 
-	var out ListDisputesOutput
+	var out disputetools.ListDisputesOutput
 	decode(t, result, &out)
 
-	if len(out.Disputes) > maxRows {
-		t.Errorf("returned %d disputes, cap is %d", len(out.Disputes), maxRows)
+	if len(out.Disputes) > disputetools.MaxRows {
+		t.Errorf("returned %d disputes, cap is %d", len(out.Disputes), disputetools.MaxRows)
 	}
 	// A truncated answer that does not say so is how an assistant states a
 	// wrong total with confidence.
@@ -148,7 +149,7 @@ func TestDisputeDetailMasksTheEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	var listed ListDisputesOutput
+	var listed disputetools.ListDisputesOutput
 	decode(t, list, &listed)
 	if len(listed.Disputes) == 0 {
 		t.Skip("no disputes seeded; run make seed")
@@ -161,7 +162,7 @@ func TestDisputeDetailMasksTheEmail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get_dispute: %v", err)
 	}
-	var got GetDisputeOutput
+	var got disputetools.GetDisputeOutput
 	decode(t, detail, &got)
 
 	if got.CustomerEmail == "" {
@@ -183,7 +184,7 @@ func TestOverdueIsStatedNotImplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CallTool: %v", err)
 	}
-	var out ListDisputesOutput
+	var out disputetools.ListDisputesOutput
 	decode(t, result, &out)
 
 	for _, d := range out.Disputes {
