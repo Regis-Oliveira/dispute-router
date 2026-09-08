@@ -984,3 +984,24 @@ indistinguível de um worker travado.**
     SIGQUIT eram pista falsa; quem respondeu foi o MONITOR do Redis, mostrando
     os mesmos quatro ids sendo reagendados milhares de vezes por segundo. O
     reagendamento caía dentro da própria janela de captura."*
+
+---
+
+## 12. Onde está o resto do contexto
+
+Este documento explica *conceitos* — o porquê de cada tecnologia, em português,
+para reler antes de uma entrevista. Ele não é o registro das decisões do projeto.
+
+- **[`DECISIONS.md`](DECISIONS.md)** — o log de decisões: cada escolha real feita
+  ao longo das 5 fases, o que foi rejeitado e por quê, e os bugs cuja lição virou
+  regra (o tipo de parâmetro em SQL, o livelock do worker, a fronteira read-only
+  do MCP). Em inglês, porque referencia identificadores do código.
+- **[`../.spec/agent-harness/part-b.md`](../.spec/agent-harness/part-b.md)** — o
+  desenho completo da Parte B (o harness agêntico): o loop manual, o verificador
+  independente, as guardrails, os evals e a ordem de construção. Desenhado, não
+  construído. Tem uma seção final em português com as frases para a entrevista.
+- **[`../README.md`](../README.md)** — o que existe hoje e como rodar.
+
+A regra de separação: `docs/` descreve **o que é**; `.spec/` descreve **o que
+ainda não é**. Quando algo do `.spec/` for construído, a decisão que valeu a pena
+guardar migra para `docs/` e o plano é apagado — o git é o arquivo.

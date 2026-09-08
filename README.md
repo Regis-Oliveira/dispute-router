@@ -494,17 +494,30 @@ that fails if a tool ever stops being read-only.
 make mcp-check
 ```
 
-## Notes in Portuguese
+## Where the context lives
 
-`docs/conceitos-pt.md` — why Terraform exists and what category of thing it is,
-why Go rather than Node here, what HMAC proves, and why these are long-running
-processes rather than serverless functions. Written to be reread before an
-interview, with every answer grounded in this repository.
+- **[`docs/DECISIONS.md`](docs/DECISIONS.md)** — why the project is shaped the
+  way it is, including the alternatives that were rejected. This README says what
+  exists; that says what was chosen against, which is the part that gets lost.
+- **[`docs/conceitos-pt.md`](docs/conceitos-pt.md)** — the same ground explained
+  in Portuguese, for study rather than record: why Terraform exists and what
+  category of thing it is, why Go rather than Node here, what HMAC proves, and
+  why these are long-running processes rather than serverless functions.
+- **[`.spec/agent-harness/part-b.md`](.spec/agent-harness/part-b.md)** — the
+  representment assistant: designed, not built. The loop, the independent
+  verifier, the guardrails, the evals, and the order to build in.
+
+`docs/` describes what is; `.spec/` describes what isn't yet. When something in
+`.spec/` ships, the decision worth keeping moves to `docs/` and the plan is
+deleted — git is the archive.
 
 ## Known gaps
 
-- Nothing is deployed anywhere; ECS needs a real account, and the Terraform has
-  never been applied or even `validate`d.
+- Nothing is deployed anywhere; ECS needs a real AWS account. The Terraform is
+  `fmt`-clean, `validate`s, and `plan`s to 60 resources under OpenTofu, but has
+  never been applied.
+- Part B — the agentic harness described in `.spec/agent-harness/part-b.md` —
+  is designed and not started. Part A (the MCP server) is done.
 - `merchants.webhook_secret` still exists, because it is the `database` fallback
   source. Secrets Manager is the default (`WEBHOOK_SECRET_SOURCE=secretsmanager`)
   and the ingest service reads from it, but the column is still a place a signing
