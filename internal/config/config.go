@@ -68,6 +68,20 @@ type Config struct {
 	// unlike every other AWS client here this one always reaches the real
 	// thing and every run costs money - which is why the ceilings are
 	// configuration rather than constants.
+	// ModelProvider is "anthropic" or "bedrock".
+	//
+	// Two, because they answer different situations: Bedrock needs an AWS
+	// account with model access and gets its credentials from the task role,
+	// which is the right shape in production; the direct API needs a key and
+	// nothing else, which is the only shape available to somebody trying this
+	// on a laptop.
+	ModelProvider string
+
+	// A key from console.anthropic.com. A claude.ai subscription is a separate
+	// product and cannot be used here.
+	AnthropicAPIKey string
+	AnthropicModel  string
+
 	BedrockModelID string
 	// AgentMaxCostMicros bounds one dispute across the generator and the
 	// verifier, in micro-dollars. An automation that costs more than the
@@ -133,6 +147,9 @@ func Load(dotenvPath string) (Config, error) {
 		SQSMaxMessages:   integer("SQS_MAX_MESSAGES", 10),
 		SQSWaitSeconds:   integer("SQS_WAIT_SECONDS", 20),
 
+		ModelProvider:      str("MODEL_PROVIDER", "anthropic"),
+		AnthropicAPIKey:    str("ANTHROPIC_API_KEY", ""),
+		AnthropicModel:     str("ANTHROPIC_MODEL", "claude-sonnet-5"),
 		BedrockModelID:     str("BEDROCK_MODEL_ID", ""),
 		AgentMaxCostMicros: int64(integer("AGENT_MAX_COST_MICROS", 250_000)),
 		AgentMaxAttempts:   integer("AGENT_MAX_ATTEMPTS", 2),
@@ -163,6 +180,11 @@ func Load(dotenvPath string) (Config, error) {
 	}
 	if cfg.S3EvidenceBucket == "" {
 		return Config{}, fmt.Errorf("S3_EVIDENCE_BUCKET is required")
+	}
+	switch cfg.ModelProvider {
+	case "anthropic", "bedrock":
+	default:
+		return Config{}, fmt.Errorf("MODEL_PROVIDER must be anthropic or bedrock, got %q", cfg.ModelProvider)
 	}
 	switch cfg.WebhookSecretSource {
 	case "secretsmanager", "database":

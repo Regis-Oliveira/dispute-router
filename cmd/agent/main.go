@@ -91,7 +91,13 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	completer, err := agent.NewBedrock(awsx.Bedrock(awsCfg), cfg.BedrockModelID)
+	completer, model, err := agent.Provider{
+		Kind:            cfg.ModelProvider,
+		AnthropicAPIKey: cfg.AnthropicAPIKey,
+		AnthropicModel:  cfg.AnthropicModel,
+		BedrockModelID:  cfg.BedrockModelID,
+		BedrockClient:   awsx.Bedrock(awsCfg),
+	}.Build(ctx)
 	if err != nil {
 		return err
 	}
@@ -104,11 +110,11 @@ func run(logger *slog.Logger) error {
 	evidence := awsx.S3(awsCfg, cfg.AWSEndpoint)
 	assistant := agent.NewAssistant(
 		agent.NewFactSource(store, api.NewEvidence(evidence, cfg.S3EvidenceBucket, time.Minute)),
-		agent.NewGenerator(completer, cfg.BedrockModelID, pricing, 4096),
-		agent.NewVerifier(completer, cfg.BedrockModelID, pricing, 2048),
+		agent.NewGenerator(completer, model, pricing, 4096),
+		agent.NewVerifier(completer, model, pricing, 2048),
 		runs,
 		agent.AssistantOptions{
-			Model:         cfg.BedrockModelID,
+			Model:         model,
 			MaxCostMicros: cfg.AgentMaxCostMicros,
 			MaxAttempts:   cfg.AgentMaxAttempts,
 			Logger:        logger,

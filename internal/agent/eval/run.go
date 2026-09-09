@@ -24,6 +24,14 @@ type Runner struct {
 	facts     *agent.FactSource
 	generator *agent.Generator
 
+	// MaxTotalCostMicros stops the whole run, not one case.
+	//
+	// The Assistant already bounds a single dispute, but an eval is a loop over
+	// disputes and nothing was bounding the loop. A prompt change that makes
+	// every case retry, or a case set that grows, spends the whole budget
+	// before anybody sees a number. Zero means no ceiling.
+	MaxTotalCostMicros int64
+
 	// verifier is optional. Its verdict is reported alongside the graders
 	// rather than replacing them: the graders say whether a rule was broken,
 	// and the verifier says whether the model thinks one was. Where they
@@ -34,6 +42,12 @@ type Runner struct {
 
 func NewRunner(pool *pgxpool.Pool, facts *agent.FactSource, generator *agent.Generator, verifier *agent.Verifier) *Runner {
 	return &Runner{pool: pool, facts: facts, generator: generator, verifier: verifier}
+}
+
+// WithCostCeiling bounds what the whole run may spend.
+func (r *Runner) WithCostCeiling(micros int64) *Runner {
+	r.MaxTotalCostMicros = micros
+	return r
 }
 
 type Result struct {
@@ -62,6 +76,11 @@ type Report struct {
 	SkippedCount    int            `json:"skipped"`
 	FailuresByRule  map[string]int `json:"failures_by_rule"`
 	TotalCostMicros int64          `json:"total_cost_micros"`
+
+	// Stopped explains a run that did not reach the end of the case set. A
+	// pass rate over half the cases is not the pass rate, and a report that
+	// does not say so invites reading it as one.
+	Stopped string `json:"stopped,omitempty"`
 }
 
 func (r Report) PassRate() float64 {
@@ -82,6 +101,16 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 	report := Report{FailuresByRule: map[string]int{}}
 
 	for _, c := range cases {
+		// Checked before each case rather than after, so the ceiling is never
+		// knowingly exceeded - the same rule the loop applies per turn, and it
+		// can still be overshot by one case for the same reason: the price of a
+		// call is not known until it returns.
+		if r.MaxTotalCostMicros > 0 && report.TotalCostMicros >= r.MaxTotalCostMicros {
+			report.Stopped = fmt.Sprintf("cost ceiling reached after %d of %d cases",
+				report.Ran+report.SkippedCount, len(cases))
+			break
+		}
+
 		result := Result{Case: c.Name, Why: c.Why}
 
 		var disputeID int64

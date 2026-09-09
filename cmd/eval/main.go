@@ -50,6 +50,7 @@ func run() error {
 		withVerify = flag.Bool("verify", false, "also run the verifier, and report where it disagrees with the graders")
 		asJSON     = flag.Bool("json", false, "emit the full report as JSON")
 		only       = flag.String("only", "", "run one case by name")
+		maxCost    = flag.Float64("max-cost", 1.0, "stop the run once it has spent this many dollars")
 		timeout    = flag.Duration("timeout", 10*time.Minute, "wall clock ceiling")
 	)
 	flag.Parse()
@@ -90,10 +91,18 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	completer, err := agent.NewBedrock(awsx.Bedrock(awsCfg), cfg.BedrockModelID)
+
+	completer, model, err := agent.Provider{
+		Kind:            cfg.ModelProvider,
+		AnthropicAPIKey: cfg.AnthropicAPIKey,
+		AnthropicModel:  cfg.AnthropicModel,
+		BedrockModelID:  cfg.BedrockModelID,
+		BedrockClient:   awsx.Bedrock(awsCfg),
+	}.Build(ctx)
 	if err != nil {
 		return err
 	}
+	fmt.Fprintf(os.Stderr, "running %d case(s) against %s, stopping at $%.2f\n", len(cases), model, *maxCost)
 
 	pricing := agent.Pricing{
 		InputMicrosPerMTok:  cfg.AgentInputPerMTok,
@@ -104,11 +113,13 @@ func run() error {
 
 	var verifier *agent.Verifier
 	if *withVerify {
-		verifier = agent.NewVerifier(completer, cfg.BedrockModelID, pricing, 2048)
+		verifier = agent.NewVerifier(completer, model, pricing, 2048)
 	}
 
 	report, err := eval.NewRunner(pool, facts,
-		agent.NewGenerator(completer, cfg.BedrockModelID, pricing, 4096), verifier).Run(ctx, cases)
+		agent.NewGenerator(completer, model, pricing, 4096), verifier).
+		WithCostCeiling(int64(*maxCost*1_000_000)).
+		Run(ctx, cases)
 	if err != nil {
 		return err
 	}
