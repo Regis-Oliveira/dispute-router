@@ -89,6 +89,11 @@ api:
 worker:
 	go run ./cmd/worker
 
+# Stage three drafts in the review queue so the screen can be demonstrated
+# without spending anything on a model. Repeatable: run it between takes.
+demo-reset:
+	docker exec -i dr-postgres psql -U dispute -d dispute_router -q -f - < db/demo/review_queue.sql
+
 go-test:
 	go test ./... -race
 
