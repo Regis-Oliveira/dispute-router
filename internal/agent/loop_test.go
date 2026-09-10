@@ -280,16 +280,12 @@ func TestAnExhaustedScriptIsAnError(t *testing.T) {
 	}
 }
 
-// Cache tokens bill at their own rates, and an unset rate has to fall back in
-// the direction that overstates rather than understates the bill.
-func TestCacheRatesFallBackToInput(t *testing.T) {
+// A configured cache rate wins over the derived one, so a provider whose
+// pricing differs can be described without editing code.
+func TestAConfiguredCacheRateWins(t *testing.T) {
 	p := Pricing{InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000}
-	if got := p.cost(Usage{CacheReadInputTokens: 1_000_000}); got != 3_000_000 {
-		t.Errorf("unset cache read rate cost %d, want the input rate 3000000", got)
-	}
-
-	p.CacheReadMicrosPerMTok = 300_000
-	if got := p.cost(Usage{CacheReadInputTokens: 1_000_000}); got != 300_000 {
-		t.Errorf("configured cache read rate cost %d, want 300000", got)
+	p.CacheReadMicrosPerMTok = 150_000
+	if got := p.cost(Usage{CacheReadInputTokens: 1_000_000}); got != 150_000 {
+		t.Errorf("configured cache read rate cost %d, want 150000", got)
 	}
 }

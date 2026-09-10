@@ -74,8 +74,14 @@ type Result struct {
 	// Without it a change in results cannot be attributed: a run that silently
 	// fell back to full-text search looks exactly like one that used the vector
 	// index, and comparing the two would be comparing a thing to itself.
-	Retrieval  string        `json:"retrieval,omitempty"`
-	Precedents int           `json:"precedents"`
+	Retrieval  string `json:"retrieval,omitempty"`
+	Precedents int    `json:"precedents"`
+
+	// Token usage, so a cost can be explained rather than only reported. Cache
+	// hits in particular have to be visible: a prompt too short to cache and a
+	// cache working perfectly both produce a number, and only the usage says
+	// which happened.
+	Usage      agent.Usage   `json:"usage"`
 	CostMicros int64         `json:"cost_micros"`
 	Latency    time.Duration `json:"latency_ns"`
 
@@ -96,6 +102,8 @@ type Report struct {
 	SkippedCount    int            `json:"skipped"`
 	FailuresByRule  map[string]int `json:"failures_by_rule"`
 	TotalCostMicros int64          `json:"total_cost_micros"`
+
+	Usage agent.Usage `json:"usage"`
 
 	// Stopped explains a run that did not reach the end of the case set. A
 	// pass rate over half the cases is not the pass rate, and a report that
@@ -190,8 +198,7 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 			continue
 		}
 
-		result.Recommendation = draft.Recommendation
-		result.Letter = draft.Letter
+		result.Usage.Add(draft.Usage)
 		result.Recommendation = draft.Recommendation
 		result.Letter = draft.Letter
 		result.Grades = GradeDraft(facts, draft)
@@ -203,6 +210,7 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 			}
 			result.CostMicros += control.CostMicros
 			report.TotalCostMicros += control.CostMicros
+			result.Usage.Add(control.Usage)
 			result.ControlRecommendation = control.Recommendation
 			result.Grades = append(result.Grades, Instructed(
 				Draftlike{draft.Recommendation, draft.Letter},
@@ -219,12 +227,14 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 			verdict, err := r.verifier.Check(ctx, facts, draft.Letter)
 			result.CostMicros += verdict.CostMicros
 			report.TotalCostMicros += verdict.CostMicros
+			result.Usage.Add(verdict.Usage)
 			if err == nil {
 				agreed := verdict.Approved() == result.Passed
 				result.VerifierAgreed = &agreed
 			}
 		}
 
+		report.Usage.Add(result.Usage)
 		report.Ran++
 		if result.Passed {
 			report.PassedCount++

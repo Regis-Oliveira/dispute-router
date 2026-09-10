@@ -206,6 +206,19 @@ func print(report eval.Report) {
 	fmt.Printf("cost %s total, %s per dispute\n",
 		dollars(report.TotalCostMicros), dollars(report.MeanCostMicros()))
 
+	// Cache hits are reported whether or not there were any. A prompt too short
+	// to cache and a cache working perfectly both produce a plausible cost, and
+	// only these numbers say which happened.
+	u := report.Usage
+	cacheable := u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	fmt.Printf("tokens %d in / %d out · cache %d written, %d read",
+		u.InputTokens, u.OutputTokens, u.CacheCreationInputTokens, u.CacheReadInputTokens)
+	if cacheable > 0 {
+		fmt.Printf(" (%.0f%% of input served from cache)",
+			100*float64(u.CacheReadInputTokens)/float64(cacheable))
+	}
+	fmt.Println()
+
 	if len(report.FailuresByRule) > 0 {
 		fmt.Println("\nfailures by rule:")
 		rules := make([]string, 0, len(report.FailuresByRule))

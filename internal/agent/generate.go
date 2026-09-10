@@ -136,6 +136,9 @@ func (g *Generator) Write(ctx context.Context, facts Facts) (Draft, error) {
 			InputSchema: encodedSchema,
 		}},
 		ToolChoice: &ToolChoice{Type: "tool", Name: RepresentmentTool},
+		// The system prompt and the tool schema are identical on every call;
+		// only the record below them changes.
+		CacheSystem: true,
 	})
 	if err != nil {
 		return Draft{}, fmt.Errorf("generator: %w", err)

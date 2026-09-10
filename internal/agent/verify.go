@@ -160,6 +160,9 @@ func (v *Verifier) Check(ctx context.Context, facts Facts, draft string) (Verdic
 		// that has to be interpreted - and interpreting prose is where a
 		// "no problems found" becomes a pass by accident.
 		ToolChoice: &ToolChoice{Type: "tool", Name: VerdictTool},
+		// The system prompt and the tool schema are identical on every call;
+		// only the record below them changes.
+		CacheSystem: true,
 	})
 	if err != nil {
 		return Verdict{}, fmt.Errorf("verifier: %w", err)

@@ -51,6 +51,24 @@ winnable and everything about the merchant. Below ten settled disputes the count
 go out and the rate does not, because an interval that wide is noise with a
 percent sign.
 
+**Caching the system prompt cut 24% of the bill.** The two system prompts are
+about 1,570 tokens that never change, against roughly 880 for the record that
+does — nearly half of every input. Marking the *system* block rather than a tool
+puts the cache breakpoint at the end of the longer prefix, since the cacheable
+order runs tools, then system, then messages. Measured over the eval: 46% of
+input served from cache, $0.0204 to $0.0156 per dispute.
+
+The individual prompts sit below the minimum cacheable length and tools plus
+system together clear it, which is why the breakpoint placement was the whole
+decision rather than a detail.
+
+Two things had to be fixed before the number meant anything. Unset cache rates
+fell back to the *input* rate, so a cache working perfectly would have reported
+no saving at all — they are derived now, a write at 1.25× input and a read at
+0.1×. And the eval reports cache tokens whether or not there were any: a prompt
+too short to cache and a cache working perfectly both produce a plausible cost,
+and only the usage says which happened.
+
 **A prompt is a boundary, and boundaries get formatters.** The rule below —
 divide exactly once, at the edge — was applied to the ledger, the API and the
 dashboard, and then the record handed a model `amount_minor: 5799` with an

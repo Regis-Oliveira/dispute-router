@@ -142,7 +142,7 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	// The cost is real whether or not a draft came back, so it is added before
 	// the error is examined. A failed run that reports zero spend is how a
 	// budget silently stops meaning anything.
-	run.Usage.add(draft.Usage)
+	run.Usage.Add(draft.Usage)
 	run.CostMicros += draft.CostMicros
 	trace := Trace{Generator: phase{
 		Usage: draft.Usage, CostMicros: draft.CostMicros, Latency: time.Since(genStarted),
@@ -186,7 +186,7 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 
 	verStarted := time.Now()
 	verdict, err := a.verifier.Check(ctx, facts, draft.Letter)
-	run.Usage.add(verdict.Usage)
+	run.Usage.Add(verdict.Usage)
 	run.CostMicros += verdict.CostMicros
 	trace.Verifier = &phase{
 		Usage: verdict.Usage, CostMicros: verdict.CostMicros, Latency: time.Since(verStarted),

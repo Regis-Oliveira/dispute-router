@@ -67,10 +67,24 @@ func NewAnthropic(key, model string) (*Anthropic, error) {
 
 // anthropicBody differs from Bedrock's in exactly one way: the model is named
 // in the body rather than in the call, and there is no anthropic_version field.
+// cacheControl marks the end of a cacheable prefix. Ephemeral is the only kind
+// there is; the name refers to a short time to live, not to whether it works.
+type cacheControl struct {
+	Type string `json:"type"`
+}
+
+type systemBlock struct {
+	Type         string        `json:"type"`
+	Text         string        `json:"text"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
 type anthropicBody struct {
-	Model       string      `json:"model"`
-	MaxTokens   int         `json:"max_tokens"`
-	System      string      `json:"system,omitempty"`
+	Model     string `json:"model"`
+	MaxTokens int    `json:"max_tokens"`
+	// A string when nothing is cached, an array of blocks when something is:
+	// cache_control lives on a block and a bare string has nowhere to put it.
+	System      any         `json:"system,omitempty"`
 	Messages    []Message   `json:"messages"`
 	Tools       []Tool      `json:"tools,omitempty"`
 	ToolChoice  *ToolChoice `json:"tool_choice,omitempty"`
@@ -89,7 +103,7 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error)
 	body, err := json.Marshal(anthropicBody{
 		Model:       a.model,
 		MaxTokens:   req.MaxTokens,
-		System:      req.System,
+		System:      systemFor(req),
 		Messages:    req.Messages,
 		Tools:       req.Tools,
 		ToolChoice:  req.ToolChoice,
@@ -161,4 +175,25 @@ func (a *Anthropic) once(ctx context.Context, body []byte) (Response, bool, erro
 		return Response{}, false, errors.New("anthropic: response carried no stop_reason")
 	}
 	return response, false, nil
+}
+
+// systemFor renders the system prompt, with a cache breakpoint when one was
+// asked for.
+//
+// The breakpoint goes on the system block rather than on a tool, because the
+// cacheable prefix runs tools then system then messages: marking the system
+// caches the tool schemas with it, and marking a tool would cache only the
+// tools. One breakpoint, the larger prefix.
+func systemFor(req Request) any {
+	if req.System == "" {
+		return nil
+	}
+	if !req.CacheSystem {
+		return req.System
+	}
+	return []systemBlock{{
+		Type:         "text",
+		Text:         req.System,
+		CacheControl: &cacheControl{Type: "ephemeral"},
+	}}
 }

@@ -47,7 +47,7 @@ func NewBedrock(client *bedrockruntime.Client, modelID string) (*Bedrock, error)
 type bedrockBody struct {
 	AnthropicVersion string      `json:"anthropic_version"`
 	MaxTokens        int         `json:"max_tokens"`
-	System           string      `json:"system,omitempty"`
+	System           any         `json:"system,omitempty"`
 	Messages         []Message   `json:"messages"`
 	Tools            []Tool      `json:"tools,omitempty"`
 	ToolChoice       *ToolChoice `json:"tool_choice,omitempty"`
@@ -60,7 +60,7 @@ func (b *Bedrock) Complete(ctx context.Context, req Request) (Response, error) {
 	body, err := json.Marshal(bedrockBody{
 		AnthropicVersion: bedrockAnthropicVersion,
 		MaxTokens:        req.MaxTokens,
-		System:           req.System,
+		System:           systemFor(req),
 		Messages:         req.Messages,
 		Tools:            req.Tools,
 		ToolChoice:       req.ToolChoice,

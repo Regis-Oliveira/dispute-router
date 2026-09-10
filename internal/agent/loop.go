@@ -54,6 +54,20 @@ type Request struct {
 	Temperature *float64 `json:"temperature,omitempty"`
 
 	ToolChoice *ToolChoice `json:"tool_choice,omitempty"`
+
+	// CacheSystem asks the provider to cache everything up to and including the
+	// system prompt - which means the tool schemas too, since they come first
+	// in the cacheable prefix.
+	//
+	// Worth doing here because the system prompts are the largest constant in
+	// the request: about 1,570 tokens across the two calls, against roughly 880
+	// for the record that actually varies. Nearly half of every input is text
+	// that has not changed since the process started.
+	//
+	// It is a request, not a guarantee. Providers impose a minimum cacheable
+	// length and these prompts sit close to it, so whether it takes is a
+	// question for the usage numbers rather than for this comment.
+	CacheSystem bool `json:"-"`
 }
 
 // ToolChoice constrains what the model may do with the tools it was given.
@@ -72,7 +86,10 @@ type Usage struct {
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }
 
-func (u *Usage) add(other Usage) {
+// Add accumulates one response's usage into a running total. Exported because
+// the eval package totals a run, and a token count that cannot leave this
+// package cannot explain a bill.
+func (u *Usage) Add(other Usage) {
 	u.InputTokens += other.InputTokens
 	u.OutputTokens += other.OutputTokens
 	u.CacheCreationInputTokens += other.CacheCreationInputTokens
@@ -108,25 +125,37 @@ type Pricing struct {
 	InputMicrosPerMTok  int64
 	OutputMicrosPerMTok int64
 
-	// Cached tokens bill at different rates. Left at zero they fall back to the
-	// input rate, which overstates the cost of a cache read rather than
-	// understating it - the safe direction for a ceiling to be wrong in.
+	// Cached tokens bill at their own rates. Left at zero they are DERIVED from
+	// the input rate rather than set equal to it.
+	//
+	// Falling back to the input rate was the first version and it was safe for a
+	// ceiling and useless for a measurement: a cache that worked perfectly would
+	// report no saving at all, because every read was billed as a fresh token.
+	// The multipliers below are the standard ones - a write costs a quarter more
+	// than fresh input, a read a tenth of it - and they are worth checking
+	// against current pricing, because every number this system reports about
+	// caching is only as right as they are.
 	CacheWriteMicrosPerMTok int64
 	CacheReadMicrosPerMTok  int64
 }
 
+const (
+	cacheWriteMultiplier = 1.25
+	cacheReadMultiplier  = 0.10
+)
+
 func (p Pricing) cost(u Usage) int64 {
-	rate := func(configured int64) int64 {
-		if configured == 0 {
-			return p.InputMicrosPerMTok
+	rate := func(configured int64, multiplier float64) int64 {
+		if configured > 0 {
+			return configured
 		}
-		return configured
+		return int64(float64(p.InputMicrosPerMTok) * multiplier)
 	}
 	const perMTok = 1_000_000
 	return int64(u.InputTokens)*p.InputMicrosPerMTok/perMTok +
 		int64(u.OutputTokens)*p.OutputMicrosPerMTok/perMTok +
-		int64(u.CacheCreationInputTokens)*rate(p.CacheWriteMicrosPerMTok)/perMTok +
-		int64(u.CacheReadInputTokens)*rate(p.CacheReadMicrosPerMTok)/perMTok
+		int64(u.CacheCreationInputTokens)*rate(p.CacheWriteMicrosPerMTok, cacheWriteMultiplier)/perMTok +
+		int64(u.CacheReadInputTokens)*rate(p.CacheReadMicrosPerMTok, cacheReadMultiplier)/perMTok
 }
 
 // ---------------------------------------------------------------------------
@@ -333,7 +362,7 @@ func (l *Loop) Run(ctx context.Context, system string, prompt string) (Result, e
 
 func (l *Loop) finish(result *Result, record Turn) {
 	result.Turns = append(result.Turns, record)
-	result.Usage.add(record.Usage)
+	result.Usage.Add(record.Usage)
 	result.CostMicros += record.CostMicros
 }
 
