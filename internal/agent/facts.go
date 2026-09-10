@@ -182,6 +182,26 @@ func quarantine(text string, maxRunes int) string {
 	return claimOpen + "\n" + clean + "\n" + claimClose + "\n"
 }
 
+// renderAmounts states the money in the form a letter should use it.
+//
+// The JSON above carries amount_minor, which is the right shape for a database
+// and the wrong one for a sentence: a model told to copy amounts from the record
+// copies 5799, and the letter claims $5,799 or $579.99 about a $57.99 dispute.
+// Both happened. The division belongs at the boundary, exactly as it does for
+// the dashboard and the API, and this is that boundary.
+func (f Facts) renderAmounts() string {
+	d := f.Dispute
+	var b strings.Builder
+	b.WriteString("\nAMOUNTS, AS THEY MUST BE WRITTEN\n")
+	b.WriteString("The record above stores money in minor units. Use these strings in the letter and do no arithmetic of your own.\n")
+	fmt.Fprintf(&b, "- amount in dispute: %s\n", FormatMinor(d.AmountMinor, d.Currency))
+	fmt.Fprintf(&b, "- original charge:   %s\n", FormatMinor(d.OriginalCharge, d.Currency))
+	if d.RefundedMinor > 0 {
+		fmt.Fprintf(&b, "- already refunded:  %s\n", FormatMinor(d.RefundedMinor, d.Currency))
+	}
+	return b.String()
+}
+
 // render turns the record into the block both the generator and the verifier
 // read.
 //
@@ -212,7 +232,8 @@ func (f Facts) Render() (string, error) {
 	var b strings.Builder
 	b.WriteString("RECORD\n")
 	b.Write(encoded)
-	b.WriteString("\n\nCARDHOLDER CLAIM\n")
+	b.WriteString("\n" + f.renderAmounts())
+	b.WriteString("\nCARDHOLDER CLAIM\n")
 
 	if strings.TrimSpace(quoted) == "" {
 		// No early return. It used to stop here, which silently dropped the

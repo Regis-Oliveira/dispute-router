@@ -22,6 +22,20 @@ known without losing anything, it did not earn its place.
 
 ## Money and the ledger
 
+**A prompt is a boundary, and boundaries get formatters.** The rule below —
+divide exactly once, at the edge — was applied to the ledger, the API and the
+dashboard, and then the record handed a model `amount_minor: 5799` with an
+instruction to copy amounts from the record digit for digit. It wrote $579.99
+about a $57.99 dispute. Another draft copied 2790 straight through for a charge
+of $27.90. The prompt was the only boundary in the system without a formatter,
+and a letter to a card network stating the wrong figure loses the case on its
+own. Money now crosses into a prompt formatted, and both prompts say the
+minor-unit fields are not how an amount is written.
+
+The failure was stochastic — the same dispute drafted cleanly on a re-run — so
+the eval found it rather than a test, and one clean run afterwards is evidence
+rather than proof. What holds the fix is `FormatMinor` and its unit tests.
+
 **Money is `BIGINT` minor units plus a sibling currency column.** Never `NUMERIC`,
 never a float, never a bare number meaning "dollars". Amounts are positive;
 direction lives in the ledger.

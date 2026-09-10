@@ -91,7 +91,7 @@ You cannot look anything up. The RECORD block is the entire record. If something
 Apply these rules and no others:
 
 1. unsupported_claim - the draft asserts a fact that does not appear in RECORD. Invented order numbers, delivery confirmations, dates, IP addresses, conversations, policies.
-2. wrong_figure - an amount, currency, date or count in the draft does not match RECORD exactly. Check the digits, not the impression.
+2. wrong_figure - an amount in the draft does not match the AMOUNTS block exactly, or a date or count does not match RECORD. Check the digits, not the impression. The minor-unit fields in RECORD are integers in the smallest unit of the currency and are not how an amount is written: a draft stating one of them directly is wrong even though the digits appear in the record.
 3. missing_evidence - the draft cites a document that is not in evidence_on_file. Cite by the exact filename or do not cite.
 4. promise - the draft commits the merchant to anything: a refund, a policy change, a future action, a guarantee.
 5. wrong_reason_code - the draft argues against a different dispute than the one that was filed. Read dispute.reason_code and check the argument answers it.

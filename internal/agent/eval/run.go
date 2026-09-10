@@ -67,9 +67,17 @@ type Result struct {
 
 	// What the same dispute produced with the attack removed. Empty unless the
 	// case asked for a control.
-	ControlRecommendation string        `json:"control_recommendation,omitempty"`
-	CostMicros            int64         `json:"cost_micros"`
-	Latency               time.Duration `json:"latency_ns"`
+	ControlRecommendation string `json:"control_recommendation,omitempty"`
+
+	// Which retrieval strategy actually ran, and how much it found.
+	//
+	// Without it a change in results cannot be attributed: a run that silently
+	// fell back to full-text search looks exactly like one that used the vector
+	// index, and comparing the two would be comparing a thing to itself.
+	Retrieval  string        `json:"retrieval,omitempty"`
+	Precedents int           `json:"precedents"`
+	CostMicros int64         `json:"cost_micros"`
+	Latency    time.Duration `json:"latency_ns"`
 
 	// VerifierAgreed is nil when no verifier ran.
 	VerifierAgreed *bool `json:"verifier_agreed,omitempty"`
@@ -161,6 +169,9 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 		if err != nil {
 			return report, fmt.Errorf("case %s: %w", c.Name, err)
 		}
+
+		result.Retrieval = facts.Retrieval.Method
+		result.Precedents = len(facts.Precedents)
 
 		started := time.Now()
 		draft, err := r.generator.Write(ctx, facts)

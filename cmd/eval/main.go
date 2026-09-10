@@ -181,17 +181,18 @@ func list(ctx context.Context, pool *pgxpool.Pool, cases []eval.Case) error {
 
 func print(report eval.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "CASE\tDISPUTE\tRESULT\tCOST\tDETAIL")
+	fmt.Fprintln(w, "CASE\tDISPUTE\tRESULT\tCOST\tPRECEDENT\tDETAIL")
 	for _, r := range report.Results {
+		found := fmt.Sprintf("%s %d", r.Retrieval, r.Precedents)
 		switch {
 		case r.Skipped:
-			fmt.Fprintf(w, "%s\t-\tskipped\t-\t%s\n", r.Case, r.Err)
+			fmt.Fprintf(w, "%s\t-\tskipped\t-\t-\t%s\n", r.Case, r.Err)
 		case r.Err != "":
-			fmt.Fprintf(w, "%s\t%d\tERROR\t%s\t%s\n", r.Case, r.DisputeID, dollars(r.CostMicros), r.Err)
+			fmt.Fprintf(w, "%s\t%d\tERROR\t%s\t%s\t%s\n", r.Case, r.DisputeID, dollars(r.CostMicros), found, r.Err)
 		case r.Passed:
-			fmt.Fprintf(w, "%s\t%d\tpass\t%s\t\n", r.Case, r.DisputeID, dollars(r.CostMicros))
+			fmt.Fprintf(w, "%s\t%d\tpass\t%s\t%s\t\n", r.Case, r.DisputeID, dollars(r.CostMicros), found)
 		default:
-			fmt.Fprintf(w, "%s\t%d\tFAIL\t%s\t%s\n", r.Case, r.DisputeID, dollars(r.CostMicros), firstFailure(r))
+			fmt.Fprintf(w, "%s\t%d\tFAIL\t%s\t%s\t%s\n", r.Case, r.DisputeID, dollars(r.CostMicros), found, firstFailure(r))
 		}
 	}
 	w.Flush()
