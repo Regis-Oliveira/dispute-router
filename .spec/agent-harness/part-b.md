@@ -420,11 +420,20 @@ un-quarantined under a heading that said "record". A planted instruction in a
 settled dispute was being served as system-asserted fact. Retrieval is an
 injection vector; a quarantine that covers only the obvious input is not one.
 
-Open: nothing has been embedded with a real model — the round trip is proven
-with a deterministic bag-of-words embedder, which tests the plumbing and says
-nothing about retrieval quality. And the seeded claims are drawn from a pool of
-fifteen texts, so exact matches exist and lexical retrieval looks better here
-than it would against real free text.
+**Measured.** 373 claims embedded with voyage-4 (1024 dimensions, requested
+rather than assumed). `cmd/retrieval` compares the two strategies over 78 open
+disputes: coverage identical, nothing found by one that the other misses, mean
+overlap 0.41 of 3 on ordering. On this data the vector index does not earn the
+dependency it brings — another key, another provider, a backfill to maintain,
+and a width baked into the schema.
+
+The first run said the opposite and was wrong: the lexical baseline ANDed every
+term of the claim, which is a straw man, and against it the vector index looked
+23% better. Fixed to OR with ts_rank, the advantage was zero.
+
+Still open: nobody has labelled which precedent was the *right* one to retrieve,
+so overlap measures disagreement and not quality. And the seeded claims come
+from a pool of fifteen texts, so lexical matching is unusually easy here.
 
 ## Dataset gaps this surfaced
 

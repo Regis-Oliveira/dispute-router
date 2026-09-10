@@ -37,15 +37,21 @@ type BackfillStats struct {
 	Elapsed   time.Duration
 }
 
-// Pending counts the claims still to embed for the current model.
+// PendingEmbeddings counts the claims still to embed for a model.
+//
+// A package function taking a model name rather than a method needing an
+// Embedder, because "how much is outstanding" is a question about the database
+// and should cost nothing to ask. Requiring a key to count rows is the same
+// mistake as requiring one to print a prompt: the free question stops being
+// free for no reason.
 //
 // Keyed on the model, because vectors from two models are not comparable.
 // Changing model does not update rows, it makes every existing row the wrong
 // answer to a query that filters by model - and this count is how that becomes
 // visible rather than silently halving recall.
-func (b *Backfill) Pending(ctx context.Context) (int64, error) {
+func PendingEmbeddings(ctx context.Context, pool *pgxpool.Pool, model string) (int64, error) {
 	var n int64
-	err := b.pool.QueryRow(ctx, `
+	err := pool.QueryRow(ctx, `
 		SELECT count(*)
 		  FROM disputes d
 		 WHERE d.cardholder_claim <> ''
@@ -53,11 +59,15 @@ func (b *Backfill) Pending(ctx context.Context) (int64, error) {
 		   AND NOT EXISTS (
 		         SELECT 1 FROM dispute_embeddings e
 		          WHERE e.dispute_id = d.id AND e.model = $1
-		       )`, b.embedder.Model()).Scan(&n)
+		       )`, model).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("counting pending embeddings: %w", err)
 	}
 	return n, nil
+}
+
+func (b *Backfill) Pending(ctx context.Context) (int64, error) {
+	return PendingEmbeddings(ctx, b.pool, b.embedder.Model())
 }
 
 // Run embeds up to limit claims. Zero means everything outstanding.
@@ -65,13 +75,25 @@ func (b *Backfill) Pending(ctx context.Context) (int64, error) {
 // Only settled disputes are embedded. An open dispute has no outcome, so it can
 // never be precedent, and embedding it would be paying to index rows that the
 // retrieval query filters out.
-func (b *Backfill) Run(ctx context.Context, batchSize, limit int) (BackfillStats, error) {
+func (b *Backfill) Run(ctx context.Context, batchSize, limit int) (stats BackfillStats, err error) {
 	started := time.Now()
+
+	// The outstanding count is recomputed on every exit, including the failing
+	// ones. It used to be set only on the happy path, so a run that stopped on
+	// a rate limit reported "0 still outstanding" - the one number that would
+	// make somebody stop, believing it had finished. A partial run is the
+	// normal case here; its report has to be true.
+	defer func() {
+		stats.Elapsed = time.Since(started)
+		remaining, countErr := b.Pending(context.WithoutCancel(ctx))
+		if countErr == nil {
+			stats.Remaining = remaining
+		}
+	}()
 	if batchSize <= 0 || batchSize > voyageMaxBatch {
 		batchSize = voyageMaxBatch
 	}
 
-	stats := BackfillStats{}
 	for {
 		if limit > 0 && stats.Embedded >= limit {
 			break
@@ -109,12 +131,6 @@ func (b *Backfill) Run(ctx context.Context, batchSize, limit int) (BackfillStats
 		}
 	}
 
-	remaining, err := b.Pending(ctx)
-	if err != nil {
-		return stats, err
-	}
-	stats.Remaining = remaining
-	stats.Elapsed = time.Since(started)
 	return stats, nil
 }
 

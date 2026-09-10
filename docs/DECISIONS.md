@@ -278,6 +278,28 @@ record fixed before either call ran — has never seen, and a correct draft woul
 come back rejected as unsupported. Retrieval that only one of two judges can see
 is worse than no retrieval.
 
+**Measured: the vector index does not earn its dependency here.** Over 78 open
+disputes, top-3 each, coverage is identical — nothing is found by the vector
+index that full-text search misses, and nothing the other way. They disagree
+about *ordering* (mean overlap 0.41 of 3), but nobody has labelled which
+precedent was the right one to retrieve, so that is disagreement rather than
+quality.
+
+The first run of that comparison said the opposite: 23% found only by the vector
+index. It was wrong because the baseline was rigged. `websearch_to_tsquery` on a
+whole sentence ANDs every term, so a candidate had to contain every word of the
+claim being searched — a straw man that found nothing in a quarter of cases. The
+honest version ORs the terms and ranks with `ts_rank`, and against it the
+advantage vanished entirely. **Comparing against a crippled baseline is how "we
+need embeddings" gets justified**, and the comparison caught it in its own first
+run.
+
+Caveat that keeps this from being a general claim: the seeded claims come from a
+pool of fifteen texts, so lexical matching is unusually easy. Against real free
+text — a thousand people writing in their own words — the vector index would
+likely pull ahead, because paraphrase and vocabulary mismatch are exactly where
+it wins and exactly what this dataset lacks.
+
 **The lexical baseline is built, not assumed away.** A vector index that has
 never been compared against `ts_rank` is a claim rather than a result, and for
 short text in one language the contest is genuinely open. Without an embedding

@@ -162,7 +162,7 @@ func Load(dotenvPath string) (Config, error) {
 		AnthropicAPIKey:    str("ANTHROPIC_API_KEY", ""),
 		AnthropicModel:     str("ANTHROPIC_MODEL", "claude-sonnet-5"),
 		VoyageAPIKey:       str("VOYAGE_API_KEY", ""),
-		VoyageModel:        str("VOYAGE_MODEL", "voyage-3"),
+		VoyageModel:        str("VOYAGE_MODEL", "voyage-4"),
 		PrecedentLimit:     integer("PRECEDENT_LIMIT", 3),
 		BedrockModelID:     str("BEDROCK_MODEL_ID", ""),
 		AgentMaxCostMicros: int64(integer("AGENT_MAX_COST_MICROS", 250_000)),

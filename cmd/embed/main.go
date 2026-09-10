@@ -58,25 +58,25 @@ func run(logger *slog.Logger) error {
 	}
 	defer pool.Close()
 
+	// Counted before the embedder is built, so -n needs no key. How much is
+	// outstanding is a question about the database, and the answer costs
+	// nothing - charging a credential for it would be charging for the one
+	// question somebody asks precisely to decide whether to spend.
+	pending, err := agent.PendingEmbeddings(ctx, pool, cfg.VoyageModel)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "%d claims outstanding for %s\n", pending, cfg.VoyageModel)
+
+	if *dryRun || pending == 0 {
+		return nil
+	}
+
 	embedder, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
 	if err != nil {
 		return err
 	}
-
 	backfill := agent.NewBackfill(pool, embedder, logger)
-
-	pending, err := backfill.Pending(ctx)
-	if err != nil {
-		return err
-	}
-	fmt.Fprintf(os.Stderr, "%d claims outstanding for %s\n", pending, embedder.Model())
-
-	if *dryRun {
-		return nil
-	}
-	if pending == 0 {
-		return nil
-	}
 
 	stats, err := backfill.Run(ctx, *batchSize, *limit)
 	// Reported either way: a run that stopped halfway still embedded what it

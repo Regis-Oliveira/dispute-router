@@ -116,7 +116,18 @@ func (r *Retriever) byVector(ctx context.Context, disputeID int64, merchant, cla
 	if err != nil {
 		return nil, fmt.Errorf("embedding the claim: %w", err)
 	}
+	return r.NearestTo(ctx, disputeID, merchant, vectors[0])
+}
 
+// NearestTo searches with a query that is already embedded.
+//
+// Split out from byVector because turning text into a vector and searching with
+// it are different operations with different costs, and joining them forces one
+// API request per search. Anything comparing or batching - the retrieval
+// comparator, a run over a queue of disputes - embeds every query in one request
+// and then searches locally, which on a rate-limited account is the difference
+// between working and not.
+func (r *Retriever) NearestTo(ctx context.Context, disputeID int64, merchant string, query []float32) ([]Precedent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+precedentColumns+`,
 		       1 - (e.embedding <=> $1::vector) AS similarity
@@ -129,7 +140,7 @@ func (r *Retriever) byVector(ctx context.Context, disputeID int64, merchant, cla
 		   AND e.model = $4
 		 ORDER BY e.embedding <=> $1::vector
 		 LIMIT $5`,
-		pgvector(vectors[0]), merchant, disputeID, r.embedder.Model(), r.limit)
+		pgvector(query), merchant, disputeID, r.embedder.Model(), r.limit)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
 	}
@@ -138,20 +149,37 @@ func (r *Retriever) byVector(ctx context.Context, disputeID int64, merchant, cla
 	return scanPrecedents(rows, "vector")
 }
 
-// byText is the baseline: full-text ranking over the same claims.
+// orQuery turns a whole claim into a tsquery joined by OR.
 //
-// websearch_to_tsquery rather than plain_to_tsquery, because it tolerates the
-// punctuation and stray quotes that appear in text a person typed while angry.
+// The first version used websearch_to_tsquery on the entire sentence, which ANDs
+// every term: a candidate had to contain every word of the claim being searched.
+// That is not a baseline, it is a straw man - and a vector index compared
+// against it would have looked good for the wrong reason. This is the mistake
+// the comparison exists to catch, and it caught it in its own first run.
+//
+// OR with ts_rank is the honest version: any shared term makes a candidate
+// eligible and the ranking decides. Built in SQL so the tokenizer producing the
+// query is the same one that produced claim_tsv - splitting on whitespace in Go
+// would disagree with Postgres about what a word is.
+const orQuery = `nullif(array_to_string(tsvector_to_array(to_tsvector('simple', $1)), ' | '), '')::tsquery`
+
+// byText is the baseline: full-text ranking over the same claims.
+// Lexical is the baseline search, exported for the same reason as NearestTo:
+// a comparison needs to run both halves side by side.
+func (r *Retriever) Lexical(ctx context.Context, disputeID int64, merchant, claim string) ([]Precedent, error) {
+	return r.byText(ctx, disputeID, merchant, claim)
+}
+
 func (r *Retriever) byText(ctx context.Context, disputeID int64, merchant, claim string) ([]Precedent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+precedentColumns+`,
-		       ts_rank(d.claim_tsv, websearch_to_tsquery('simple', $1)) AS similarity
+		       ts_rank(d.claim_tsv, `+orQuery+`) AS similarity
 		  FROM disputes  d
 		  JOIN merchants m ON m.id = d.merchant_id
 		 WHERE m.external_id = $2
 		   AND d.state IN ('won', 'lost')
 		   AND d.id <> $3
-		   AND d.claim_tsv @@ websearch_to_tsquery('simple', $1)
+		   AND d.claim_tsv @@ `+orQuery+`
 		 ORDER BY similarity DESC
 		 LIMIT $4`,
 		claim, merchant, disputeID, r.limit)

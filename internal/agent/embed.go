@@ -55,9 +55,12 @@ const (
 )
 
 type Voyage struct {
-	client   *http.Client
-	key      string
-	model    string
+	client *http.Client
+	key    string
+	model  string
+	// pause is how long to wait after a rate limit. A field so a test does not
+	// have to sit through a real one.
+	pause    time.Duration
 	endpoint string
 }
 
@@ -67,13 +70,18 @@ func NewVoyage(key, model string) (*Voyage, error) {
 			"(Anthropic does not serve embeddings; without a key the retriever falls back to full-text search)")
 	}
 	if model == "" {
-		model = "voyage-3"
+		model = "voyage-4"
 	}
 	return &Voyage{
 		client:   &http.Client{Timeout: 2 * time.Minute},
 		key:      key,
 		model:    model,
 		endpoint: voyageEndpoint,
+		// Voyage limits requests per MINUTE - three of them on an account with
+		// no payment method. A backoff measured in seconds cannot clear a
+		// window measured in minutes, so it retries forever and fails anyway.
+		// This waits out the window instead.
+		pause: 25 * time.Second,
 	}, nil
 }
 
@@ -84,6 +92,15 @@ type voyageRequest struct {
 	Input     []string `json:"input"`
 	Model     string   `json:"model"`
 	InputType string   `json:"input_type"`
+
+	// The width is requested, not hoped for.
+	//
+	// The schema declares vector(1024), and asking the API for exactly that
+	// turns a mismatch into an error from the model provider naming the
+	// parameter, instead of a surprise discovered after a backfill has run.
+	// Models that do not support the parameter will say so, which is also an
+	// answer and a cheap one.
+	OutputDimension int `json:"output_dimension,omitempty"`
 }
 
 type voyageResponse struct {
@@ -102,7 +119,7 @@ func (v *Voyage) Embed(ctx context.Context, texts []string, kind EmbedKind) ([][
 	for start := 0; start < len(texts); start += voyageMaxBatch {
 		end := min(start+voyageMaxBatch, len(texts))
 
-		vectors, err := v.batch(ctx, texts[start:end], kind)
+		vectors, err := v.withRetry(ctx, texts[start:end], kind)
 		if err != nil {
 			return nil, err
 		}
@@ -111,8 +128,37 @@ func (v *Voyage) Embed(ctx context.Context, texts []string, kind EmbedKind) ([][
 	return out, nil
 }
 
+// errRateLimited marks the one failure worth waiting out rather than giving up
+// on. Everything else is either permanent or transient in seconds.
+var errRateLimited = errors.New("rate limited")
+
+func (v *Voyage) withRetry(ctx context.Context, texts []string, kind EmbedKind) ([][]float32, error) {
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		vectors, err := v.batch(ctx, texts, kind)
+		if err == nil {
+			return vectors, nil
+		}
+		lastErr = err
+		if !errors.Is(err, errRateLimited) || attempt == maxAttempts {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(v.pause):
+		}
+	}
+	return nil, lastErr
+}
+
 func (v *Voyage) batch(ctx context.Context, texts []string, kind EmbedKind) ([][]float32, error) {
-	body, err := json.Marshal(voyageRequest{Input: texts, Model: v.model, InputType: string(kind)})
+	body, err := json.Marshal(voyageRequest{
+		Input:           texts,
+		Model:           v.model,
+		InputType:       string(kind),
+		OutputDimension: voyageDimensions,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("voyage: encoding request: %w", err)
 	}
@@ -133,6 +179,9 @@ func (v *Voyage) batch(ctx context.Context, texts []string, kind EmbedKind) ([][
 	payload, err := io.ReadAll(io.LimitReader(res.Body, 32<<20))
 	if err != nil {
 		return nil, fmt.Errorf("voyage: reading response: %w", err)
+	}
+	if res.StatusCode == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("voyage: %w: %s", errRateLimited, bytes.TrimSpace(payload))
 	}
 	if res.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("voyage: %s: %s", res.Status, bytes.TrimSpace(payload))
