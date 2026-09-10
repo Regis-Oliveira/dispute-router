@@ -105,10 +105,39 @@ func TestFactsAreReadFromTheStoreAndStayMasked(t *testing.T) {
 	if facts.Dispute.CustomerEmail != "" && !strings.Contains(facts.Dispute.CustomerEmail, "***") {
 		t.Errorf("customer email %q reached the facts block unmasked", facts.Dispute.CustomerEmail)
 	}
-	// The history is the signal the whole draft turns on, and it only arrives
-	// if the merchant handle chained correctly.
+	// The history is the signal the whole draft turns on, and the dispute being
+	// drafted is not part of it: "prior disputes" that include the present one
+	// make a first-time claimant look like a repeat filer.
+	for _, prior := range facts.History {
+		if prior.ID == id {
+			t.Error("the dispute appears in its own customer history")
+		}
+		if got := prior.OpenedAt.Format(time.RFC3339Nano); prior.OpenedAt.Location() != time.UTC || strings.Contains(got, ".") {
+			t.Errorf("history timestamp %s is not whole-second UTC like the rest of the record", got)
+		}
+	}
+}
+
+// The chaining itself is still exercised: a customer with more than one dispute
+// has to show the others.
+func TestPriorDisputesArriveForARepeatFiler(t *testing.T) {
+	store, pool := liveStore(t)
+	var id int64
+	err := pool.QueryRow(context.Background(), `
+		SELECT d.id FROM disputes d
+		  JOIN transactions t ON t.id = d.transaction_id
+		 WHERE (SELECT count(*) FROM disputes d2 JOIN transactions t2 ON t2.id = d2.transaction_id
+		         WHERE t2.customer_ref = t.customer_ref AND t2.merchant_id = t.merchant_id) >= 2
+		 ORDER BY d.id LIMIT 1`).Scan(&id)
+	if err != nil {
+		t.Skipf("no repeat filer seeded: %v", err)
+	}
+	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
 	if len(facts.History) == 0 {
-		t.Error("no customer history; a dispute always appears in its own")
+		t.Error("a repeat filer's other disputes did not arrive; the merchant handle did not chain")
 	}
 }
 

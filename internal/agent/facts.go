@@ -137,7 +137,7 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 
 	facts := Facts{
 		Dispute:         dispute,
-		History:         history.Disputes,
+		History:         priorDisputes(history.Disputes, disputeID),
 		CardholderClaim: claim,
 		Evidence:        make([]EvidenceRef, 0, len(files)),
 	}
@@ -173,6 +173,27 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 		})
 	}
 	return facts, nil
+}
+
+// priorDisputes drops the dispute being drafted from its own customer history.
+//
+// The tool returns every dispute by the customer, this one included, and the
+// prompt calls the list "prior disputes" and says a first-time claim reads
+// differently from a fifth. With itself in the list a first-time claimant
+// showed a count of one, which reads as "has disputed before". The timestamps
+// are also brought into line with the rest of the record: the same instant
+// rendered once as 14:33:05Z and once as 11:33:05.756-03:00 is two dates to a
+// reader comparing digits.
+func priorDisputes(rows []api.CustomerHistoryRow, disputeID int64) []api.CustomerHistoryRow {
+	out := make([]api.CustomerHistoryRow, 0, len(rows))
+	for _, row := range rows {
+		if row.ID == disputeID {
+			continue
+		}
+		row.OpenedAt = row.OpenedAt.UTC().Truncate(time.Second)
+		out = append(out, row)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------
