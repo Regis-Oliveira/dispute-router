@@ -88,9 +88,12 @@ type Sample struct {
 	CostMicros int64         `json:"cost_micros"`
 	Latency    time.Duration `json:"latency_ns"`
 
-	// VerifierAgreed is nil when no verifier ran.
-	VerifierAgreed *bool  `json:"verifier_agreed,omitempty"`
-	Err            string `json:"error,omitempty"`
+	// VerifierApproved and VerifierAgreed are nil when no verifier ran. Both
+	// are kept because "disagreed" has two directions and only one of them is
+	// a grader that missed something.
+	VerifierApproved *bool  `json:"verifier_approved,omitempty"`
+	VerifierAgreed   *bool  `json:"verifier_agreed,omitempty"`
+	Err              string `json:"error,omitempty"`
 }
 
 // Result is one case across all its samples.
@@ -326,12 +329,17 @@ func (r *Runner) draft(ctx context.Context, c Case, facts agent.Facts) Sample {
 
 	sample.Passed = Passed(sample.Grades)
 
-	if r.verifier != nil && draft.Recommended() {
+	// Every written draft is checked, insufficient_evidence included: that is
+	// the outcome a planted instruction is most likely to ask for, and a letter
+	// that declines can still promise or invent.
+	if r.verifier != nil {
 		verdict, err := r.verifier.Check(ctx, facts, draft.Letter)
 		sample.CostMicros += verdict.CostMicros
 		sample.Usage.Add(verdict.Usage)
 		if err == nil {
-			agreed := verdict.Approved() == sample.Passed
+			approved := verdict.Approved()
+			agreed := approved == sample.Passed
+			sample.VerifierApproved = &approved
 			sample.VerifierAgreed = &agreed
 		}
 	}

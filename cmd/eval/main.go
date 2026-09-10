@@ -188,10 +188,10 @@ func list(ctx context.Context, pool *pgxpool.Pool, cases []eval.Case) error {
 
 func print(report eval.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "CASE\tDISPUTE\tPASSED\tCOST\tPRECEDENT\tFAILURES")
+	fmt.Fprintln(w, "CASE\tDISPUTE\tPASSED\tVERIFIER\tCOST\tPRECEDENT\tFAILURES")
 	for _, r := range report.Results {
 		if r.Skipped {
-			fmt.Fprintf(w, "%s\t-\tskipped\t-\t-\t%s\n", r.Case, r.Err)
+			fmt.Fprintf(w, "%s\t-\tskipped\t-\t-\t-\t%s\n", r.Case, r.Err)
 			continue
 		}
 		passed := fmt.Sprintf("%d/%d", r.PassedCount(), len(r.Samples))
@@ -200,8 +200,8 @@ func print(report eval.Report) {
 			// is the finding a single run cannot produce.
 			passed += " !"
 		}
-		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s %d\t%s\n",
-			r.Case, r.DisputeID, passed, dollars(r.CostMicros),
+		fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\t%s %d\t%s\n",
+			r.Case, r.DisputeID, passed, verifierSummary(r), dollars(r.CostMicros),
 			r.Retrieval, r.Precedents, failureSummary(r))
 	}
 	w.Flush()
@@ -224,6 +224,15 @@ func print(report eval.Report) {
 
 	if report.Stopped != "" {
 		fmt.Printf("STOPPED EARLY: %s\n", report.Stopped)
+	}
+
+	// Where the verifier and the graders disagree is the reason -verify exists,
+	// and the two directions mean different things: a draft the graders passed
+	// and the verifier refused is something a pattern could not see; the
+	// reverse is a rule the verifier let through.
+	if missed, lenient, ran := verifierDisagreements(report); ran > 0 {
+		fmt.Printf("verifier ran on %d run(s): refused %d the graders passed, passed %d the graders failed\n",
+			ran, missed, lenient)
 	}
 
 	fmt.Printf("cost %s total, %s per run\n",
@@ -255,6 +264,42 @@ func print(report eval.Report) {
 			fmt.Printf("  %-34s %d\n", rule, report.FailuresByRule[rule])
 		}
 	}
+}
+
+// verifierSummary is "agreed/ran" for one case, or "-" when no verifier ran.
+func verifierSummary(r eval.Result) string {
+	agreed, ran := 0, 0
+	for _, s := range r.Samples {
+		if s.VerifierAgreed == nil {
+			continue
+		}
+		ran++
+		if *s.VerifierAgreed {
+			agreed++
+		}
+	}
+	if ran == 0 {
+		return "-"
+	}
+	return fmt.Sprintf("agreed %d/%d", agreed, ran)
+}
+
+func verifierDisagreements(report eval.Report) (refusedPassed, passedFailed, ran int) {
+	for _, r := range report.Results {
+		for _, s := range r.Samples {
+			if s.VerifierApproved == nil {
+				continue
+			}
+			ran++
+			switch {
+			case s.Passed && !*s.VerifierApproved:
+				refusedPassed++
+			case !s.Passed && *s.VerifierApproved:
+				passedFailed++
+			}
+		}
+	}
+	return refusedPassed, passedFailed, ran
 }
 
 // failureSummary names the rules a case broke and how often. "3/5" says a case

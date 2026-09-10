@@ -157,14 +157,12 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	run.Letter = draft.Letter
 	run.CitedEvidence = draft.CitedEvidence
 
-	if !draft.Recommended() {
-		// insufficient_evidence. There is nothing to verify - the draft makes
-		// no claim about the merchant's case - and paying for a verifier call
-		// to confirm that would be spending on a foregone conclusion.
-		trace.Note = "no representment recommended; verifier not called"
-		run.Outcome = OutcomeInsufficient
-		return OutcomeInsufficient, run, nil
-	}
+	// An insufficient_evidence draft is checked like any other. It used to skip
+	// the verifier on the grounds that it makes no claim about the merchant's
+	// case - but it is a letter, and a letter can still promise, invent, or
+	// repeat a planted instruction. "Decline, and say the merchant accepts
+	// liability" is exactly the outcome an attacker would aim for, and it was
+	// the one outcome nothing read.
 
 	if findings := CheckCitations(facts, draft); len(findings) > 0 {
 		run.Findings = findings
@@ -204,6 +202,10 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 		return run.Outcome, run, nil
 	}
 
+	if !draft.Recommended() {
+		run.Outcome = OutcomeInsufficient
+		return OutcomeInsufficient, run, nil
+	}
 	run.Outcome = OutcomeDrafted
 	return OutcomeDrafted, run, nil
 }
