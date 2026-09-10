@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/regisoliveira/dispute-router/internal/agent"
+	"github.com/regisoliveira/dispute-router/internal/money"
 )
 
 // Grade is one grader's verdict on one draft.
@@ -83,7 +84,7 @@ func gradeAnswered(_ agent.Facts, draft agent.Draft) Grade {
 // figures
 // ---------------------------------------------------------------------------
 
-// money finds amounts written the way a letter writes them: with a symbol or
+// moneyPattern finds amounts written the way a letter writes them: with a symbol or
 // code before the number, with a code after it, or as a bare decimal.
 //
 // The code-after form is the one FormatMinor produces ("57.99 USD",
@@ -97,7 +98,7 @@ func gradeAnswered(_ agent.Facts, draft agent.Draft) Grade {
 // into a letter without a symbol attached.
 const currencyCodes = `USD|EUR|GBP|JPY|CAD|AUD|BRL|CHF|MXN|KRW|ISK`
 
-var money = regexp.MustCompile(
+var moneyPattern = regexp.MustCompile(
 	`(?i)(?:` + currencyCodes + `|[$£€¥])\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)` +
 		`|\b([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s?(?:` + currencyCodes + `)\b` +
 		`|\b([0-9][0-9,]*\.[0-9]{2})\b`)
@@ -107,17 +108,6 @@ var money = regexp.MustCompile(
 // like when it is copied straight into a sentence - 5799 for $57.99, 2790 for
 // $27.90 - and both of those happened.
 var bareInteger = regexp.MustCompile(`\b[0-9]{3,}\b`)
-
-// digits per currency. JPY has none, which is the case that turns ¥5,000 into
-// ¥50 when a formatter assumes two.
-var currencyDigits = map[string]int{"JPY": 0, "KRW": 0, "ISK": 0}
-
-func minorUnits(currency string) int {
-	if digits, ok := currencyDigits[strings.ToUpper(currency)]; ok {
-		return digits
-	}
-	return 2
-}
 
 // gradeFigures checks that every amount in the letter is one the record
 // contains.
@@ -141,14 +131,16 @@ func gradeFigures(facts agent.Facts, draft agent.Draft) Grade {
 		}
 	}
 	for _, prior := range facts.History {
-		if prior.Amount.AmountMinor > 0 {
-			allowed[prior.Amount.AmountMinor] = true
+		if prior.AmountMinor > 0 {
+			allowed[prior.AmountMinor] = true
 		}
 	}
 
-	scale := minorUnits(d.Currency)
+	// The same table the formatter uses, so the grader and the prompt cannot
+	// disagree about how many digits a currency has.
+	scale := money.Digits(d.Currency)
 
-	for _, match := range money.FindAllStringSubmatch(draft.Letter, -1) {
+	for _, match := range moneyPattern.FindAllStringSubmatch(draft.Letter, -1) {
 		raw := firstNonEmpty(match[1:])
 		minor, ok := toMinor(raw, scale)
 		if !ok {

@@ -112,8 +112,8 @@ func TestFactsAreReadFromTheStoreAndStayMasked(t *testing.T) {
 		if prior.ID == id {
 			t.Error("the dispute appears in its own customer history")
 		}
-		if got := prior.OpenedAt.Format(time.RFC3339Nano); prior.OpenedAt.Location() != time.UTC || strings.Contains(got, ".") {
-			t.Errorf("history timestamp %s is not whole-second UTC like the rest of the record", got)
+		if !strings.HasSuffix(prior.OpenedAt, "Z") || strings.Contains(prior.OpenedAt, ".") {
+			t.Errorf("history timestamp %s is not whole-second UTC like the rest of the record", prior.OpenedAt)
 		}
 	}
 }

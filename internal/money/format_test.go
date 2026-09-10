@@ -1,11 +1,8 @@
-package agent
+package money
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
-// The bug this file exists for: a letter that said $579.99 about a $57.99
+// The bug this package exists for: a letter that said $579.99 about a $57.99
 // dispute, because the record handed the model 5799 and the prompt told it to
 // copy the record's digits.
 func TestFormatMinorDividesExactlyOnce(t *testing.T) {
@@ -42,23 +39,7 @@ func TestZeroDecimalCurrenciesAreNotDivided(t *testing.T) {
 	if got := FormatMinor(100, "XYZ"); got != "1.00 XYZ" {
 		t.Errorf("FormatMinor(100, XYZ) = %q", got)
 	}
-}
-
-// The record hands the model minor units; the prompt must not.
-func TestTheAmountsBlockCarriesFormattedMoney(t *testing.T) {
-	facts := Facts{}
-	facts.Dispute.AmountMinor = 5799
-	facts.Dispute.OriginalCharge = 5799
-	facts.Dispute.Currency = "USD"
-
-	rendered, err := facts.Render()
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if !strings.Contains(rendered, "57.99 USD") {
-		t.Error("the formatted amount is missing from the prompt")
-	}
-	if !strings.Contains(rendered, "do no arithmetic of your own") {
-		t.Error("the prompt does not tell the model to stop converting")
+	if Digits("jpy") != 0 || Digits("USD") != 2 {
+		t.Error("Digits does not match the formatter's own table")
 	}
 }

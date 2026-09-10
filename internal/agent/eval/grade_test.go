@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/regisoliveira/dispute-router/internal/agent"
+	"github.com/regisoliveira/dispute-router/internal/money"
 )
 
 // Drafts are built by running the real generator over a scripted response
@@ -101,14 +102,14 @@ func TestZeroDecimalCurrenciesAreNotRescaled(t *testing.T) {
 	facts.Dispute.ReasonCode = "10.4"
 
 	right := draftFrom(t, agent.RecommendRepresent,
-		"The charge of "+agent.FormatMinor(5000, "JPY")+" was authorised. Reason code 10.4.")
+		"The charge of "+money.FormatMinor(5000, "JPY")+" was authorised. Reason code 10.4.")
 	if g := gradeFor(t, GradeDraft(facts, right), RuleFigures); !g.Passed {
 		t.Errorf("¥5,000 against a 5000 minor-unit record was flagged: %s", g.Detail)
 	}
 
 	for _, wrong := range []string{
 		"The charge of JPY 50.00 was authorised. Reason code 10.4.",
-		"The charge of " + agent.FormatMinor(50, "JPY") + " was authorised. Reason code 10.4.",
+		"The charge of " + money.FormatMinor(50, "JPY") + " was authorised. Reason code 10.4.",
 		"The charge of 50 JPY was authorised. Reason code 10.4.",
 	} {
 		if g := gradeFor(t, GradeDraft(facts, draftFrom(t, agent.RecommendRepresent, wrong)), RuleFigures); g.Passed {
@@ -123,13 +124,13 @@ func TestTheGraderSeesAmountsAsTheFormatterWritesThem(t *testing.T) {
 	facts := usdFacts() // 4100 USD
 
 	right := draftFrom(t, agent.RecommendRepresent,
-		"The charge of "+agent.FormatMinor(4100, "USD")+" was authorised. Reason code 10.4.")
+		"The charge of "+money.FormatMinor(4100, "USD")+" was authorised. Reason code 10.4.")
 	if g := gradeFor(t, GradeDraft(facts, right), RuleFigures); !g.Passed {
 		t.Errorf("the formatter's own output was flagged: %s", g.Detail)
 	}
 
 	wrong := draftFrom(t, agent.RecommendRepresent,
-		"The charge of "+agent.FormatMinor(5100, "USD")+" was authorised. Reason code 10.4.")
+		"The charge of "+money.FormatMinor(5100, "USD")+" was authorised. Reason code 10.4.")
 	if g := gradeFor(t, GradeDraft(facts, wrong), RuleFigures); g.Passed {
 		t.Error("a wrong amount in the formatter's format passed")
 	}
@@ -151,7 +152,7 @@ func TestAMinorUnitIntegerIsNotAnAmount(t *testing.T) {
 	// last four, and an integer that matches nothing on the record.
 	fine := draftFrom(t, agent.RecommendRepresent,
 		"Reason code 10.4; card ending 1541; order 90210 shipped. The charge of "+
-			agent.FormatMinor(4100, "USD")+" stands.")
+			money.FormatMinor(4100, "USD")+" stands.")
 	if g := gradeFor(t, GradeDraft(facts, fine), RuleFigures); !g.Passed {
 		t.Errorf("a non-money integer was read as a minor-unit amount: %s", g.Detail)
 	}

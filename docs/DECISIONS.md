@@ -98,8 +98,14 @@ instruction to copy amounts from the record digit for digit. It wrote $579.99
 about a $57.99 dispute. Another draft copied 2790 straight through for a charge
 of $27.90. The prompt was the only boundary in the system without a formatter,
 and a letter to a card network stating the wrong figure loses the case on its
-own. Money now crosses into a prompt formatted, and both prompts say the
-minor-unit fields are not how an amount is written.
+own. Money now crosses into a prompt formatted - and only formatted. The
+first fix added an AMOUNTS block beside the raw record and told both prompts
+which fields not to read; the review found the precedent block still printing
+"8864 USD" for an $88.64 case, and customer history and ledger lines with no
+formatted twin at all. A rule that lives in a warning is a request. The record a
+model reads is now a view with every amount already formatted and no minor-unit
+integer anywhere in it, and the MCP tools return a formatted `amount` beside
+`amount_minor` with a description saying which one to quote.
 
 The failure was stochastic — the same dispute drafted cleanly on a re-run — so
 the eval found it rather than a test, and one clean run afterwards is evidence

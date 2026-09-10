@@ -1,6 +1,6 @@
 # Review fixes
 
-Status: **planned, not started.** Source: the adversarial review of 2026-09-10.
+Status: **Phases 1 and 2 done (2026-09-10); Phase 3 next.** Source: the adversarial review of 2026-09-10.
 Each item names the file, the change, how it is verified, and whether it spends
 money. Phases are ordered by dependency, not by cost: the measurements are fixed
 first because every later change needs a re-run that can be trusted, and dead
@@ -16,7 +16,7 @@ Cost key: `free` = tests and `-cases`/`-prompt` only; `$` = one eval run at
 
 ---
 
-## Phase 1 — make the eval able to fail
+## Phase 1 — make the eval able to fail — DONE (b17b605, de3e924, d97048e, 3dd049f)
 
 **1.1 Figures grader sees the prompt's own format.** `internal/agent/eval/grade.go`
 - Extend `money` to match number-then-code (`57.99 USD`, `5,000 JPY`, `50 JPY`),
@@ -71,7 +71,7 @@ Cost key: `free` = tests and `-cases`/`-prompt` only; `$` = one eval run at
 - Verify: `facts_test` asserts absence of the current id and one time format.
   free.
 
-## Phase 2 — money crosses every boundary formatted
+## Phase 2 — money crosses every boundary formatted — DONE
 
 **2.1 One formatter, shared.** New `internal/money/format.go`
 - Move `FormatMinor`, `group`, `minorDigits` out of `internal/agent/money.go`;
@@ -101,9 +101,9 @@ Cost key: `free` = tests and `-cases`/`-prompt` only; `$` = one eval run at
 - Verify: `tools_test` and `mcpserver/protocol_test` check the field. free.
 
 **2.4 Lexical rank is not a similarity.** `internal/agent/precedent.go`, `facts.go`
-- Use `ts_rank(..., 32)` so the lexical score is normalised into 0..1, and
-  label the field `score` in the prompt with the method beside it, or print no
-  number for lexical. Either way the model stops reading `0.01` as "unrelated".
+- Done as: no number for lexical precedents ("found by text search"); the
+  cosine similarity is printed only on the vector path. Normalising ts_rank was
+  tried first and still printed 0.01, because the raw rank is tiny, not unscaled.
 - Verify: `-prompt` output. free.
 
 ## Phase 3 — close the doors

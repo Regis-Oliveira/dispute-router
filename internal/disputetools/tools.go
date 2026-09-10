@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/regisoliveira/dispute-router/internal/api"
+	"github.com/regisoliveira/dispute-router/internal/money"
 )
 
 // MaxRows caps every list.
@@ -99,7 +100,16 @@ const DescListDisputes = "Find disputes. Use this to answer questions about what
 	"by deadline, soonest first, and capped at 50 - narrow the filters rather than " +
 	"asking for more. Check the overdue flag before saying a dispute still has time: " +
 	"a due_within window includes disputes whose deadline has already passed, and those " +
-	"carry a negative hours_to_deadline."
+	"carry a negative hours_to_deadline. " + descAmounts
+
+// descAmounts is appended to every tool that returns money. A model told to
+// copy figures from a record copies amount_minor, and a letter or an answer
+// that says 5799 about a $57.99 dispute is off by a factor of a hundred. The
+// formatted field is the one to quote; the integer exists for arithmetic.
+const descAmounts = "Amounts appear twice: `amount` is the figure to quote, already formatted with " +
+	"its currency (for example 57.99 USD or 5,000 JPY); `amount_minor` is the same value " +
+	"as an integer in the currency's smallest unit, for arithmetic only. Never state " +
+	"amount_minor as an amount."
 
 type ListDisputesInput struct {
 	State     string `json:"state,omitempty" jsonschema:"Comma-separated states: received, resolving, represented, refunded, won, lost, expired"`
@@ -122,6 +132,7 @@ type DisputeSummary struct {
 	Kind            string `json:"kind"`
 	State           string `json:"state"`
 	ReasonCode      string `json:"reason_code"`
+	Amount          string `json:"amount"`
 	AmountMinor     int64  `json:"amount_minor"`
 	Currency        string `json:"currency"`
 	HoursToDeadline int    `json:"hours_to_deadline"`
@@ -173,6 +184,7 @@ func (s *Set) ListDisputes(ctx context.Context, in ListDisputesInput) (ListDispu
 			Kind:            row.Kind,
 			State:           row.State,
 			ReasonCode:      row.ReasonCode,
+			Amount:          money.FormatMinor(row.Amount.AmountMinor, row.Amount.Currency),
 			AmountMinor:     row.Amount.AmountMinor,
 			Currency:        row.Amount.Currency,
 			HoursToDeadline: int(row.SecondsToDeadline / 3600),
@@ -198,7 +210,7 @@ func (s *Set) ListDisputes(ctx context.Context, in ListDisputesInput) (ListDispu
 const DescGetDispute = "Everything known about one dispute: the amounts, the original charge, " +
 	"the full state history with who caused each transition, and the ledger entries it " +
 	"produced. Use this before reasoning about a specific dispute - the list view " +
-	"deliberately omits most of it."
+	"deliberately omits most of it. " + descAmounts
 
 type GetDisputeInput struct {
 	ID int64 `json:"id" jsonschema:"The dispute's numeric id, from list_disputes"`
@@ -208,6 +220,7 @@ type LedgerLine struct {
 	Entry       string `json:"entry"`
 	Account     string `json:"account"`
 	Direction   string `json:"direction"`
+	Amount      string `json:"amount"`
 	AmountMinor int64  `json:"amount_minor"`
 }
 
@@ -219,28 +232,34 @@ type HistoryLine struct {
 }
 
 type GetDisputeOutput struct {
-	ID              int64         `json:"id"`
-	Reference       string        `json:"reference"`
-	Merchant        string        `json:"merchant"`
-	MerchantName    string        `json:"merchant_name"`
-	Kind            string        `json:"kind"`
-	State           string        `json:"state"`
-	ReasonCode      string        `json:"reason_code"`
-	CardNetwork     string        `json:"card_network"`
-	AmountMinor     int64         `json:"amount_minor"`
-	Currency        string        `json:"currency"`
-	OriginalCharge  int64         `json:"original_charge_minor"`
-	RefundedMinor   int64         `json:"refunded_minor"`
-	HoursToDeadline int           `json:"hours_to_deadline"`
-	Overdue         bool          `json:"overdue"`
-	OpenedAt        string        `json:"opened_at"`
-	ChargedAt       string        `json:"charged_at"`
-	Descriptor      string        `json:"statement_descriptor"`
-	CardLast4       string        `json:"card_last4"`
-	CustomerRef     string        `json:"customer_ref"`
-	CustomerEmail   string        `json:"customer_email_masked"`
-	History         []HistoryLine `json:"history"`
-	Ledger          []LedgerLine  `json:"ledger"`
+	ID           int64  `json:"id"`
+	Reference    string `json:"reference"`
+	Merchant     string `json:"merchant"`
+	MerchantName string `json:"merchant_name"`
+	Kind         string `json:"kind"`
+	State        string `json:"state"`
+	ReasonCode   string `json:"reason_code"`
+	CardNetwork  string `json:"card_network"`
+	// The formatted strings are the figures to quote; the integers beside
+	// them are for arithmetic. Both are here because a tool answer is read by
+	// a model, and a model handed only the integer writes it as the amount.
+	Amount             string        `json:"amount"`
+	AmountMinor        int64         `json:"amount_minor"`
+	Currency           string        `json:"currency"`
+	OriginalChargeText string        `json:"original_charge"`
+	OriginalCharge     int64         `json:"original_charge_minor"`
+	RefundedText       string        `json:"refunded,omitempty"`
+	RefundedMinor      int64         `json:"refunded_minor"`
+	HoursToDeadline    int           `json:"hours_to_deadline"`
+	Overdue            bool          `json:"overdue"`
+	OpenedAt           string        `json:"opened_at"`
+	ChargedAt          string        `json:"charged_at"`
+	Descriptor         string        `json:"statement_descriptor"`
+	CardLast4          string        `json:"card_last4"`
+	CustomerRef        string        `json:"customer_ref"`
+	CustomerEmail      string        `json:"customer_email_masked"`
+	History            []HistoryLine `json:"history"`
+	Ledger             []LedgerLine  `json:"ledger"`
 }
 
 // GetDispute is the tool. It never returns the cardholder's claim.
@@ -266,16 +285,24 @@ func (s *Set) DisputeWithClaim(ctx context.Context, in GetDisputeInput) (GetDisp
 	out := GetDisputeOutput{
 		ID: d.ID, Reference: d.ExternalID, Merchant: d.MerchantID, MerchantName: d.MerchantName,
 		Kind: d.Kind, State: d.State, ReasonCode: d.ReasonCode, CardNetwork: d.CardNetwork,
-		AmountMinor: d.Amount.AmountMinor, Currency: d.Amount.Currency,
-		OriginalCharge: d.OriginalAmount.AmountMinor, RefundedMinor: d.RefundedMinor,
-		HoursToDeadline: int(d.SecondsToDeadline / 3600),
-		Overdue:         d.SecondsToDeadline < 0 && d.ResolvedAt == nil,
-		OpenedAt:        d.OpenedAt.UTC().Format(time.RFC3339),
-		ChargedAt:       d.CapturedAt.UTC().Format(time.RFC3339),
-		Descriptor:      d.Descriptor,
-		CardLast4:       d.CardLast4,
-		CustomerRef:     d.CustomerRef,
-		CustomerEmail:   maskEmail(d.CustomerEmail),
+		Amount:             money.FormatMinor(d.Amount.AmountMinor, d.Amount.Currency),
+		AmountMinor:        d.Amount.AmountMinor,
+		Currency:           d.Amount.Currency,
+		OriginalChargeText: money.FormatMinor(d.OriginalAmount.AmountMinor, d.OriginalAmount.Currency),
+		OriginalCharge:     d.OriginalAmount.AmountMinor,
+		RefundedMinor:      d.RefundedMinor,
+		HoursToDeadline:    int(d.SecondsToDeadline / 3600),
+		Overdue:            d.SecondsToDeadline < 0 && d.ResolvedAt == nil,
+		OpenedAt:           d.OpenedAt.UTC().Format(time.RFC3339),
+		ChargedAt:          d.CapturedAt.UTC().Format(time.RFC3339),
+		Descriptor:         d.Descriptor,
+		CardLast4:          d.CardLast4,
+		CustomerRef:        d.CustomerRef,
+		CustomerEmail:      maskEmail(d.CustomerEmail),
+	}
+
+	if d.RefundedMinor > 0 {
+		out.RefundedText = money.FormatMinor(d.RefundedMinor, d.Amount.Currency)
 	}
 
 	for _, e := range d.Events {
@@ -288,6 +315,7 @@ func (s *Set) DisputeWithClaim(ctx context.Context, in GetDisputeInput) (GetDisp
 	for _, p := range d.LedgerPostings {
 		out.Ledger = append(out.Ledger, LedgerLine{
 			Entry: p.Kind, Account: p.Account, Direction: p.Direction,
+			Amount:      money.FormatMinor(p.Amount.AmountMinor, p.Amount.Currency),
 			AmountMinor: p.Amount.AmountMinor,
 		})
 	}
@@ -298,10 +326,26 @@ func (s *Set) DisputeWithClaim(ctx context.Context, in GetDisputeInput) (GetDisp
 // get_customer_history
 // ---------------------------------------------------------------------------
 
-const DescCustomerHistory = "Prior disputes filed by the same customer at the same merchant. The " +
-	"single most useful signal when judging whether a dispute is worth fighting: a " +
-	"first-time claim reads very differently from a fifth. Pass the merchant field from " +
-	"list_disputes or get_dispute, not the merchant_name."
+const DescCustomerHistory = "Every dispute filed by the same customer at the same merchant, the one " +
+	"being asked about included. The single most useful signal when judging whether a " +
+	"dispute is worth fighting: a first-time claim reads very differently from a fifth. " +
+	"Pass the merchant field from list_disputes or get_dispute, not the merchant_name. " +
+	descAmounts
+
+// CustomerHistoryEntry is one dispute by the same customer, in the shape a
+// model reads: a formatted amount beside the integer, and a timestamp in the
+// same form every other tool uses.
+type CustomerHistoryEntry struct {
+	ID          int64  `json:"id"`
+	Reference   string `json:"reference"`
+	Kind        string `json:"kind"`
+	State       string `json:"state"`
+	ReasonCode  string `json:"reason_code"`
+	Amount      string `json:"amount"`
+	AmountMinor int64  `json:"amount_minor"`
+	Currency    string `json:"currency"`
+	OpenedAt    string `json:"opened_at"`
+}
 
 type CustomerHistoryInput struct {
 	Merchant    string `json:"merchant" jsonschema:"Merchant external id, for example mrc_northwind"`
@@ -310,8 +354,8 @@ type CustomerHistoryInput struct {
 }
 
 type CustomerHistoryOutput struct {
-	Disputes []api.CustomerHistoryRow `json:"disputes"`
-	Count    int                      `json:"count"`
+	Disputes []CustomerHistoryEntry `json:"disputes"`
+	Count    int                    `json:"count"`
 }
 
 func (s *Set) CustomerHistory(ctx context.Context, in CustomerHistoryInput) (CustomerHistoryOutput, error) {
@@ -319,7 +363,18 @@ func (s *Set) CustomerHistory(ctx context.Context, in CustomerHistoryInput) (Cus
 	if err != nil {
 		return CustomerHistoryOutput{}, err
 	}
-	return CustomerHistoryOutput{Disputes: rows, Count: len(rows)}, nil
+	out := CustomerHistoryOutput{Disputes: make([]CustomerHistoryEntry, 0, len(rows)), Count: len(rows)}
+	for _, row := range rows {
+		out.Disputes = append(out.Disputes, CustomerHistoryEntry{
+			ID: row.ID, Reference: row.ExternalID, Kind: row.Kind, State: row.State,
+			ReasonCode:  row.ReasonCode,
+			Amount:      money.FormatMinor(row.Amount.AmountMinor, row.Amount.Currency),
+			AmountMinor: row.Amount.AmountMinor,
+			Currency:    row.Amount.Currency,
+			OpenedAt:    row.OpenedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------
