@@ -1,6 +1,10 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector's own image rather than plain postgres, because the precedent
+    # retrieval in internal/agent needs the vector type and CREATE EXTENSION
+    # cannot conjure one that is not compiled in. Same PostgreSQL 16, so an
+    # existing data volume mounts unchanged.
+    image: pgvector/pgvector:pg16
     container_name: dr-postgres
     environment:
       POSTGRES_USER: dispute
