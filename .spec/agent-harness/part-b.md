@@ -400,6 +400,32 @@ verifier on costs roughly $0.15-$0.25.
 
 So: the harness is finished. The assistant is unproven.
 
+## Built after the plan: precedent retrieval
+
+`internal/agent/precedent.go`, `embed.go`, `backfill.go`, migration 000004.
+
+The best RAG this domain offers, and it is not documentation search: retrieve
+the settled disputes at this merchant whose cardholder claim resembles this one,
+and put their outcomes in front of the drafter. The outcome is the payload —
+"a dispute like this was won here" is a different sentence from "a dispute like
+this exists".
+
+Two strategies, both real: pgvector HNSW over embedded claims, and Postgres
+full-text search. The second is not a fallback, it is the baseline; without it
+there is no way to know whether embeddings earned their cost.
+
+**It introduced a security bug and the fix is the lesson.** Retrieved precedent
+carries other cardholders' claims, and the first version rendered them
+un-quarantined under a heading that said "record". A planted instruction in a
+settled dispute was being served as system-asserted fact. Retrieval is an
+injection vector; a quarantine that covers only the obvious input is not one.
+
+Open: nothing has been embedded with a real model — the round trip is proven
+with a deterministic bag-of-words embedder, which tests the plumbing and says
+nothing about retrieval quality. And the seeded claims are drawn from a pool of
+fifteen texts, so exact matches exist and lexical retrieval looks better here
+than it would against real free text.
+
 ## Dataset gaps this surfaced
 
 - **No double-dip case.** A chargeback on a charge already refunded does not

@@ -82,6 +82,17 @@ type Config struct {
 	AnthropicAPIKey string
 	AnthropicModel  string
 
+	// Embeddings for precedent retrieval. Anthropic does not serve embeddings,
+	// so this is a second provider whatever happens. Without a key the
+	// retriever falls back to full-text search, which is the baseline the
+	// vector path has to beat anyway.
+	VoyageAPIKey string
+	VoyageModel  string
+	// How many precedents reach the prompt. Small: each one is another case the
+	// drafter could borrow a figure from, and the risk grows faster than the
+	// signal.
+	PrecedentLimit int
+
 	BedrockModelID string
 	// AgentMaxCostMicros bounds one dispute across the generator and the
 	// verifier, in micro-dollars. An automation that costs more than the
@@ -150,6 +161,9 @@ func Load(dotenvPath string) (Config, error) {
 		ModelProvider:      str("MODEL_PROVIDER", "anthropic"),
 		AnthropicAPIKey:    str("ANTHROPIC_API_KEY", ""),
 		AnthropicModel:     str("ANTHROPIC_MODEL", "claude-sonnet-5"),
+		VoyageAPIKey:       str("VOYAGE_API_KEY", ""),
+		VoyageModel:        str("VOYAGE_MODEL", "voyage-3"),
+		PrecedentLimit:     integer("PRECEDENT_LIMIT", 3),
 		BedrockModelID:     str("BEDROCK_MODEL_ID", ""),
 		AgentMaxCostMicros: int64(integer("AGENT_MAX_COST_MICROS", 250_000)),
 		AgentMaxAttempts:   integer("AGENT_MAX_ATTEMPTS", 2),

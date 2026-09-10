@@ -261,6 +261,33 @@ empty, which is the worst shape a wrong answer can take. Both are returned now,
 `merchant` being the handle and `merchant_name` the label, and a test drives the
 chain rather than checking either tool alone.
 
+**Retrieval is an injection vector.** Precedent retrieval brings back the
+cardholder claims of *other* disputes, and the first version rendered them bare
+under a heading that said "record" — serving a planted instruction from a
+settled dispute to the model as though the system had asserted it. The
+quarantine had been built for the input somebody was thinking about, and
+retrieval reached around it. One `quarantine()` function now wraps every piece
+of cardholder text wherever it appears, and the precedent claims are truncated
+as well as wrapped, because every extra sentence is both prompt paid for and
+injection surface offered.
+
+**Precedent reaches both calls or neither.** The retrieved neighbours are on
+`Facts`, which the generator and the verifier both read. If only the generator
+could see them, it could reason from something the verifier — working from a
+record fixed before either call ran — has never seen, and a correct draft would
+come back rejected as unsupported. Retrieval that only one of two judges can see
+is worse than no retrieval.
+
+**The lexical baseline is built, not assumed away.** A vector index that has
+never been compared against `ts_rank` is a claim rather than a result, and for
+short text in one language the contest is genuinely open. Without an embedding
+key the retriever uses full-text search and says so in the trace.
+
+**The embedding width is in the schema.** `vector(1024)` means changing
+embedding model is a migration, not a config change — and the model travels with
+every row, because two models' vectors are not comparable and mixing them
+produces neighbours that are not neighbours.
+
 **Truncation says so, and overdue is an explicit boolean.** Designing tools for a
 model is not designing an API for code: code never forgets to check the sign of a
 number, and silent truncation is how an assistant states a wrong total with

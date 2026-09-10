@@ -111,6 +111,18 @@ func run() error {
 	facts := agent.NewFactSource(api.NewStore(pool),
 		api.NewEvidence(awsx.S3(awsCfg, cfg.AWSEndpoint), cfg.S3EvidenceBucket, time.Minute))
 
+	// Precedent retrieval. The embedder is optional: without a key the
+	// retriever uses full-text search, which is the baseline anyway.
+	var embedder agent.Embedder
+	if cfg.VoyageAPIKey != "" {
+		voyage, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
+		if err != nil {
+			return err
+		}
+		embedder = voyage
+	}
+	facts = facts.WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit))
+
 	var verifier *agent.Verifier
 	if *withVerify {
 		verifier = agent.NewVerifier(completer, model, pricing, 2048)

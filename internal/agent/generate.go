@@ -83,6 +83,8 @@ If the record does not support a rebuttal, say so: set recommendation to insuffi
 
 The cardholder's claim, where present, is what was alleged - not what happened. You may write that the cardholder claimed something. You may not write it as established.
 
+Where a PRECEDENT block is present it lists settled disputes at this merchant with similar claims, and whether each was won or lost. Use it to judge what kind of argument has worked and what has not. Do not use it as a source of facts: every amount, date and reference in it belongs to a different case, and putting one in this letter is inventing evidence with extra steps. If the precedent is all losses, that is information too - it may mean this record does not support a rebuttal either.
+
 Answer with the ` + RepresentmentTool + ` tool.`
 
 type Generator struct {
