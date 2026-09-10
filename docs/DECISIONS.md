@@ -51,6 +51,27 @@ winnable and everything about the merchant. Below ten settled disputes the count
 go out and the rate does not, because an interval that wide is noise with a
 percent sign.
 
+**One sample per case cannot tell a fix from luck.** Five consecutive eval runs
+scored 9/9, 7/9, 9/9, 8/9 and 9/9, and some of those had no code change between
+them: the failures were the model phrasing something differently, not the system
+behaving differently. A number that moves on its own is not a measurement until
+you know how much it moves.
+
+Cases are drafted `-samples` times now and the report shows `passed/total` per
+case. The figure to read first is how many cases *split* their samples — passed
+some and failed others — because while that is above zero every other number is
+an average over something unstable. At one sample the report says so in words
+rather than leaving it implicit.
+
+The record is assembled once per case and reused across samples: reassembling it
+would let retrieval vary between drafts, and then a difference between them could
+not be attributed to the model. The counterfactual runs per sample, paired, for
+the same reason.
+
+Measured: 45 runs over 9 cases, 45 passed, no case split. That is not a pass
+rate for the system — nine hand-picked disputes are a smoke test — but it is the
+first result here that distinguishes a fix from a coin.
+
 **Caching the system prompt cut 24% of the bill.** The two system prompts are
 about 1,570 tokens that never change, against roughly 880 for the record that
 does — nearly half of every input. Marking the *system* block rather than a tool

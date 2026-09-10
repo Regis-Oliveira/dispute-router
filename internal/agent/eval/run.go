@@ -25,6 +25,11 @@ type Runner struct {
 	facts     *agent.FactSource
 	generator *agent.Generator
 
+	// Samples is how many times each case is drafted. One by default, because
+	// the cost is linear in it and nobody should multiply their bill by
+	// accident.
+	Samples int
+
 	// MaxTotalCostMicros stops the whole run, not one case.
 	//
 	// The Assistant already bounds a single dispute, but an eval is a loop over
@@ -45,23 +50,33 @@ func NewRunner(pool *pgxpool.Pool, facts *agent.FactSource, generator *agent.Gen
 	return &Runner{pool: pool, facts: facts, generator: generator, verifier: verifier}
 }
 
+// WithSamples sets how many drafts each case gets.
+func (r *Runner) WithSamples(n int) *Runner {
+	r.Samples = n
+	return r
+}
+
 // WithCostCeiling bounds what the whole run may spend.
 func (r *Runner) WithCostCeiling(micros int64) *Runner {
 	r.MaxTotalCostMicros = micros
 	return r
 }
 
-type Result struct {
-	Case      string  `json:"case"`
-	Why       string  `json:"why"`
-	DisputeID int64   `json:"dispute_id"`
-	Passed    bool    `json:"passed"`
-	Grades    []Grade `json:"grades"`
+// Sample is one draft of one case.
+//
+// Cases are run more than once because a single run cannot tell a fix from
+// luck. Five consecutive runs of this eval scored 9/9, 7/9, 9/9, 8/9 and 9/9
+// with no code change between some of them: the failures were the model
+// phrasing something differently, not the system behaving differently. A
+// number that moves on its own is not a measurement until you know how much it
+// moves.
+type Sample struct {
+	Passed bool    `json:"passed"`
+	Grades []Grade `json:"grades"`
 
 	// The draft itself. A grader's verdict is not reviewable without the text
 	// it was passed - "wrong_figure" says a number is wrong and not which one
-	// the letter actually used, and the first question anybody asks of a
-	// failing case is to see it.
+	// the letter actually used.
 	Recommendation string `json:"recommendation,omitempty"`
 	Letter         string `json:"letter,omitempty"`
 
@@ -69,24 +84,29 @@ type Result struct {
 	// case asked for a control.
 	ControlRecommendation string `json:"control_recommendation,omitempty"`
 
-	// Which retrieval strategy actually ran, and how much it found.
-	//
-	// Without it a change in results cannot be attributed: a run that silently
-	// fell back to full-text search looks exactly like one that used the vector
-	// index, and comparing the two would be comparing a thing to itself.
-	Retrieval  string `json:"retrieval,omitempty"`
-	Precedents int    `json:"precedents"`
-
-	// Token usage, so a cost can be explained rather than only reported. Cache
-	// hits in particular have to be visible: a prompt too short to cache and a
-	// cache working perfectly both produce a number, and only the usage says
-	// which happened.
 	Usage      agent.Usage   `json:"usage"`
 	CostMicros int64         `json:"cost_micros"`
 	Latency    time.Duration `json:"latency_ns"`
 
 	// VerifierAgreed is nil when no verifier ran.
-	VerifierAgreed *bool `json:"verifier_agreed,omitempty"`
+	VerifierAgreed *bool  `json:"verifier_agreed,omitempty"`
+	Err            string `json:"error,omitempty"`
+}
+
+// Result is one case across all its samples.
+type Result struct {
+	Case      string   `json:"case"`
+	Why       string   `json:"why"`
+	DisputeID int64    `json:"dispute_id"`
+	Samples   []Sample `json:"samples"`
+
+	// Which retrieval strategy actually ran, and how much it found. The same
+	// for every sample of a case, since the record is assembled once.
+	Retrieval  string `json:"retrieval,omitempty"`
+	Precedents int    `json:"precedents"`
+
+	Usage      agent.Usage `json:"usage"`
+	CostMicros int64       `json:"cost_micros"`
 
 	// Skipped means the dataset has no dispute matching this case. Reported
 	// rather than passed over: a case that silently disappears is a rule
@@ -95,11 +115,56 @@ type Result struct {
 	Err     string `json:"error,omitempty"`
 }
 
+func (r Result) PassedCount() int {
+	n := 0
+	for _, s := range r.Samples {
+		if s.Passed {
+			n++
+		}
+	}
+	return n
+}
+
+// Unstable is the number this whole change exists to produce.
+//
+// A case that passed three times out of five and one that passed five out of
+// five both read as "pass" when a case is run once, and the difference between
+// them is the difference between a result and a coin. Anything unstable makes
+// every single-sample number about it meaningless.
+func (r Result) Unstable() bool {
+	n := r.PassedCount()
+	return len(r.Samples) > 1 && n > 0 && n < len(r.Samples)
+}
+
+// FailuresByRule counts, across samples, how often each rule was broken.
+func (r Result) FailuresByRule() map[string]int {
+	out := map[string]int{}
+	for _, sample := range r.Samples {
+		for _, g := range sample.Grades {
+			if !g.Passed {
+				out[g.Rule]++
+			}
+		}
+		if sample.Err != "" {
+			out[RuleAnswered]++
+		}
+	}
+	return out
+}
+
 type Report struct {
-	Results         []Result       `json:"results"`
-	Ran             int            `json:"ran"`
-	PassedCount     int            `json:"passed"`
-	SkippedCount    int            `json:"skipped"`
+	Results      []Result `json:"results"`
+	Samples      int      `json:"samples_per_case"`
+	Cases        int      `json:"cases_run"`
+	Runs         int      `json:"runs"`
+	PassedRuns   int      `json:"passed_runs"`
+	SkippedCount int      `json:"skipped"`
+
+	// UnstableCases passed some samples and failed others. It is the number to
+	// read first: while it is above zero, every other figure here is an
+	// average over a thing that moves.
+	UnstableCases int `json:"unstable_cases"`
+
 	FailuresByRule  map[string]int `json:"failures_by_rule"`
 	TotalCostMicros int64          `json:"total_cost_micros"`
 
@@ -111,18 +176,24 @@ type Report struct {
 	Stopped string `json:"stopped,omitempty"`
 }
 
+// PassRate is over RUNS, not cases. With one sample per case the two are the
+// same number; with more they are not, and the runs figure is the one that
+// carries the sample size.
 func (r Report) PassRate() float64 {
-	if r.Ran == 0 {
+	if r.Runs == 0 {
 		return 0
 	}
-	return float64(r.PassedCount) / float64(r.Ran)
+	return float64(r.PassedRuns) / float64(r.Runs)
 }
 
+// MeanCostMicros is per run, which is what a draft actually costs. Per case it
+// would be per case times the sample count, and nobody drafts five times in
+// production.
 func (r Report) MeanCostMicros() int64 {
-	if r.Ran == 0 {
+	if r.Runs == 0 {
 		return 0
 	}
-	return r.TotalCostMicros / int64(r.Ran)
+	return r.TotalCostMicros / int64(r.Runs)
 }
 
 // plantedMarker is where the seeded attack begins. Specific to the fixture on
@@ -143,17 +214,15 @@ func (r *Runner) withoutTheAttack(ctx context.Context, facts agent.Facts) (agent
 	return r.generator.Write(ctx, clean)
 }
 
+// Run drafts for each case, Samples times, and grades every draft.
 func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
-	report := Report{FailuresByRule: map[string]int{}}
+	samples := max(1, r.Samples)
+	report := Report{FailuresByRule: map[string]int{}, Samples: samples}
 
 	for _, c := range cases {
-		// Checked before each case rather than after, so the ceiling is never
-		// knowingly exceeded - the same rule the loop applies per turn, and it
-		// can still be overshot by one case for the same reason: the price of a
-		// call is not known until it returns.
 		if r.MaxTotalCostMicros > 0 && report.TotalCostMicros >= r.MaxTotalCostMicros {
 			report.Stopped = fmt.Sprintf("cost ceiling reached after %d of %d cases",
-				report.Ran+report.SkippedCount, len(cases))
+				report.Cases+report.SkippedCount, len(cases))
 			break
 		}
 
@@ -173,74 +242,98 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 		}
 		result.DisputeID = disputeID
 
+		// The record is assembled once and reused across samples. Reassembling
+		// it would embed the same query five times for nothing, and - worse -
+		// let retrieval vary between samples, so a difference between drafts
+		// could not be attributed to the model.
 		facts, err := r.facts.For(ctx, disputeID)
 		if err != nil {
 			return report, fmt.Errorf("case %s: %w", c.Name, err)
 		}
-
 		result.Retrieval = facts.Retrieval.Method
 		result.Precedents = len(facts.Precedents)
 
-		started := time.Now()
-		draft, err := r.generator.Write(ctx, facts)
-		result.Latency = time.Since(started)
-		result.CostMicros = draft.CostMicros
-		report.TotalCostMicros += draft.CostMicros
-
-		if err != nil {
-			// A failed generation is a failed case, not a failed run. The
-			// number that matters is how often the system produces something
-			// usable, and a crash is one of the ways it does not.
-			result.Err = err.Error()
-			report.Ran++
-			report.Results = append(report.Results, result)
-			report.FailuresByRule[RuleAnswered]++
-			continue
-		}
-
-		result.Usage.Add(draft.Usage)
-		result.Recommendation = draft.Recommendation
-		result.Letter = draft.Letter
-		result.Grades = GradeDraft(facts, draft)
-
-		if c.Counterfactual {
-			control, err := r.withoutTheAttack(ctx, facts)
-			if err != nil {
-				return report, fmt.Errorf("case %s control run: %w", c.Name, err)
+		for i := 0; i < samples; i++ {
+			if r.MaxTotalCostMicros > 0 && report.TotalCostMicros >= r.MaxTotalCostMicros {
+				report.Stopped = fmt.Sprintf("cost ceiling reached during %s, sample %d of %d",
+					c.Name, i+1, samples)
+				break
 			}
-			result.CostMicros += control.CostMicros
-			report.TotalCostMicros += control.CostMicros
-			result.Usage.Add(control.Usage)
-			result.ControlRecommendation = control.Recommendation
-			result.Grades = append(result.Grades, Instructed(
-				Draftlike{draft.Recommendation, draft.Letter},
-				Draftlike{control.Recommendation, control.Letter}))
-		}
-		result.Passed = Passed(result.Grades)
-		for _, g := range result.Grades {
-			if !g.Passed {
-				report.FailuresByRule[g.Rule]++
-			}
+
+			sample := r.draft(ctx, c, facts)
+			result.Samples = append(result.Samples, sample)
+			result.CostMicros += sample.CostMicros
+			result.Usage.Add(sample.Usage)
+			report.TotalCostMicros += sample.CostMicros
+			report.Usage.Add(sample.Usage)
 		}
 
-		if r.verifier != nil && draft.Recommended() {
-			verdict, err := r.verifier.Check(ctx, facts, draft.Letter)
-			result.CostMicros += verdict.CostMicros
-			report.TotalCostMicros += verdict.CostMicros
-			result.Usage.Add(verdict.Usage)
-			if err == nil {
-				agreed := verdict.Approved() == result.Passed
-				result.VerifierAgreed = &agreed
-			}
+		for rule, n := range result.FailuresByRule() {
+			report.FailuresByRule[rule] += n
 		}
-
-		report.Usage.Add(result.Usage)
-		report.Ran++
-		if result.Passed {
-			report.PassedCount++
+		report.Cases++
+		report.Runs += len(result.Samples)
+		report.PassedRuns += result.PassedCount()
+		if result.Unstable() {
+			report.UnstableCases++
 		}
 		report.Results = append(report.Results, result)
+
+		if report.Stopped != "" {
+			break
+		}
 	}
 
 	return report, nil
+}
+
+// draft produces and grades one sample.
+//
+// A failed generation is a failed sample, not a failed run: the number that
+// matters is how often the system produces something usable, and a crash is one
+// of the ways it does not.
+func (r *Runner) draft(ctx context.Context, c Case, facts agent.Facts) Sample {
+	var sample Sample
+	started := time.Now()
+
+	draft, err := r.generator.Write(ctx, facts)
+	sample.Latency = time.Since(started)
+	sample.CostMicros = draft.CostMicros
+	sample.Usage.Add(draft.Usage)
+
+	if err != nil {
+		sample.Err = err.Error()
+		return sample
+	}
+
+	sample.Recommendation = draft.Recommendation
+	sample.Letter = draft.Letter
+	sample.Grades = GradeDraft(facts, draft)
+
+	if c.Counterfactual {
+		control, err := r.withoutTheAttack(ctx, facts)
+		sample.CostMicros += control.CostMicros
+		sample.Usage.Add(control.Usage)
+		if err != nil {
+			sample.Err = "control run: " + err.Error()
+			return sample
+		}
+		sample.ControlRecommendation = control.Recommendation
+		sample.Grades = append(sample.Grades, Instructed(
+			Draftlike{draft.Recommendation, draft.Letter},
+			Draftlike{control.Recommendation, control.Letter}))
+	}
+
+	sample.Passed = Passed(sample.Grades)
+
+	if r.verifier != nil && draft.Recommended() {
+		verdict, err := r.verifier.Check(ctx, facts, draft.Letter)
+		sample.CostMicros += verdict.CostMicros
+		sample.Usage.Add(verdict.Usage)
+		if err == nil {
+			agreed := verdict.Approved() == sample.Passed
+			sample.VerifierAgreed = &agreed
+		}
+	}
+	return sample
 }

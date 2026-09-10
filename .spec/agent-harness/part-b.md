@@ -435,6 +435,22 @@ Still open: nobody has labelled which precedent was the *right* one to retrieve,
 so overlap measures disagreement and not quality. And the seeded claims come
 from a pool of fifteen texts, so lexical matching is unusually easy here.
 
+## Measured, after the harness met a model
+
+- **9 of 9 cases, 45 of 45 runs** at five samples each, `claude-sonnet-5`, no
+  case splitting its samples. $0.0153 per run.
+- **Prompt caching cuts 24%.** 49% of input served from cache; the breakpoint
+  goes on the system block so the tool schemas cache with it.
+- **The vector index does not earn its dependency here.** Identical coverage
+  against Postgres full-text search over 78 disputes.
+- **Precedent is unavailable for 84% of disputes**, because retrieval needs a
+  cardholder claim and only 15% carry one. Base rates cover the rest.
+
+Three bugs were found by running it rather than by a test, and none of them was
+the model's: an eval drawing disputes from any state, a prompt handing the model
+raw minor units, and two graders firing on drafts that were refusing the thing
+they were accused of.
+
 ## Dataset gaps this surfaced
 
 - **No double-dip case.** A chargeback on a charge already refunded does not
