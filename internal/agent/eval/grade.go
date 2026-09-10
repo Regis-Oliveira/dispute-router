@@ -83,13 +83,30 @@ func gradeAnswered(_ agent.Facts, draft agent.Draft) Grade {
 // figures
 // ---------------------------------------------------------------------------
 
-// money finds amounts written the way a letter writes them: with a symbol, a
-// currency code, or as a bare decimal.
+// money finds amounts written the way a letter writes them: with a symbol or
+// code before the number, with a code after it, or as a bare decimal.
+//
+// The code-after form is the one FormatMinor produces ("57.99 USD",
+// "5,000 JPY"), and it is the form the prompt tells the model to copy. The
+// first version of this pattern only knew code-before, so the JPY case - the
+// one built to catch a rescaled amount - could not see an amount written the
+// way the prompt itself writes it, and passed vacuously.
 //
 // Bare decimals are included on purpose even though they are the noisiest
 // pattern, because "the charge of 41.00" is exactly how an invented figure gets
 // into a letter without a symbol attached.
-var money = regexp.MustCompile(`(?i)(?:USD|EUR|GBP|JPY|CAD|AUD|[$£€¥])\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)|\b([0-9][0-9,]*\.[0-9]{2})\b`)
+const currencyCodes = `USD|EUR|GBP|JPY|CAD|AUD|BRL|CHF|MXN|KRW|ISK`
+
+var money = regexp.MustCompile(
+	`(?i)(?:` + currencyCodes + `|[$£€¥])\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)` +
+		`|\b([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s?(?:` + currencyCodes + `)\b` +
+		`|\b([0-9][0-9,]*\.[0-9]{2})\b`)
+
+// bareInteger finds a run of three or more digits standing alone: no comma, no
+// decimal point, no currency around it. That is what a minor-unit field looks
+// like when it is copied straight into a sentence - 5799 for $57.99, 2790 for
+// $27.90 - and both of those happened.
+var bareInteger = regexp.MustCompile(`\b[0-9]{3,}\b`)
 
 // digits per currency. JPY has none, which is the case that turns ¥5,000 into
 // ¥50 when a formatter assumes two.
@@ -132,10 +149,7 @@ func gradeFigures(facts agent.Facts, draft agent.Draft) Grade {
 	scale := minorUnits(d.Currency)
 
 	for _, match := range money.FindAllStringSubmatch(draft.Letter, -1) {
-		raw := match[1]
-		if raw == "" {
-			raw = match[2]
-		}
+		raw := firstNonEmpty(match[1:])
 		minor, ok := toMinor(raw, scale)
 		if !ok {
 			continue
@@ -145,7 +159,37 @@ func gradeFigures(facts agent.Facts, draft agent.Draft) Grade {
 				"the letter states %s, which is not an amount on this dispute", raw))
 		}
 	}
+
+	// A minor-unit integer stated as if it were the amount. Only for currencies
+	// that have minor units: for JPY the integer IS the amount, and "5000" is
+	// right. Reason codes and card digits are excluded because a code like
+	// 4837 can collide with an amount of 48.37 by coincidence.
+	if scale > 0 {
+		notMoney := map[string]bool{d.ReasonCode: true, d.CardLast4: true}
+		for _, token := range bareInteger.FindAllString(draft.Letter, -1) {
+			if notMoney[token] {
+				continue
+			}
+			value, err := strconv.ParseInt(token, 10, 64)
+			if err != nil {
+				continue
+			}
+			if allowed[value] {
+				return fail(RuleFigures, fmt.Sprintf(
+					"the letter states %s, which is a minor-unit integer, not an amount", token))
+			}
+		}
+	}
 	return pass(RuleFigures)
+}
+
+func firstNonEmpty(groups []string) string {
+	for _, g := range groups {
+		if g != "" {
+			return g
+		}
+	}
+	return ""
 }
 
 func toMinor(raw string, scale int) (int64, bool) {

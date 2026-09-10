@@ -89,20 +89,80 @@ func TestFiguresAreCheckedAgainstTheRecord(t *testing.T) {
 // The JPY case. A formatter that assumes two decimal places turns 5,000 yen
 // into 50, and a letter that states the wrong amount loses the case on a
 // detail nobody meant to get wrong.
+//
+// The letters are built with FormatMinor, because that is the form the prompt
+// tells the model to copy. The first version of this test wrote "JPY 5,000" by
+// hand - a form the prompt never produces - and passed against a pattern that
+// could not see "5,000 JPY" at all.
 func TestZeroDecimalCurrenciesAreNotRescaled(t *testing.T) {
 	facts := agent.Facts{}
 	facts.Dispute.AmountMinor = 5000
 	facts.Dispute.Currency = "JPY"
 	facts.Dispute.ReasonCode = "10.4"
 
-	right := draftFrom(t, agent.RecommendRepresent, "The charge of JPY 5,000 was authorised. Reason code 10.4.")
+	right := draftFrom(t, agent.RecommendRepresent,
+		"The charge of "+agent.FormatMinor(5000, "JPY")+" was authorised. Reason code 10.4.")
 	if g := gradeFor(t, GradeDraft(facts, right), RuleFigures); !g.Passed {
 		t.Errorf("¥5,000 against a 5000 minor-unit record was flagged: %s", g.Detail)
 	}
 
-	rescaled := draftFrom(t, agent.RecommendRepresent, "The charge of JPY 50.00 was authorised. Reason code 10.4.")
-	if g := gradeFor(t, GradeDraft(facts, rescaled), RuleFigures); g.Passed {
-		t.Error("¥50.00 - the two-decimal mistake - passed against a ¥5,000 charge")
+	for _, wrong := range []string{
+		"The charge of JPY 50.00 was authorised. Reason code 10.4.",
+		"The charge of " + agent.FormatMinor(50, "JPY") + " was authorised. Reason code 10.4.",
+		"The charge of 50 JPY was authorised. Reason code 10.4.",
+	} {
+		if g := gradeFor(t, GradeDraft(facts, draftFrom(t, agent.RecommendRepresent, wrong)), RuleFigures); g.Passed {
+			t.Errorf("a rescaled yen amount passed: %q", wrong)
+		}
+	}
+}
+
+// The form the prompt actually produces has to be visible to the grader, or the
+// grader is checking a format nobody writes.
+func TestTheGraderSeesAmountsAsTheFormatterWritesThem(t *testing.T) {
+	facts := usdFacts() // 4100 USD
+
+	right := draftFrom(t, agent.RecommendRepresent,
+		"The charge of "+agent.FormatMinor(4100, "USD")+" was authorised. Reason code 10.4.")
+	if g := gradeFor(t, GradeDraft(facts, right), RuleFigures); !g.Passed {
+		t.Errorf("the formatter's own output was flagged: %s", g.Detail)
+	}
+
+	wrong := draftFrom(t, agent.RecommendRepresent,
+		"The charge of "+agent.FormatMinor(5100, "USD")+" was authorised. Reason code 10.4.")
+	if g := gradeFor(t, GradeDraft(facts, wrong), RuleFigures); g.Passed {
+		t.Error("a wrong amount in the formatter's format passed")
+	}
+}
+
+// The bug this grader exists for: the minor-unit integer copied straight into a
+// sentence. 4100 for $41.00 is wrong by a factor of a hundred and contains only
+// digits that appear in the record.
+func TestAMinorUnitIntegerIsNotAnAmount(t *testing.T) {
+	facts := usdFacts()
+	facts.Dispute.CardLast4 = "1541"
+
+	raw := draftFrom(t, agent.RecommendRepresent, "The charge of 4100 was authorised. Reason code 10.4.")
+	if g := gradeFor(t, GradeDraft(facts, raw), RuleFigures); g.Passed {
+		t.Error("the minor-unit integer 4100 passed as an amount on a USD dispute")
+	}
+
+	// Digits that are not money must not trip it: the reason code, the card's
+	// last four, and an integer that matches nothing on the record.
+	fine := draftFrom(t, agent.RecommendRepresent,
+		"Reason code 10.4; card ending 1541; order 90210 shipped. The charge of "+
+			agent.FormatMinor(4100, "USD")+" stands.")
+	if g := gradeFor(t, GradeDraft(facts, fine), RuleFigures); !g.Passed {
+		t.Errorf("a non-money integer was read as a minor-unit amount: %s", g.Detail)
+	}
+
+	// And for a zero-decimal currency the integer IS the amount.
+	yen := agent.Facts{}
+	yen.Dispute.AmountMinor = 5000
+	yen.Dispute.Currency = "JPY"
+	yen.Dispute.ReasonCode = "10.4"
+	if g := gradeFor(t, GradeDraft(yen, draftFrom(t, agent.RecommendRepresent, "The charge of 5000 yen. Reason code 10.4.")), RuleFigures); !g.Passed {
+		t.Errorf("5000 on a JPY dispute was flagged as a minor-unit integer: %s", g.Detail)
 	}
 }
 
