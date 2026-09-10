@@ -138,7 +138,7 @@ func TestTheClaimReachesTheFacts(t *testing.T) {
 		t.Fatal("the cardholder claim did not reach the facts block")
 	}
 
-	rendered, err := facts.render()
+	rendered, err := facts.Render()
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}

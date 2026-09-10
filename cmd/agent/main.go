@@ -6,8 +6,9 @@
 //
 // Two modes:
 //
-//	agent -dispute 1234    one dispute, by id
-//	agent                  drain a batch of candidates
+//	agent -dispute 1234           one dispute, by id
+//	agent                        drain a batch of candidates
+//	agent -dispute 1234 -prompt  print what a model would be given, and stop
 //
 // Every run costs money. Bedrock is the one AWS service LocalStack does not
 // emulate, so unlike the rest of this repository there is no way to exercise
@@ -44,10 +45,11 @@ func main() {
 
 func run(logger *slog.Logger) error {
 	var (
-		disputeID = flag.Int64("dispute", 0, "draft for one dispute by id")
-		dryRun    = flag.Bool("dry-run", false, "list what would be worked on and stop, without spending anything")
-		batch     = flag.Int("batch", 0, "how many disputes to drain (default from AGENT_BATCH_SIZE)")
-		timeout   = flag.Duration("timeout", 5*time.Minute, "wall clock ceiling for the whole invocation")
+		disputeID  = flag.Int64("dispute", 0, "draft for one dispute by id")
+		dryRun     = flag.Bool("dry-run", false, "list what would be worked on and stop, without spending anything")
+		batch      = flag.Int("batch", 0, "how many disputes to drain (default from AGENT_BATCH_SIZE)")
+		showPrompt = flag.Bool("prompt", false, "print the record a model would be given for -dispute, and stop")
+		timeout    = flag.Duration("timeout", 5*time.Minute, "wall clock ceiling for the whole invocation")
 	)
 	flag.Parse()
 
@@ -91,6 +93,43 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
+	evidence := awsx.S3(awsCfg, cfg.AWSEndpoint)
+	facts := agent.NewFactSource(store, api.NewEvidence(evidence, cfg.S3EvidenceBucket, time.Minute))
+
+	// Precedent retrieval. The embedder is optional: without a key the
+	// retriever uses full-text search, which is the baseline anyway.
+	var embedder agent.Embedder
+	if cfg.VoyageAPIKey != "" {
+		voyage, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
+		if err != nil {
+			return err
+		}
+		embedder = voyage
+	}
+	facts = facts.WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit))
+
+	// Printing the record spends nothing and is the fastest way to answer the
+	// question that actually comes up: not "what did the model say" but "what
+	// was it looking at". Retrieval, quarantine and truncation are all visible
+	// here, and none of them are visible in a draft.
+	if *showPrompt {
+		if *disputeID <= 0 {
+			return fmt.Errorf("-prompt needs -dispute")
+		}
+		record, err := facts.For(ctx, *disputeID)
+		if err != nil {
+			return err
+		}
+		rendered, err := record.Render()
+		if err != nil {
+			return err
+		}
+		fmt.Println(rendered)
+		logger.Info("record built", "dispute", *disputeID,
+			"retrieval", record.Retrieval.Method, "precedents", len(record.Precedents))
+		return nil
+	}
+
 	completer, model, err := agent.Provider{
 		Kind:            cfg.ModelProvider,
 		AnthropicAPIKey: cfg.AnthropicAPIKey,
@@ -106,21 +145,6 @@ func run(logger *slog.Logger) error {
 		InputMicrosPerMTok:  cfg.AgentInputPerMTok,
 		OutputMicrosPerMTok: cfg.AgentOutputPerMTok,
 	}
-
-	evidence := awsx.S3(awsCfg, cfg.AWSEndpoint)
-	facts := agent.NewFactSource(store, api.NewEvidence(evidence, cfg.S3EvidenceBucket, time.Minute))
-
-	// Precedent retrieval. The embedder is optional: without a key the
-	// retriever uses full-text search, which is the baseline anyway.
-	var embedder agent.Embedder
-	if cfg.VoyageAPIKey != "" {
-		voyage, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
-		if err != nil {
-			return err
-		}
-		embedder = voyage
-	}
-	facts = facts.WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit))
 
 	assistant := agent.NewAssistant(
 		facts,

@@ -194,7 +194,11 @@ func quarantine(text string, maxRunes int) string {
 //
 // Both calls use this, so the quarantine is a property of the record rather
 // than of one prompt someone remembered to write carefully.
-func (f Facts) render() (string, error) {
+// Render is exported because "what will the model actually see" is a question
+// worth being able to ask from outside this package - cmd/agent -prompt answers
+// it for free, and retrieval, quarantine and truncation are all visible in the
+// output and none of them are visible in a draft.
+func (f Facts) Render() (string, error) {
 	// The claim is blanked before marshalling so it cannot appear twice - once
 	// quarantined and once, unmarked, in the middle of the JSON.
 	quoted := f.CardholderClaim

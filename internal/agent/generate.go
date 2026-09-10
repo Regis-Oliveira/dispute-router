@@ -106,7 +106,7 @@ func NewGenerator(completer Completer, model string, pricing Pricing, maxTokens 
 // An error means no draft, not an empty one. As with the verifier, the caller
 // must not read a failure here as any kind of outcome.
 func (g *Generator) Write(ctx context.Context, facts Facts) (Draft, error) {
-	record, err := facts.render()
+	record, err := facts.Render()
 	if err != nil {
 		return Draft{}, fmt.Errorf("generator: %w", err)
 	}

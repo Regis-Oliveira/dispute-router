@@ -125,7 +125,7 @@ func NewVerifier(completer Completer, model string, pricing Pricing, maxTokens i
 // An error means no verdict was reached - not a rejection. Callers must not
 // read a failure here as either outcome; the run stops and a human looks at it.
 func (v *Verifier) Check(ctx context.Context, facts Facts, draft string) (Verdict, error) {
-	record, err := facts.render()
+	record, err := facts.Render()
 	if err != nil {
 		return Verdict{}, fmt.Errorf("verifier: %w", err)
 	}
