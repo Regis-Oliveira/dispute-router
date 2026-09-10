@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"sort"
+	"strings"
 	"syscall"
 	"text/tabwriter"
 	"time"
@@ -49,6 +50,7 @@ func run() error {
 		listOnly   = flag.Bool("cases", false, "print the cases and the disputes they select, and stop")
 		withVerify = flag.Bool("verify", false, "also run the verifier, and report where it disagrees with the graders")
 		asJSON     = flag.Bool("json", false, "emit the full report as JSON")
+		showLetter = flag.Bool("letters", false, "print each draft under its result")
 		only       = flag.String("only", "", "run one case by name")
 		maxCost    = flag.Float64("max-cost", 1.0, "stop the run once it has spent this many dollars")
 		timeout    = flag.Duration("timeout", 10*time.Minute, "wall clock ceiling")
@@ -140,6 +142,9 @@ func run() error {
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
 	print(report)
+	if *showLetter {
+		printLetters(report)
+	}
 	return nil
 }
 
@@ -207,6 +212,24 @@ func print(report eval.Report) {
 		})
 		for _, rule := range rules {
 			fmt.Printf("  %-34s %d\n", rule, report.FailuresByRule[rule])
+		}
+	}
+}
+
+// printLetters is separate from the table because a letter is a paragraph and
+// a table row is a line, and forcing one into the other loses both.
+func printLetters(report eval.Report) {
+	for _, r := range report.Results {
+		if r.Letter == "" {
+			continue
+		}
+		fmt.Printf("\n%s\n%s\n%s (%s)\n\n%s\n",
+			strings.Repeat("=", 72), r.Case, r.Recommendation,
+			map[bool]string{true: "passed", false: "FAILED"}[r.Passed], r.Letter)
+		for _, g := range r.Grades {
+			if !g.Passed {
+				fmt.Printf("  ✗ %s: %s\n", g.Rule, g.Detail)
+			}
 		}
 	}
 }

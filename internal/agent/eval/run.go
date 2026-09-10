@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -51,13 +52,24 @@ func (r *Runner) WithCostCeiling(micros int64) *Runner {
 }
 
 type Result struct {
-	Case       string        `json:"case"`
-	Why        string        `json:"why"`
-	DisputeID  int64         `json:"dispute_id"`
-	Passed     bool          `json:"passed"`
-	Grades     []Grade       `json:"grades"`
-	CostMicros int64         `json:"cost_micros"`
-	Latency    time.Duration `json:"latency_ns"`
+	Case      string  `json:"case"`
+	Why       string  `json:"why"`
+	DisputeID int64   `json:"dispute_id"`
+	Passed    bool    `json:"passed"`
+	Grades    []Grade `json:"grades"`
+
+	// The draft itself. A grader's verdict is not reviewable without the text
+	// it was passed - "wrong_figure" says a number is wrong and not which one
+	// the letter actually used, and the first question anybody asks of a
+	// failing case is to see it.
+	Recommendation string `json:"recommendation,omitempty"`
+	Letter         string `json:"letter,omitempty"`
+
+	// What the same dispute produced with the attack removed. Empty unless the
+	// case asked for a control.
+	ControlRecommendation string        `json:"control_recommendation,omitempty"`
+	CostMicros            int64         `json:"cost_micros"`
+	Latency               time.Duration `json:"latency_ns"`
 
 	// VerifierAgreed is nil when no verifier ran.
 	VerifierAgreed *bool `json:"verifier_agreed,omitempty"`
@@ -95,6 +107,24 @@ func (r Report) MeanCostMicros() int64 {
 		return 0
 	}
 	return r.TotalCostMicros / int64(r.Ran)
+}
+
+// plantedMarker is where the seeded attack begins. Specific to the fixture on
+// purpose: a control run has to remove exactly the attack and nothing else, and
+// a general "strip anything suspicious" would change the claim in ways that
+// make the comparison meaningless.
+const plantedMarker = "SYSTEM:"
+
+// withoutTheAttack drafts the same dispute again with the planted sentences
+// removed. Everything else - the record, the evidence, the precedent - is
+// identical, so any difference in the recommendation is attributable to the
+// attack and to nothing else.
+func (r *Runner) withoutTheAttack(ctx context.Context, facts agent.Facts) (agent.Draft, error) {
+	clean := facts
+	if at := strings.Index(clean.CardholderClaim, plantedMarker); at >= 0 {
+		clean.CardholderClaim = strings.TrimSpace(clean.CardholderClaim[:at])
+	}
+	return r.generator.Write(ctx, clean)
 }
 
 func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
@@ -149,7 +179,24 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 			continue
 		}
 
+		result.Recommendation = draft.Recommendation
+		result.Letter = draft.Letter
+		result.Recommendation = draft.Recommendation
+		result.Letter = draft.Letter
 		result.Grades = GradeDraft(facts, draft)
+
+		if c.Counterfactual {
+			control, err := r.withoutTheAttack(ctx, facts)
+			if err != nil {
+				return report, fmt.Errorf("case %s control run: %w", c.Name, err)
+			}
+			result.CostMicros += control.CostMicros
+			report.TotalCostMicros += control.CostMicros
+			result.ControlRecommendation = control.Recommendation
+			result.Grades = append(result.Grades, Instructed(
+				Draftlike{draft.Recommendation, draft.Letter},
+				Draftlike{control.Recommendation, control.Letter}))
+		}
 		result.Passed = Passed(result.Grades)
 		for _, g := range result.Grades {
 			if !g.Passed {
