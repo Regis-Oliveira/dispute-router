@@ -14,11 +14,12 @@ import (
 // The review queue: what the agent drafted, and the one place a person can act
 // on it.
 //
-// Everything else in this package reads. These two writes are the only ones,
-// and Submit is the only code path in the whole system that moves a dispute to
-// 'represented'. The agent deliberately cannot reach it - draft_ready is as far
-// as it goes - so this is where the decision to send something to a card
-// network actually happens.
+// Everything else in this package reads. These two writes are the only ones.
+// Submit is the only path from a DRAFT to 'represented': the agent deliberately
+// cannot reach that state - draft_ready is as far as it goes. The worker's
+// rule engine (internal/worker/rules.go) also moves evidence-led chargebacks to
+// 'represented', with no letter; whether it should keep doing that is an open
+// decision in .spec/review-fixes/plan.md (4.2).
 
 // ErrNotReviewable means the run is not in a state a decision can be made
 // about: it was already decided, or the dispute moved on underneath it.

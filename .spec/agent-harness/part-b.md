@@ -1,7 +1,8 @@
 # Part B — the representment assistant (agentic harness)
 
-Status: **designed, not built.** Part A (the MCP server, `internal/mcpserver`) is
-done and committed.
+Status: **built and measured.** Part A (the MCP server, `internal/mcpserver`) is
+done; every step below is done. The gaps an adversarial review found on
+2026-09-10 are in `.spec/review-fixes/plan.md`.
 
 This document exists so Part B can be built without the conversation that
 designed it. It states the problem, the shape chosen, the alternatives rejected,
@@ -82,7 +83,7 @@ Two model calls with different jobs, not one call asked to double-check itself.
         │ pass / fail + reasons
         ▼
    pass → dispute_events + status draft_ready → human queue
-   fail → one retry with the failure appended → still failing → escalate to human
+   fail → one retry (not yet told why; see review-fixes 4.4) → still failing → escalate to human
 ```
 
 **Why a separate verifier rather than "check your work":** a model that has just
@@ -389,16 +390,10 @@ tried it" is not a claim about a system.
 
 All eight steps are built, plus a decision-history screen that was not planned.
 
-**Nothing has ever run against a real model.** LocalStack does not emulate
-Bedrock, so every draft this system has produced was written by hand as demo
-data. The loop, the generator, the verifier, the orchestrator and the eval
-runner have all been exercised only against `ScriptedCompleter`. That is what
-the seam was for and it is why the harness has tests at all - but it means the
-question the eval exists to answer, "is the model good enough", has never been
-asked. A run needs an AWS account with model access; nine cases with the
-verifier on costs roughly $0.15-$0.25.
-
-So: the harness is finished. The assistant is unproven.
+The eval has run against `claude-sonnet-5` through the Anthropic API (the
+numbers are under "Measured" below). The Bedrock `Completer` has never executed:
+LocalStack does not emulate Bedrock and there is no account behind this project.
+The demo drafts in `db/demo/` are still hand-written.
 
 ## Built after the plan: precedent retrieval
 
@@ -439,10 +434,13 @@ from a pool of fifteen texts, so lexical matching is unusually easy here.
 
 - **9 of 9 cases, 45 of 45 runs** at five samples each, `claude-sonnet-5`, no
   case splitting its samples. $0.0153 per run.
-- **Prompt caching cuts 24%.** 49% of input served from cache; the breakpoint
-  goes on the system block so the tool schemas cache with it.
-- **The vector index does not earn its dependency here.** Identical coverage
-  against Postgres full-text search over 78 disputes.
+- **Prompt caching cuts 24%.** 46% of input served from cache on the measuring
+  run (49% on the later five-sample run); the breakpoint goes on the system
+  block so the tool schemas cache with it.
+- **The vector index has not shown a gain here, and the comparison does not yet
+  decide it.** Over 78 disputes both strategies always return three, so "found
+  something" is identical by construction; set overlap is 0.41 of 3, so they
+  mostly return different precedents, and nobody has labelled which was right.
 - **Precedent is unavailable for 84% of disputes**, because retrieval needs a
   cardholder claim and only 15% carry one. Base rates cover the rest.
 

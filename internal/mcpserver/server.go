@@ -106,10 +106,11 @@ func lift[In, Out any](fn func(context.Context, In) (Out, error)) mcp.ToolHandle
 //     whether a dispute is winnable. customer_ref already answers "is this the
 //     same person".
 //
-// On prompt injection: in this schema the fields a model reads are mostly
-// controlled vocabularies - reason codes, states, card networks - so the
-// injection surface is thinner than it would be in a real platform, which
-// would carry the cardholder's own free-text description of the claim. The
+// On prompt injection: the fields these tools return are controlled
+// vocabularies - reason codes, states, card networks. The one free-text field
+// on a dispute, the cardholder's own claim, is deliberately NOT returned here:
+// this transport has no way to mark a span as untrusted, so get_dispute drops
+// it and only internal/agent, which quarantines it, asks for it. The
 // mitigation that survives either way is the first entry above: read-only
 // tools mean the worst a hostile string can do is produce a wrong answer,
 // not a wrong refund.

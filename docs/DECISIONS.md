@@ -77,7 +77,8 @@ about 1,570 tokens that never change, against roughly 880 for the record that
 does — nearly half of every input. Marking the *system* block rather than a tool
 puts the cache breakpoint at the end of the longer prefix, since the cacheable
 order runs tools, then system, then messages. Measured over the eval: 46% of
-input served from cache, $0.0204 to $0.0156 per dispute.
+input served from cache, $0.0204 to $0.0156 per dispute (the later five-sample
+run saw 49%).
 
 The individual prompts sit below the minimum cacheable length and tools plus
 system together clear it, which is why the breakpoint placement was the whole
@@ -360,12 +361,19 @@ record fixed before either call ran — has never seen, and a correct draft woul
 come back rejected as unsupported. Retrieval that only one of two judges can see
 is worse than no retrieval.
 
-**Measured: the vector index does not earn its dependency here.** Over 78 open
-disputes, top-3 each, coverage is identical — nothing is found by the vector
-index that full-text search misses, and nothing the other way. They disagree
-about *ordering* (mean overlap 0.41 of 3), but nobody has labelled which
-precedent was the right one to retrieve, so that is disagreement rather than
-quality.
+**Measured: the vector index has not shown a gain here, and the comparison does
+not yet decide it.** Over 78 open disputes, top-3 each, both strategies always
+return three results — every target merchant has at least five settled claims —
+so "found something" is identical by construction and the comparator's
+"found only by" counters cannot move. The number that carries information is
+set overlap: 0.41 of 3, meaning the two strategies return *different*
+precedents most of the time. Nobody has labelled which precedent was the right
+one to retrieve, so that is disagreement rather than a verdict in either
+direction. Two more things weaken the comparison as it stands: the `simple`
+configuration keeps stop words, so the OR query matches every settled candidate
+for most targets and ranking does all the work; and the comparator never checks
+that every lexical candidate is also embedded. The fix is in
+`.spec/review-fixes/plan.md` (5.3).
 
 The first run of that comparison said the opposite: 23% found only by the vector
 index. It was wrong because the baseline was rigged. `websearch_to_tsquery` on a

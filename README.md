@@ -15,7 +15,7 @@ rather than decorative:
 | --- | --- |
 | **Go** | Webhook ingestion and the worker pool that drains the deadline queue. |
 | **PostgreSQL** | An append-only event log and a double-entry ledger where correctness is enforced by the database, not by application code. |
-| **Redis** | Idempotency, distributed locks, per-merchant rate limiting, and a sorted set used as a deadline timer. Four distinct patterns, none of them caching. |
+| **Redis** | Idempotency, distributed locks, per-merchant rate limiting, a sorted set used as a deadline timer, and a pub/sub channel for the live feed. Five distinct patterns, none of them caching. |
 | **Angular** | An operations dashboard over half a million rows: server-side pagination, filters, exports, charts, a live feed. |
 | **AWS** | SQS for the queue, S3 for evidence uploads, ECS for the services. |
 | **Node/TypeScript** | The fake payment processor that generates the world. |
@@ -193,8 +193,6 @@ outage for everybody.
 
 ### Building it
 
-Go is not installed on this machine yet. Once `go version` works:
-
 ```bash
 make tidy          # resolves the module graph, writes go.sum
 make ingest-test   # signing + validation tests, including a cross-language HMAC vector
@@ -290,7 +288,7 @@ It does still release safely, comparing its token before deleting, because a bar
 deletes whatever lock is there — including somebody else's.
 
 Over the 1,667 open disputes in a fresh seed: **395 refunds, 412 representments, 860
-escalations, no errors** — and all nine money invariants still pass afterwards.
+escalations, no errors** — and all 11 money invariants still pass afterwards.
 
 ### The livelock
 
@@ -504,8 +502,10 @@ make mcp-check
   category of thing it is, why Go rather than Node here, what HMAC proves, and
   why these are long-running processes rather than serverless functions.
 - **[`.spec/agent-harness/part-b.md`](.spec/agent-harness/part-b.md)** — the
-  representment assistant: designed, not built. The loop, the independent
-  verifier, the guardrails, the evals, and the order to build in.
+  representment assistant: built, with what was measured. The loop, the
+  independent verifier, the guardrails, the evals, and the order it was built in.
+- **[`.spec/review-fixes/plan.md`](.spec/review-fixes/plan.md)** — what an
+  adversarial review found on 2026-09-10 and the order to fix it in.
 
 `docs/` describes what is; `.spec/` describes what isn't yet. When something in
 `.spec/` ships, the decision worth keeping moves to `docs/` and the plan is
@@ -518,14 +518,15 @@ deleted — git is the archive.
   request body, so `reviewed_by` records who a caller *claimed* to be. Fine for
   a local dashboard, and the first thing that has to change before this service
   is exposed: an audit trail is worth what the identity in it is worth.
-- The agent has never run against Bedrock. LocalStack does not emulate it, so
-  `cmd/agent` and `cmd/eval` are the only code here with no proven execution -
-  everything above the `Completer` interface is exercised against a script.
+- The agent runs against the Anthropic API (`MODEL_PROVIDER=anthropic`); the
+  Bedrock `Completer` has never executed, because LocalStack does not emulate
+  Bedrock and there is no AWS account behind this project.
 - Nothing is deployed anywhere; ECS needs a real AWS account. The Terraform is
   `fmt`-clean, `validate`s, and `plan`s to 60 resources under OpenTofu, but has
   never been applied.
-- Part B — the agentic harness described in `.spec/agent-harness/part-b.md` —
-  is designed and not started. Part A (the MCP server) is done.
+- Disputes in `draft_ready` never expire: the deadline sweeper covers only
+  `received` and `resolving`, and a draft nobody approved can outlive its window
+  with the funds still held. Fix planned in `.spec/review-fixes/plan.md`.
 - `merchants.webhook_secret` still exists, because it is the `database` fallback
   source. Secrets Manager is the default (`WEBHOOK_SECRET_SOURCE=secretsmanager`)
   and the ingest service reads from it, but the column is still a place a signing
