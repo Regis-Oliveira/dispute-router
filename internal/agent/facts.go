@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/disputetools"
 )
@@ -43,6 +45,13 @@ type Facts struct {
 	// back rejected as unsupported. Retrieval that only one of two judges can
 	// see is worse than no retrieval.
 	Precedents []Precedent `json:"-"`
+
+	// BaseRates are how disputes like this one have gone at this merchant.
+	//
+	// They cover what precedent cannot: retrieval needs a cardholder claim to
+	// match on, and only 15% of open chargebacks have one. Merchant and reason
+	// code are enough for a base rate, and every dispute has both.
+	BaseRates []BaseRate `json:"-"`
 
 	// Retrieval records how they were found, for the trace. A change in draft
 	// quality has to be attributable to a change in retrieval, and it cannot be
@@ -80,6 +89,7 @@ type FactSource struct {
 	tools     *disputetools.Set
 	evidence  EvidenceLister
 	retriever *Retriever
+	pool      *pgxpool.Pool
 }
 
 func NewFactSource(store *api.Store, evidence EvidenceLister) *FactSource {
@@ -90,6 +100,14 @@ func NewFactSource(store *api.Store, evidence EvidenceLister) *FactSource {
 // what it was before, and every draft is written from this dispute alone.
 func (f *FactSource) WithPrecedent(r *Retriever) *FactSource {
 	f.retriever = r
+	return f
+}
+
+// WithBaseRates turns on the population numbers. Separate from WithPrecedent
+// because they answer different questions and one is available for every
+// dispute while the other is not.
+func (f *FactSource) WithBaseRates(pool *pgxpool.Pool) *FactSource {
+	f.pool = pool
 	return f
 }
 
@@ -135,6 +153,17 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 		}
 		facts.Precedents = precedents
 		facts.Retrieval = retrieval
+	}
+
+	if f.pool != nil {
+		rates, err := BaseRates(ctx, f.pool, dispute.Merchant, dispute.ReasonCode, dispute.Kind)
+		if err != nil {
+			// Same rule as retrieval: a draft written without the population
+			// numbers is worse, not wrong, and refusing to draft because an
+			// aggregate query failed would be the expensive kind of caution.
+			rates = nil
+		}
+		facts.BaseRates = rates
 	}
 	for _, file := range files {
 		facts.Evidence = append(facts.Evidence, EvidenceRef{
@@ -242,6 +271,7 @@ func (f Facts) Render() (string, error) {
 		// say nothing.
 		b.WriteString("None on file. Do not assume what the cardholder said.\n")
 		b.WriteString(f.renderPrecedent())
+		b.WriteString(f.renderBaseRates())
 		return b.String(), nil
 	}
 
@@ -249,6 +279,7 @@ func (f Facts) Render() (string, error) {
 	b.WriteString(quarantine(quoted, 0))
 	b.WriteString("End of the cardholder's words.\n")
 	b.WriteString(f.renderPrecedent())
+	b.WriteString(f.renderBaseRates())
 
 	return b.String(), nil
 }

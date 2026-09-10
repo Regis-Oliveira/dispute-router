@@ -1,0 +1,128 @@
+package agent
+
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+)
+
+// Ten settled disputes is where a proportion starts meaning anything. Below it
+// the counts go out and the rate does not - "67% win" from three disputes is
+// noise with a percent sign on it.
+func TestASmallSampleIsNotARate(t *testing.T) {
+	small := Facts{BaseRates: []BaseRate{
+		{Scope: "merchant+reason", ReasonCode: "10.4", Won: 2, Lost: 1},
+	}}
+	rendered := small.renderBaseRates()
+	if !strings.Contains(rendered, "too few to be a rate") {
+		t.Errorf("a 3-dispute sample was reported as a rate:\n%s", rendered)
+	}
+	if strings.Contains(rendered, "%") && !strings.Contains(rendered, "too few") {
+		t.Error("a percentage escaped from a sample too small to carry one")
+	}
+
+	big := Facts{BaseRates: []BaseRate{
+		{Scope: "merchant+reason", ReasonCode: "10.4", Won: 4, Lost: 6},
+	}}
+	if !strings.Contains(big.renderBaseRates(), "40% of 10 settled") {
+		t.Errorf("a 10-dispute sample did not produce a rate:\n%s", big.renderBaseRates())
+	}
+}
+
+// An expired dispute was never argued. Folding it into losses would say this
+// kind of case is unwinnable when what happened is that nobody tried.
+func TestExpiredIsReportedSeparately(t *testing.T) {
+	facts := Facts{BaseRates: []BaseRate{
+		{Scope: "merchant", Won: 10, Lost: 10, Expired: 40},
+	}}
+	rendered := facts.renderBaseRates()
+
+	if !strings.Contains(rendered, "50% of 20 settled") {
+		t.Errorf("expired disputes were counted into the rate:\n%s", rendered)
+	}
+	if !strings.Contains(rendered, "40 more expired unattended") {
+		t.Error("the expired count was dropped; it is the one number that is somebody's fault")
+	}
+}
+
+// The failure this block could cause: a model declining a winnable case because
+// the population loses more often than it wins.
+func TestTheBlockSaysItIsNotAboutThisDispute(t *testing.T) {
+	facts := Facts{BaseRates: []BaseRate{{Scope: "merchant", Won: 2, Lost: 98}}}
+	rendered := facts.renderBaseRates()
+
+	if !strings.Contains(rendered, "says nothing about whether THIS dispute is winnable") {
+		t.Error("the block does not separate the population from the case")
+	}
+	if !strings.Contains(rendered, "a low rate is not a reason to decline") {
+		t.Error("the block does not guard against the statistic deciding the case")
+	}
+}
+
+func TestAMerchantWithNoHistorySaysSo(t *testing.T) {
+	rendered := Facts{}.renderBaseRates()
+	if !strings.Contains(rendered, "no settled disputes to compare against") {
+		t.Error("an absent base rate was passed over in silence")
+	}
+}
+
+// Both calls see it, for the same reason precedent does: two judges working
+// from different records disagree about facts neither of them can check.
+func TestBaseRatesReachBothCalls(t *testing.T) {
+	facts := Facts{BaseRates: []BaseRate{
+		{Scope: "merchant+reason", ReasonCode: "13.1", Won: 12, Lost: 18},
+	}}
+
+	gen := &ScriptedCompleter{Responses: []Response{draftResponseFor(t, RecommendRepresent, "x")}}
+	if _, err := NewGenerator(gen, "t", Pricing{}, 4096).Write(context.Background(), facts); err != nil {
+		t.Fatalf("generator: %v", err)
+	}
+	ver := &ScriptedCompleter{Responses: []Response{verdictPass(t)}}
+	if _, err := NewVerifier(ver, "t", Pricing{}, 2048).Check(context.Background(), facts, "x"); err != nil {
+		t.Fatalf("verifier: %v", err)
+	}
+
+	for name, script := range map[string]*ScriptedCompleter{"generator": gen, "verifier": ver} {
+		if !strings.Contains(script.Requests[0].Messages[0].Content[0].Text, "40% of 30 settled") {
+			t.Errorf("the %s never saw the base rate", name)
+		}
+	}
+	if !strings.Contains(ver.Requests[0].System, "reasoned from a statistic") {
+		t.Error("the verifier was not told to catch a case declined on the population")
+	}
+}
+
+// Every dispute has a merchant and a reason code, which is the whole point:
+// precedent covers about one in seven, this covers all of them.
+func TestBaseRatesExistForAClaimlessDispute(t *testing.T) {
+	if os.Getenv("DATABASE_URL") == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	store, pool := liveStore(t)
+
+	var id int64
+	err := pool.QueryRow(context.Background(), `
+		SELECT id FROM disputes
+		 WHERE kind = 'chargeback' AND cardholder_claim = ''
+		   AND state = 'received' ORDER BY id LIMIT 1`).Scan(&id)
+	if err != nil {
+		t.Skipf("no claimless open chargeback: %v", err)
+	}
+
+	facts, err := NewFactSource(store, fakeEvidence{}).
+		WithPrecedent(NewRetriever(pool, nil, 3)).
+		WithBaseRates(pool).
+		For(context.Background(), id)
+	if err != nil {
+		t.Fatalf("For: %v", err)
+	}
+
+	if len(facts.Precedents) != 0 {
+		t.Log("this dispute happens to have precedent; the point still holds")
+	}
+	if len(facts.BaseRates) == 0 {
+		t.Fatal("a dispute with no claim got no base rate either; the gap is not closed")
+	}
+	t.Logf("dispute %d: %d precedent(s), %d base rate scope(s)", id, len(facts.Precedents), len(facts.BaseRates))
+}

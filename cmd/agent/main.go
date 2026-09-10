@@ -106,7 +106,11 @@ func run(logger *slog.Logger) error {
 		}
 		embedder = voyage
 	}
-	facts = facts.WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit))
+	facts = facts.
+		WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit)).
+		// Available for every dispute, unlike precedent, which needs a claim to
+		// match on and therefore covers about one in seven.
+		WithBaseRates(pool)
 
 	// Printing the record spends nothing and is the fastest way to answer the
 	// question that actually comes up: not "what did the model say" but "what

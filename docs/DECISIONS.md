@@ -22,6 +22,35 @@ known without losing anything, it did not earn its place.
 
 ## Money and the ledger
 
+**A deterministic grader keeps what is deterministic.** Three separate graders
+have now fired on a draft that was refusing the thing it was accused of. The
+injection grader failed a model that named the planted text and declined it. The
+promise grader failed a letter whose disclaimer said "purporting to direct an
+admission of liability... has been disregarded". Both patterns were reading for
+meaning, and a pattern cannot tell a letter making a commitment from a letter
+describing the commitment it refused — the words are the same and the difference
+is in what surrounds them.
+
+The resolution is a boundary, not a better pattern. Deterministic checks decide
+what is decidable by comparison: does this filename exist, does this figure
+appear in the record, did the recommendation change against a control. Judgements
+that need reading go to the verifier, which is a model reading the letter and is
+the right tool for them.
+
+Worth stating plainly because of how it was found: the class was diagnosed and
+fixed in the injection grader, and left untouched in the function next to it. The
+eval caught it again three runs later.
+
+**Base rates cover what precedent cannot.** Precedent retrieval needs a
+cardholder claim to match on, and only 15% of open chargebacks have one — so the
+feature built to inform a draft was unavailable for six disputes in seven. A base
+rate needs only merchant and reason code, which every dispute has. Expired
+disputes are reported beside the rate and never inside it: a deadline missed
+unattended was never argued, so it says nothing about whether the case was
+winnable and everything about the merchant. Below ten settled disputes the counts
+go out and the rate does not, because an interval that wide is noise with a
+percent sign.
+
 **A prompt is a boundary, and boundaries get formatters.** The rule below —
 divide exactly once, at the edge — was applied to the ledger, the API and the
 dashboard, and then the record handed a model `amount_minor: 5799` with an

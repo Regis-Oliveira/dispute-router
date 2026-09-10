@@ -123,7 +123,11 @@ func run() error {
 		}
 		embedder = voyage
 	}
-	facts = facts.WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit))
+	facts = facts.
+		WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit)).
+		// Available for every dispute, unlike precedent, which needs a claim to
+		// match on and therefore covers about one in seven.
+		WithBaseRates(pool)
 
 	var verifier *agent.Verifier
 	if *withVerify {
