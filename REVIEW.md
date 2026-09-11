@@ -21,6 +21,12 @@ exists to stop you spending the effort on things already known. Everything in
 The code comments carry the *why*. If a comment and this brief disagree, the
 comment is more likely to be current.
 
+A review against this brief ran on 2026-09-10. What it found, and the order it
+was fixed in, is `.spec/review-fixes/plan.md`; the course syllabus set against
+the project afterwards is beside it. The "where a fresh pair of eyes would be
+most useful" list below is kept as it was written, because every item on it
+produced a finding.
+
 ## Already known, documented, and not worth reporting
 
 - **No authentication anywhere.** `POST /api/reviews/{id}/decision` moves a

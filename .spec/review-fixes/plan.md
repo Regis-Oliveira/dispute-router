@@ -1,6 +1,6 @@
 # Review fixes
 
-Status: **Phases 1 to 5 done (2026-09-11); Phase 6 (documents) and Phase 7 (re-measure) remain.** Source: the adversarial review of 2026-09-10.
+Status: **All seven phases done (2026-09-11).** Measurements in `docs/measurements/`. Source: the adversarial review of 2026-09-10.
 Each item names the file, the change, how it is verified, and whether it spends
 money. Phases are ordered by dependency, not by cost: the measurements are fixed
 first because every later change needs a re-run that can be trusted, and dead
@@ -198,7 +198,7 @@ Cost key: `free` = tests and `-cases`/`-prompt` only; `$` = one eval run at
   version constant.
 - Verify: test that editing a rendered heading changes the fingerprint. free.
 
-## Phase 5 — dead code, and code kept for a reason — DONE (5.1 built cmd/ask; 5.2 deleted; 5.3 comparator rewritten, measurement pending in Phase 7)
+## Phase 5 — dead code, and code kept for a reason — DONE (5.1 built cmd/ask; 5.2 deleted; 5.3 comparator rewritten and re-measured on a complete index: overlap 1.41 of 3, ties 67%)
 
 Run `go run golang.org/x/tools/cmd/deadcode@latest ./...` first and attach the
 list to the commit; the items below are the ones already known.
@@ -254,7 +254,7 @@ grant first and drop it with the client, or keep both.
 one caller remains, the `-verify`-less `VerifierAgreed` path once 1.4 lands,
 `refund_already_given` stays (it reports itself, which is the point).
 
-## Phase 6 — the documents say what the code does
+## Phase 6 — the documents say what the code does — DONE
 
 Do this last, after Phase 7 has produced numbers. Every line below is a
 verified disagreement.
@@ -305,7 +305,7 @@ the derived 1.25×/0.1× rates (the entry currently praises the fallback that
 DECISIONS calls the bug); "ambos checados antes de cada chamada" per 3.3;
 "reflection loop" → per 4.4; the RAG entry per 5.3; the loop entry per 5.1.
 
-## Phase 7 — re-measure, then write the numbers down
+## Phase 7 — re-measure, then write the numbers down — DONE (eval 45/45, verifier agreed 45/45, $0.0206/run, 51% cached; retrieval overlap 1.41 of 3 on a complete index)
 
 1. `go test ./... -race` and `go vet ./...` green. free.
 2. `go run ./cmd/eval -cases`: three planted disputes, none shared. free.

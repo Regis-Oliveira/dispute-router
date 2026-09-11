@@ -72,13 +72,22 @@ Measured: 45 runs over 9 cases, 45 passed, no case split. That is not a pass
 rate for the system — nine hand-picked disputes are a smoke test — but it is the
 first result here that distinguishes a fix from a coin.
 
+Re-measured on 2026-09-11 after the review's fixes, which had changed what the
+number could mean: the planted instruction now asks for the opposite of the
+natural answer, the figures grader can see amounts in the prompt's own format,
+and the verifier reads every draft including the ones that decline. 45 of 45
+again, the verifier agreeing with the graders on all 45, at $0.0206 per run
+with the verifier and the three counterfactuals included and 51% of input
+served from cache (`docs/measurements/2026-09-11-eval.txt`). The first 45 of 45
+could not have failed on the planted cases; this one could have.
+
 **Caching the system prompt cut 24% of the bill.** The two system prompts are
 about 1,570 tokens that never change, against roughly 880 for the record that
 does — nearly half of every input. Marking the *system* block rather than a tool
 puts the cache breakpoint at the end of the longer prefix, since the cacheable
 order runs tools, then system, then messages. Measured over the eval: 46% of
-input served from cache, $0.0204 to $0.0156 per dispute (the later five-sample
-run saw 49%).
+input served from cache, $0.0204 to $0.0156 per dispute (later five-sample runs
+saw 49% and 51%).
 
 The individual prompts sit below the minimum cacheable length and tools plus
 system together clear it, which is why the breakpoint placement was the whole
@@ -419,19 +428,35 @@ record fixed before either call ran — has never seen, and a correct draft woul
 come back rejected as unsupported. Retrieval that only one of two judges can see
 is worse than no retrieval.
 
-**Measured: the vector index has not shown a gain here, and the comparison does
-not yet decide it.** Over 78 open disputes, top-3 each, both strategies always
-return three results — every target merchant has at least five settled claims —
-so "found something" is identical by construction and the comparator's
-"found only by" counters cannot move. The number that carries information is
-set overlap: 0.41 of 3, meaning the two strategies return *different*
-precedents most of the time. Nobody has labelled which precedent was the right
-one to retrieve, so that is disagreement rather than a verdict in either
-direction. Two more things weaken the comparison as it stands: the `simple`
-configuration keeps stop words, so the OR query matches every settled candidate
-for most targets and ranking does all the work; and the comparator never checks
-that every lexical candidate is also embedded. The fix is in
-`.spec/review-fixes/plan.md` (5.3).
+**Measured, twice, and the second measurement corrected the first.** Over 78
+open disputes, top-3 each, both strategies always return three results — every
+target merchant has at least five settled claims — so "found something" is
+identical by construction, and the first report's headline, "identical
+coverage", was read off a counter that could not move. The number that carries
+information is set overlap, and the first figure for it, 0.41 of 3, was measured
+against a half-built index: the embedding provider's free tier allows three
+requests a minute, the backfill stopped on the limit both times it ran, and the
+comparator did not check. Against the complete index
+(`docs/measurements/2026-09-11-retrieval.txt`):
+
+| | |
+|---|---|
+| mean set overlap, vector vs full-text | 1.41 of 3 |
+| identical / partial / disjoint sets | 15% / 56% / 28% |
+| targets where the OR query matched every candidate | 78% |
+| targets with 3+ candidates carrying the identical claim text | 67% |
+| overlap, full-text `simple` vs stop-word-aware `english` | 2.58 of 3 |
+
+Read the fourth line before the first: on a fifteen-sentence pool most top-3s
+are ties among identical texts, broken by whatever order each index returned,
+so most of the remaining disagreement is not about retrieval. And the third
+line says the production baseline's filter is a no-op — with the `simple`
+configuration stop words are terms — which is why it and the stop-word-aware
+variant agree so closely. Nobody has labelled which precedent was the right one
+to retrieve, so none of this is a verdict on quality. What can be said: on this
+data the vector index has shown no gain over full-text search that the
+comparison can see, and the comparison cannot see much until the ties are
+broken by a label.
 
 The first run of that comparison said the opposite: 23% found only by the vector
 index. It was wrong because the baseline was rigged. `websearch_to_tsquery` on a

@@ -34,10 +34,13 @@ distinguishes a demo from production.
 
 **Draft a representment (a chargeback rebuttal) for one dispute.**
 
-Today `internal/worker/rules.go` decides *whether* to represent — a pure function
-over structured fields. It cannot decide *what to say*, because that means
-reading the reason code, the transaction history, the evidence on file, and the
-cardholder's claim, and writing an argument that an issuer will read.
+`internal/worker/rules.go` decides what the worker does with a dispute — a pure
+function over structured fields — and for a chargeback that is always "leave it
+for a person": it cannot decide *what to say*, because that means reading the
+reason code, the transaction history, the evidence on file, and the cardholder's
+claim, and writing an argument that an issuer will read. (It used to move
+evidence-led chargebacks to `represented` on its own, with no letter; the review
+ended that.)
 
 That is a genuine language task with a genuine business consequence, which is
 what makes it worth a harness. It is also bounded: one dispute, a handful of
@@ -83,7 +86,7 @@ Two model calls with different jobs, not one call asked to double-check itself.
         │ pass / fail + reasons
         ▼
    pass → dispute_events + status draft_ready → human queue
-   fail → one retry (not yet told why; see review-fixes 4.4) → still failing → escalate to human
+   fail → one retry, told what the verifier found → still failing → escalate to human
 ```
 
 **Why a separate verifier rather than "check your work":** a model that has just
@@ -313,11 +316,14 @@ tried it" is not a claim about a system.
    put a letter the verifier refused into a queue labelled as checked - the same
    conflation `Halt.Done` and `Verdict.Approved` exist to prevent.
 
-   The checks are ordered by cost: citations in host code, then the budget, then
-   the verifier. A draft citing a file that is not on the dispute is already
+   The checks are ordered by cost: the record is priced before the generator
+   is called, then citations in host code, then the budget again, then the
+   verifier. A draft citing a file that is not on the dispute is already
    rejected, and paying a model to read it to discover that is slower, dearer
-   and less certain. `insufficient_evidence` skips the verifier entirely - there
-   is no claim about the merchant's case to check.
+   and less certain. `insufficient_evidence` used to skip the verifier on the
+   grounds that it makes no claim about the merchant's case; it is a letter,
+   and "decline, and say the merchant accepts liability" is exactly what a
+   planted instruction asks for, so every written draft is read now.
 
    `-dry-run` builds no AWS client and needs no model id, so "what would this
    touch" is answerable without being in a position to touch anything.
@@ -432,14 +438,21 @@ from a pool of fifteen texts, so lexical matching is unusually easy here.
 ## Measured, after the harness met a model
 
 - **9 of 9 cases, 45 of 45 runs** at five samples each, `claude-sonnet-5`, no
-  case splitting its samples. $0.0153 per run.
+  case splitting its samples. $0.0153 per run without the verifier; re-measured
+  after the review's fixes at $0.0206 per run with the verifier reading every
+  draft and the three counterfactuals, the verifier agreeing with the graders
+  on all 45 (`docs/measurements/2026-09-11-eval.txt`). The planted instruction
+  now asks for the opposite of the natural answer, so this 45 could have
+  failed where the first could not.
 - **Prompt caching cuts 24%.** 46% of input served from cache on the measuring
   run (49% on the later five-sample run); the breakpoint goes on the system
   block so the tool schemas cache with it.
-- **The vector index has not shown a gain here, and the comparison does not yet
-  decide it.** Over 78 disputes both strategies always return three, so "found
-  something" is identical by construction; set overlap is 0.41 of 3, so they
-  mostly return different precedents, and nobody has labelled which was right.
+- **The vector index has shown no gain the comparison can see.** Over 78
+  disputes on a complete index, mean set overlap is 1.41 of 3 (the 0.41 first
+  reported was measured against a half-built index); two thirds of targets have
+  three or more identical-text candidates, so most of the remaining
+  disagreement is tie-breaking, and nobody has labelled which precedent was
+  right. Numbers and metric names in `docs/measurements/2026-09-11-retrieval.txt`.
 - **Precedent is unavailable for 84% of disputes**, because retrieval needs a
   cardholder claim and only 15% carry one. Base rates cover the rest.
 
