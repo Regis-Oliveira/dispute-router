@@ -55,6 +55,12 @@ type Facts struct {
 	// code are enough for a base rate, and every dispute has both.
 	BaseRates []BaseRate `json:"-"`
 
+	// PriorFindings is what the verifier said about this dispute's previous
+	// draft. Read by the generator only: a finding is about a draft, not
+	// about the record, so the verifier's view is unchanged and two judges
+	// still share one record.
+	PriorFindings []Finding `json:"-"`
+
 	// Retrieval records how they were found, for the trace. A change in draft
 	// quality has to be attributable to a change in retrieval, and it cannot be
 	// if nobody wrote down which strategy ran.

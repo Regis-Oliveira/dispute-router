@@ -44,6 +44,42 @@ func TestOnlyOneHolderGetsADispute(t *testing.T) {
 	}
 }
 
+// The ceiling is per dispute, so a second attempt has to know what the first
+// one cost - and what it was refused for, so it is not a blind re-roll.
+func TestAHoldCarriesTheSpendAndTheFindingsSoFar(t *testing.T) {
+	pool := scratchDB(t)
+	runs := NewRuns(pool)
+	id := fixture(t, pool, "chargeback", 72*time.Hour)
+
+	first, err := runs.Hold(context.Background(), id)
+	if err != nil {
+		t.Fatalf("first hold: %v", err)
+	}
+	if first.SpentMicros != 0 || len(first.PriorFindings) != 0 {
+		t.Errorf("a first attempt reports spend %d and %d prior finding(s)", first.SpentMicros, len(first.PriorFindings))
+	}
+
+	rejected := aRun(OutcomeRejected, false)
+	rejected.Findings = []Finding{{Check: CheckUnsupportedClaim, Quote: "signed for", Why: "no signature on file"}}
+	if err := runs.Record(context.Background(), first, rejected); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+
+	second, err := runs.Hold(context.Background(), id)
+	if err != nil {
+		t.Fatalf("second hold: %v", err)
+	}
+	if second.Attempt != 2 {
+		t.Errorf("attempt = %d, want 2", second.Attempt)
+	}
+	if second.SpentMicros != rejected.CostMicros {
+		t.Errorf("spent = %d, want %d", second.SpentMicros, rejected.CostMicros)
+	}
+	if len(second.PriorFindings) != 1 || second.PriorFindings[0].Quote != "signed for" {
+		t.Errorf("prior findings = %+v, want the first attempt's", second.PriorFindings)
+	}
+}
+
 // The run and the move are one fact. A run recorded against a dispute that
 // never moved is a draft nobody will look at; a dispute moved with no run
 // behind it is a state change with no explanation.

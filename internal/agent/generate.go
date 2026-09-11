@@ -103,6 +103,27 @@ func NewGenerator(completer Completer, model string, pricing Pricing, maxTokens 
 	return &Generator{completer: completer, model: model, pricing: pricing, maxTokens: maxTokens}
 }
 
+// renderPriorReview tells a retry what the last draft was refused for.
+//
+// Without it the second attempt was an identical re-roll: same record, same
+// prompt, and a model that had never heard the objection. The block is for
+// the generator alone - a finding is about a draft, not the record - and it
+// says how to answer one, because the failure mode of showing a model its
+// findings is that it learns to evade the detection instead of fixing the
+// claim: reword the quoted sentence rather than drop the unsupported fact.
+func renderPriorReview(findings []Finding) string {
+	if len(findings) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nPRIOR REVIEW\n")
+	b.WriteString("A previous draft of this letter was rejected. Each finding quotes that draft and says what was wrong. Remove the problem, do not reword it: an unsupported claim is answered by leaving the claim out, a wrong figure by copying the record's, a promise by making none. Do not mention the review.\n")
+	for _, f := range findings {
+		fmt.Fprintf(&b, "- %s: %q - %s\n", f.Check, f.Quote, f.Why)
+	}
+	return b.String()
+}
+
 // EstimateInputMicros prices the call before it is made.
 //
 // The record's length is known before the generator runs, and so is the
@@ -131,6 +152,7 @@ func (g *Generator) Write(ctx context.Context, facts Facts) (Draft, error) {
 	if err != nil {
 		return Draft{}, fmt.Errorf("generator: %w", err)
 	}
+	record += renderPriorReview(facts.PriorFindings)
 
 	schema, err := jsonschema.For[draftInput](nil)
 	if err != nil {

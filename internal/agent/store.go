@@ -27,6 +27,15 @@ type Claim struct {
 	DisputeID int64
 	Version   int32
 	Attempt   int
+
+	// SpentMicros is what earlier attempts at this dispute already cost. The
+	// ceiling is per dispute, and a ceiling that resets every attempt is a
+	// ceiling times the attempt count.
+	SpentMicros int64
+
+	// PriorFindings is what the verifier said about the previous attempt's
+	// draft, so the next one is not a blind re-roll. Empty on a first attempt.
+	PriorFindings []Finding
 }
 
 // Candidates lists disputes worth drafting for.
@@ -74,6 +83,7 @@ func (r *Runs) Candidates(ctx context.Context, maxAttempts, limit int) ([]int64,
 // the database and wasteful everywhere else.
 func (r *Runs) Hold(ctx context.Context, disputeID int64) (Claim, error) {
 	var claim Claim
+	var priorFindings string
 	err := r.pool.QueryRow(ctx, `
 		WITH held AS (
 		  UPDATE disputes
@@ -82,15 +92,21 @@ func (r *Runs) Hold(ctx context.Context, disputeID int64) (Claim, error) {
 		  RETURNING id, version
 		)
 		SELECT h.id, h.version,
-		       (SELECT count(*) FROM agent_runs a WHERE a.dispute_id = h.id) + 1
+		       (SELECT count(*) FROM agent_runs a WHERE a.dispute_id = h.id) + 1,
+		       (SELECT coalesce(sum(a.cost_micros), 0) FROM agent_runs a WHERE a.dispute_id = h.id),
+		       coalesce((SELECT a.findings::text FROM agent_runs a WHERE a.dispute_id = h.id
+		                  ORDER BY a.attempt DESC LIMIT 1), '[]')
 		  FROM held h`, disputeID).
-		Scan(&claim.DisputeID, &claim.Version, &claim.Attempt)
+		Scan(&claim.DisputeID, &claim.Version, &claim.Attempt, &claim.SpentMicros, &priorFindings)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Claim{}, ErrClaimLost
 	}
 	if err != nil {
 		return Claim{}, fmt.Errorf("hold dispute %d: %w", disputeID, err)
+	}
+	if err := json.Unmarshal([]byte(priorFindings), &claim.PriorFindings); err != nil {
+		return Claim{}, fmt.Errorf("hold dispute %d: decode prior findings: %w", disputeID, err)
 	}
 	return claim, nil
 }

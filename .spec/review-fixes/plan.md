@@ -1,6 +1,6 @@
 # Review fixes
 
-Status: **Phases 1 to 3 done (2026-09-10); Phase 4 next, and it opens with a DECIDE.** Source: the adversarial review of 2026-09-10.
+Status: **Phases 1 to 4 done (2026-09-11); Phase 5 next: 5.1 and 5.2 are DECIDEs.** Source: the adversarial review of 2026-09-10.
 Each item names the file, the change, how it is verified, and whether it spends
 money. Phases are ordered by dependency, not by cost: the measurements are fixed
 first because every later change needs a re-run that can be trusted, and dead
@@ -145,7 +145,7 @@ Cost key: `free` = tests and `-cases`/`-prompt` only; `$` = one eval run at
   known limitation with the fix named (scrub or hash before embedding, quote
   only the reason-code family in the prompt). Doc only.
 
-## Phase 4 — the lifecycle holds
+## Phase 4 — the lifecycle holds — DONE (4.2 decided: the worker never represents)
 
 **4.1 `draft_ready` expires like everything else.** `internal/worker/store.go`,
 `rules.go`, `internal/api/reviews.go`, dashboard `draft-panel`
