@@ -291,6 +291,9 @@ func (l *Loop) Run(ctx context.Context, system string, prompt string) (Result, e
 			Messages:  messages,
 			Tools:     l.tools.Tools(),
 			MaxTokens: l.budget.MaxTokens,
+			// The system prompt and the tool schemas are the same on every
+			// turn; only the conversation below them grows.
+			CacheSystem: true,
 		})
 		if err != nil {
 			return result, fmt.Errorf("turn %d: %w", turn, err)

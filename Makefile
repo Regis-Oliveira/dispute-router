@@ -153,6 +153,14 @@ mcp-check:
 	DATABASE_URL=postgres://dispute:dispute@localhost:5433/dispute_router \
 	  go test ./internal/mcpserver/ -v
 
+# One question over the read-only tools, answered by a model in a loop. Costs
+# money per question; -dry-run shows the tools and the budget and stops.
+#   make ask Q="what is due in the next 24 hours?"
+ask:
+	go run ./cmd/ask -dry-run
+	@echo
+	@echo "to spend on it:  go run ./cmd/ask \"$(Q)\""
+
 dlq:
 	go run ./cmd/dlq peek
 
