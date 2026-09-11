@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrInvalidEvent wraps every validation failure so the handler can answer 400
@@ -37,7 +38,20 @@ type DisputeData struct {
 
 	OpenedAt  time.Time `json:"opened_at"`
 	RespondBy time.Time `json:"respond_by"`
+
+	// CardholderClaim is the cardholder's own account, when the processor
+	// relays one. The only free text on the webhook and the only field written
+	// by the party trying to reverse the charge. Stored raw - the record has to
+	// say what was claimed - and quarantined where it is read. Bounded here,
+	// because a prompt is paid for by the token and the database should not
+	// hold a novel.
+	CardholderClaim string `json:"cardholder_claim,omitempty"`
 }
+
+// MaxClaimBytes bounds the cardholder's claim at the door. Four thousand bytes
+// is several paragraphs - longer than any claim an issuer relays - and short
+// enough that the prompt boundary's own cut (internal/agent) is rarely reached.
+const MaxClaimBytes = 4000
 
 var (
 	validKinds    = map[string]bool{"alert": true, "chargeback": true}
@@ -102,6 +116,10 @@ func (e DisputeWebhook) Validate(now time.Time) error {
 		// A deadline already in the past cannot be raced. Taking it would put a
 		// dispute in the queue that the worker can only ever mark expired.
 		return fmt.Errorf("%w: respond_by is already in the past", ErrInvalidEvent)
+	case len(d.CardholderClaim) > MaxClaimBytes:
+		return fmt.Errorf("%w: cardholder_claim exceeds %d bytes", ErrInvalidEvent, MaxClaimBytes)
+	case !utf8.ValidString(d.CardholderClaim):
+		return fmt.Errorf("%w: cardholder_claim is not valid UTF-8", ErrInvalidEvent)
 	}
 	return nil
 }

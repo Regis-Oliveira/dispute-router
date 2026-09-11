@@ -140,14 +140,15 @@ func (s *Store) Record(
 	err = tx.QueryRow(ctx, `
 		INSERT INTO disputes (
 			merchant_id, transaction_id, external_id, kind, card_network, reason_code,
-			amount_minor, currency, state, deadline_at, opened_at
+			amount_minor, currency, state, deadline_at, opened_at, cardholder_claim
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received', $9, $10)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received', $9, $10, $11)
 		ON CONFLICT (merchant_id, external_id) DO NOTHING
 		RETURNING id`,
 		merchant.ID, transactionID, event.Data.DisputeID, event.Data.Kind,
 		event.Data.CardNetwork, event.Data.ReasonCode, event.Data.AmountMinor,
 		event.Data.Currency, event.Data.RespondBy, event.Data.OpenedAt,
+		event.Data.CardholderClaim,
 	).Scan(&disputeID)
 
 	if errors.Is(err, pgx.ErrNoRows) {
