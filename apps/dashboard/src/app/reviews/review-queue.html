@@ -37,6 +37,9 @@
               @case ('no-case') {
                 <span class="tag tag--warn">no case</span>
               }
+              @case ('no-draft') {
+                <span class="tag tag--warn">stopped · {{ row.outcome }}</span>
+              }
               @default {
                 <span class="tag tag--ok">checked</span>
               }

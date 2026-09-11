@@ -70,14 +70,16 @@ func (s *Store) Load(ctx context.Context, disputeID int64) (loaded, error) {
 // OpenDeadlines returns every dispute still on the clock.
 //
 // This is what makes the Redis index disposable: the answer to "what is due?"
-// is always recoverable from here. Reads from the partial index on
-// (deadline_at) WHERE state IN ('received','resolving'), so it stays cheap
+// is always recoverable from here. draft_ready is included: a draft nobody
+// approved is still money running out of time, and until it was here nothing
+// ever expired one. Two partial indexes serve the query - the sweeper's on
+// received/resolving and the review queue's on draft_ready - so it stays cheap
 // however much resolved history piles up behind it.
 func (s *Store) OpenDeadlines(ctx context.Context) (map[int64]time.Time, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, deadline_at
 		  FROM disputes
-		 WHERE state IN ('received','resolving')`)
+		 WHERE state IN ('received','resolving','draft_ready')`)
 	if err != nil {
 		return nil, fmt.Errorf("load open deadlines: %w", err)
 	}
@@ -191,9 +193,6 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 			}
 		}
 
-	case ActionRepresent:
-		// Representing spends effort, not funds. The hold posted when the
-		// chargeback arrived stays exactly where it is until the network rules.
 	}
 
 	payload, err := json.Marshal(map[string]any{

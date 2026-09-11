@@ -13,9 +13,6 @@ const (
 	// is filed at all - no fee, no ratio damage.
 	ActionRefund Action = "refund"
 
-	// ActionRepresent submits evidence and waits for the network to rule.
-	ActionRepresent Action = "represent"
-
 	// ActionEscalate is the worker declining to decide. No state change, no
 	// money moved: the dispute stays where it is with its clock running and a
 	// human picks it up.
@@ -109,18 +106,27 @@ type Candidate struct {
 // system does with someone's money is the part that most needs to be readable,
 // reviewable, and testable without standing up a database.
 func Decide(c Candidate, now time.Time) Decision {
-	if c.Resolved || (c.State != "received" && c.State != "resolving") {
+	if c.Resolved || (c.State != "received" && c.State != "resolving" && c.State != "draft_ready") {
 		return Decision{Action: ActionSkip, Reason: "already resolved"}
 	}
 
 	// The clock is checked before anything else. Past the deadline every other
-	// rule is describing an option that no longer exists.
+	// rule is describing an option that no longer exists - and that includes a
+	// draft nobody approved. draft_ready used to be invisible to this sweeper,
+	// so a dispute waiting on a reviewer who went on holiday sat past its
+	// deadline with its funds still held and a book that balanced and lied.
 	if !now.Before(c.DeadlineAt) {
 		return Decision{
 			Action:  ActionExpire,
 			ToState: "expired",
 			Reason:  "deadline passed with no decision",
 		}
+	}
+
+	// A draft with time left belongs to a person. The worker only ever
+	// touches it once the clock has run out.
+	if c.State == "draft_ready" {
+		return Decision{Action: ActionSkip, Reason: "awaiting a reviewer"}
 	}
 
 	switch c.Kind {
@@ -164,17 +170,19 @@ func Decide(c Candidate, now time.Time) Decision {
 
 	case "chargeback":
 		// The money is already gone; the only question is whether it is worth
-		// arguing for. Service and processing disputes turn on evidence the
-		// merchant has - a delivery confirmation, a signed receipt, a
-		// duplicate-charge record. Fraud claims turn on evidence the merchant
-		// usually does not have, so a human decides whether to spend the
-		// effort.
+		// arguing for, and arguing means writing a letter. This rule engine
+		// used to move evidence-led chargebacks straight to 'represented' with
+		// no letter and no person - a state that means "evidence submitted"
+		// reached with nothing submitted. Now nothing here represents: the
+		// assistant drafts, a person submits, and the worker's part is to
+		// leave the dispute where the assistant will find it and to expire it
+		// if nobody does. The category still matters, because it is the
+		// reason written into the audit trail.
 		switch categoryOf(c.ReasonCode) {
 		case categoryService, categoryProcessing:
 			return Decision{
-				Action:  ActionRepresent,
-				ToState: "represented",
-				Reason:  "evidence-led reason code, worth representing",
+				Action: ActionEscalate,
+				Reason: "evidence-led reason code; the assistant drafts and a person submits",
 			}
 		case categoryFraud:
 			return Decision{
@@ -193,7 +201,8 @@ func Decide(c Candidate, now time.Time) Decision {
 }
 
 // Note on what this policy deliberately does not do: it never automatically
-// concedes a chargeback. Auto-refunding an alert is strictly cheaper than the
+// concedes a chargeback, and it never represents one either - the only path
+// to 'represented' is a person approving a draft. Auto-refunding an alert is strictly cheaper than the
 // alternative, so it is safe to automate; giving up on a chargeback is a
 // judgement about evidence and about a merchant relationship, and a rule engine
 // that quietly writes off money is the one nobody notices is wrong.

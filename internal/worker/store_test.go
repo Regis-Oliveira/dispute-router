@@ -170,7 +170,7 @@ func TestApplyRefusesAStaleVersion(t *testing.T) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	candidate := openCandidate(t, ctx, tx, "chargeback")
-	decision := Decision{Action: ActionRepresent, ToState: "represented", Reason: "test"}
+	decision := Decision{Action: ActionExpire, ToState: "expired", Reason: "test"}
 
 	if err := applyTx(ctx, tx, candidate, decision, "worker-a"); err != nil {
 		t.Fatalf("first applyTx: %v", err)
@@ -183,35 +183,5 @@ func TestApplyRefusesAStaleVersion(t *testing.T) {
 
 	if err != ErrStaleCandidate {
 		t.Fatalf("second applyTx = %v, want ErrStaleCandidate", err)
-	}
-}
-
-// represented is not a resolution: the network has not ruled yet, and the
-// schema's CHECK ties resolved_at to exactly the terminal states.
-func TestRepresentingDoesNotResolve(t *testing.T) {
-	ctx := context.Background()
-	pool := testPool(t)
-
-	tx, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	candidate := openCandidate(t, ctx, tx, "chargeback")
-	if err := applyTx(ctx, tx, candidate, Decision{
-		Action: ActionRepresent, ToState: "represented", Reason: "test",
-	}, "test-worker"); err != nil {
-		t.Fatalf("applyTx: %v", err)
-	}
-
-	var resolvedAt *time.Time
-	if err := tx.QueryRow(ctx,
-		`SELECT resolved_at FROM disputes WHERE id = $1`, candidate.ID,
-	).Scan(&resolvedAt); err != nil {
-		t.Fatalf("re-read dispute: %v", err)
-	}
-	if resolvedAt != nil {
-		t.Errorf("resolved_at = %v, want null", resolvedAt)
 	}
 }

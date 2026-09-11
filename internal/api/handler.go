@@ -412,7 +412,7 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
 		// 409 rather than 404: the run exists, somebody else already decided,
 		// and the page in front of this caller is out of date. Telling them it
 		// is missing would send them looking for the wrong problem.
-		writeError(w, http.StatusConflict, "this run has already been decided, or the dispute moved on")
+		writeError(w, http.StatusConflict, "this run has already been decided, its deadline has passed, or the dispute moved on")
 	case err != nil:
 		h.logger.ErrorContext(r.Context(), "decide failed", "error", err, "run", id)
 		writeError(w, http.StatusInternalServerError, "could not record the decision")

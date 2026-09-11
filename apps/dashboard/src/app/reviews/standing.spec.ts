@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCost, needsOverrideWarning, standingOf } from './standing';
+import { canSubmit, formatCost, needsOverrideWarning, standingOf } from './standing';
 
 describe('standingOf', () => {
   it('marks a verifier-approved draft as checked', () => {
@@ -21,6 +21,19 @@ describe('standingOf', () => {
   it('separates "no case to make" from "the draft is wrong"', () => {
     expect(standingOf('insufficient_evidence', 'insufficient_evidence')).toBe('no-case');
     expect(standingOf('rejected', 'insufficient_evidence')).toBe('rejected');
+  });
+
+  /**
+   * A run that stopped on the cost ceiling reached the queue so a person knows
+   * about it, not so they can send whatever it managed to write. Nothing
+   * verified that letter.
+   */
+  it('never offers an unverified letter for sending', () => {
+    expect(standingOf('budget_exceeded', '')).toBe('no-draft');
+    expect(standingOf('failed', '')).toBe('no-draft');
+    expect(canSubmit(standingOf('budget_exceeded', ''))).toBe(false);
+    expect(canSubmit(standingOf('drafted', 'represent'))).toBe(true);
+    expect(canSubmit(standingOf('rejected', 'represent'))).toBe(true);
   });
 
   it('asks for a second click only when overriding a rejection', () => {

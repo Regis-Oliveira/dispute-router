@@ -258,6 +258,25 @@ func TestADecisionNeedsADecider(t *testing.T) {
 	}
 }
 
+// A draft that outlived its deadline cannot be sent. The network has already
+// ruled by then; the sweeper records the dispute as expired, and the reviewer
+// is told the page is stale rather than allowed to send into nothing.
+func TestAnExpiredDraftCannotBeSubmitted(t *testing.T) {
+	store, pool := scratchStore(t)
+	runID, disputeID := awaitingReview(t, pool, "drafted", `[]`)
+	if _, err := pool.Exec(context.Background(),
+		"UPDATE disputes SET deadline_at = now() - interval '1 hour' WHERE id = $1", disputeID); err != nil {
+		t.Fatalf("expire the fixture: %v", err)
+	}
+
+	if err := store.Decide(context.Background(), runID, "submitted", "regis"); !errors.Is(err, ErrNotReviewable) {
+		t.Errorf("an expired draft was sent: err = %v, want ErrNotReviewable", err)
+	}
+	if got := stateOf(t, pool, disputeID); got != "draft_ready" {
+		t.Errorf("state = %q after a refused submission, want draft_ready untouched", got)
+	}
+}
+
 // The reviewer's name is written into dispute_events.actor, and that column is
 // rendered into the record the agent reads. Until there is a login it is free
 // text from an unauthenticated request, so it is bounded to the shape of a

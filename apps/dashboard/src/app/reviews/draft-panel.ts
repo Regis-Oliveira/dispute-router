@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { MoneyPipe } from '../core/money';
 import { ReviewsApi } from '../core/reviews.api';
-import { formatCost, needsOverrideWarning, standingOf } from './standing';
+import { canSubmit, formatCost, needsOverrideWarning, standingOf } from './standing';
 
 /**
  * One draft, and the decision about it.
@@ -35,6 +35,9 @@ export class DraftPanel {
   });
   protected readonly wasRejected = computed(() => needsOverrideWarning(this.standing()));
   protected readonly noRepresentment = computed(() => this.standing() === 'no-case');
+  protected readonly noDraft = computed(() => !canSubmit(this.standing()));
+  /** The window has closed; the sweeper will record the dispute as expired. */
+  protected readonly expired = computed(() => (this.detail()?.dispute.seconds_to_deadline ?? 0) < 0);
   protected readonly canDecide = computed(
     () => !this.api.deciding() && this.api.reviewer().trim().length > 0 && !this.detail()?.decided,
   );

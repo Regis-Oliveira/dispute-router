@@ -35,6 +35,12 @@
       to be on file.
     </div>
   }
+  @if (noDraft()) {
+    <div class="notice">
+      This run stopped before anything was verified ({{ run.outcome }}). Whatever it wrote
+      below was never checked and cannot be sent; it is here so somebody knows.
+    </div>
+  }
 
   <h3>Draft</h3>
   <pre class="letter">{{ run.letter }}</pre>
@@ -64,6 +70,11 @@
 
   @if (run.decided) {
     <div class="decided">Already {{ run.decided }} by {{ run.decided_by }}.</div>
+  } @else if (expired()) {
+    <div class="decided">
+      The deadline has passed. This draft can no longer be sent; the sweeper will record the
+      dispute as expired.
+    </div>
   } @else {
     <div class="actions">
       @if (api.error()) {
@@ -87,9 +98,11 @@
         </div>
       } @else {
         <div class="actions__row">
-          <button type="button" class="primary" [disabled]="!canDecide()" (click)="ask('submitted')">
-            Approve and send
-          </button>
+          @if (!noDraft()) {
+            <button type="button" class="primary" [disabled]="!canDecide()" (click)="ask('submitted')">
+              Approve and send
+            </button>
+          }
           <button type="button" class="ghost" [disabled]="!canDecide()" (click)="ask('discarded')">
             Discard draft
           </button>

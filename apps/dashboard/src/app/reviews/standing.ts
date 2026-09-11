@@ -8,12 +8,21 @@
  * stop. It must never be shown the same way as one that passed. Duplicated in
  * two templates, that rule survives exactly until somebody edits one of them.
  */
-export type Standing = 'checked' | 'rejected' | 'no-case';
+export type Standing = 'checked' | 'rejected' | 'no-case' | 'no-draft';
 
 export function standingOf(outcome: string, recommendation: string): Standing {
   if (outcome === 'rejected') return 'rejected';
+  // The run stopped before anything was verified - the ceiling was hit, or
+  // it failed - and reached the queue so that a person knows. Whatever letter
+  // it carries was never checked and must not be offered for sending.
+  if (outcome === 'budget_exceeded' || outcome === 'failed') return 'no-draft';
   if (recommendation === 'insufficient_evidence') return 'no-case';
   return 'checked';
+}
+
+/** Whether there is a verified draft that can be sent at all. */
+export function canSubmit(standing: Standing): boolean {
+  return standing !== 'no-draft';
 }
 
 /** Whether approving this needs the extra confirmation step. */

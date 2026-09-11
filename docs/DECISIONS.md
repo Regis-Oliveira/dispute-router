@@ -242,6 +242,24 @@ than letting it lapse, so it is safe to automate. Writing off money is a
 judgement about evidence and a merchant relationship, and a rule engine that
 quietly does it is the one nobody notices is wrong.
 
+**The worker never represents.** It used to move evidence-led chargebacks to
+`represented` on its own - a state that means "evidence submitted", reached
+with nothing submitted, while the assistant raced it for the same rows and the
+review endpoint's comment called itself the only path there. Representing means
+a letter, the worker has none, and the only path to `represented` is now a
+person approving a draft. Fraud and evidence-led codes both escalate; the
+category survives as the reason in the audit trail.
+
+**Drafts awaiting a reviewer expire like everything else.** `draft_ready` was
+invisible to the sweeper - deliberately, so a draft a person was reading would
+not be redrafted - and the review endpoint checked state but not the clock. So
+a dispute waiting on a reviewer who went on holiday sat past its deadline with
+its funds still held, the invariants satisfied by state, and a Submit button
+that would send a letter to a network that had already ruled. The sweeper now
+covers the state and expires it past the deadline; with time left it skips,
+because the draft still belongs to a person; and Submit refuses past the
+deadline.
+
 **The Redis sorted set is an index, not a record.** A reconcile pass rebuilds it
 from Postgres, so losing it costs one pass. It also catches what the fast path
 misses — a dispute written while Redis was unreachable.

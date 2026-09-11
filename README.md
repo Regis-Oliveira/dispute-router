@@ -271,13 +271,16 @@ database:
 | Past its deadline, still open | **expire** — a failure written down, not an outcome chosen |
 | Alert, within the merchant's ceiling, room left on the charge | **refund** |
 | Alert, above the ceiling or over the refundable remainder | **escalate** |
-| Chargeback, evidence-led reason code | **represent** |
-| Chargeback, fraud reason code | **escalate** |
+| Chargeback, any reason code | **escalate** — the assistant drafts, a person submits |
+| Draft awaiting a reviewer, deadline passed | **expire** — the same failure, written down the same way |
 
-It never concedes a chargeback. Auto-refunding an alert is strictly cheaper than letting it
-lapse, so it is safe to automate; writing off money is a judgement about evidence and a
-merchant relationship, and a rule engine that quietly does it is the one nobody notices is
-wrong.
+It never concedes a chargeback, and it never represents one. Auto-refunding an alert is
+strictly cheaper than letting it lapse, so it is safe to automate; writing off money is a
+judgement about evidence and a merchant relationship, and a rule engine that quietly does
+it is the one nobody notices is wrong. Representing means submitting a letter, and the
+worker has none: the only path to `represented` is a person approving a draft in the
+review queue. (It used to move evidence-led chargebacks there on its own, with nothing
+submitted; the review found it.)
 
 **Safety is layered, and the lock is the weakest layer.** Any lock with a timeout can be
 held by two processes at once — the holder pauses for a GC, the TTL lapses, and a second
@@ -287,8 +290,9 @@ ledger entry. The Redis lock only means the second worker usually does not bothe
 It does still release safely, comparing its token before deleting, because a bare `DEL`
 deletes whatever lock is there — including somebody else's.
 
-Over the 1,667 open disputes in a fresh seed: **395 refunds, 412 representments, 860
-escalations, no errors** — and all 11 money invariants still pass afterwards.
+Over the 1,667 open disputes in a fresh seed: **395 refunds, 1,272 escalations, no
+errors** — and all 11 money invariants still pass afterwards. (Before the worker stopped
+representing, 412 of those escalations were representments with no letter.)
 
 ### The livelock
 
@@ -524,9 +528,6 @@ deleted — git is the archive.
 - Nothing is deployed anywhere; ECS needs a real AWS account. The Terraform is
   `fmt`-clean, `validate`s, and `plan`s to 60 resources under OpenTofu, but has
   never been applied.
-- Disputes in `draft_ready` never expire: the deadline sweeper covers only
-  `received` and `resolving`, and a draft nobody approved can outlive its window
-  with the funds still held. Fix planned in `.spec/review-fixes/plan.md`.
 - `merchants.webhook_secret` still exists, because it is the `database` fallback
   source. Secrets Manager is the default (`WEBHOOK_SECRET_SOURCE=secretsmanager`)
   and the ingest service reads from it, but the column is still a place a signing

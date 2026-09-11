@@ -90,29 +90,41 @@ func TestAlertsRefundWithinTheCeiling(t *testing.T) {
 	}
 }
 
-func TestChargebacksRepresentOnlyWhenEvidenceCanWin(t *testing.T) {
-	tests := map[string]struct {
-		reason string
-		want   Action
-	}{
-		"visa service":       {"13.1", ActionRepresent},
-		"visa processing":    {"12.5", ActionRepresent},
-		"mastercard service": {"4855", ActionRepresent},
-		"amex service":       {"C08", ActionRepresent},
-		"discover service":   {"RG", ActionRepresent},
-		"visa fraud":         {"10.4", ActionEscalate},
-		"mastercard fraud":   {"4837", ActionEscalate},
-		"amex fraud":         {"F29", ActionEscalate},
-		"unrecognised code":  {"ZZ99", ActionEscalate},
-	}
-
-	for name, tc := range tests {
-		t.Run(name, func(t *testing.T) {
-			c := chargeback(func(c *Candidate) { c.ReasonCode = tc.reason })
-			if got := Decide(c, now); got.Action != tc.want {
-				t.Errorf("Action = %q, want %q (reason: %s)", got.Action, tc.want, got.Reason)
+// The worker never represents. 'represented' means evidence was submitted,
+// and the worker has no letter to submit: the assistant drafts one and a
+// person sends it. Every chargeback with time left is left for them, whatever
+// its reason code - the code only changes the reason written down.
+func TestTheWorkerNeverRepresentsAChargeback(t *testing.T) {
+	for _, reason := range []string{"13.1", "12.5", "4855", "C08", "RG", "10.4", "4837", "F29", "ZZ99"} {
+		t.Run(reason, func(t *testing.T) {
+			c := chargeback(func(c *Candidate) { c.ReasonCode = reason })
+			got := Decide(c, now)
+			if got.Action != ActionEscalate {
+				t.Errorf("Action = %q, want escalate (reason: %s)", got.Action, got.Reason)
+			}
+			if got.ToState != "" {
+				t.Errorf("ToState = %q; the worker moved a chargeback on its own", got.ToState)
 			}
 		})
+	}
+}
+
+// A draft waiting on a reviewer is left alone while there is time, and expired
+// like anything else once there is not. It used to be invisible to the sweeper
+// entirely, so it could sit past its deadline forever with the funds still held.
+func TestADraftAwaitingReviewExpiresButIsOtherwiseLeftAlone(t *testing.T) {
+	waiting := chargeback(func(c *Candidate) { c.State = "draft_ready" })
+	if got := Decide(waiting, now); got.Action != ActionSkip {
+		t.Errorf("a draft with time left: Action = %q, want skip (%s)", got.Action, got.Reason)
+	}
+
+	overdue := chargeback(func(c *Candidate) {
+		c.State = "draft_ready"
+		c.DeadlineAt = now.Add(-time.Minute)
+	})
+	got := Decide(overdue, now)
+	if got.Action != ActionExpire || got.ToState != "expired" {
+		t.Errorf("a draft past its deadline: Action = %q, ToState = %q, want expire/expired", got.Action, got.ToState)
 	}
 }
 
