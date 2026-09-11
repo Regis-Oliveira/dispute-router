@@ -10,8 +10,8 @@
 //	agent                        drain a batch of candidates
 //	agent -dispute 1234 -prompt  print what a model would be given, and stop
 //
-// Every run costs money. Bedrock is the one AWS service LocalStack does not
-// emulate, so unlike the rest of this repository there is no way to exercise
+// Every run costs money: the model is the one dependency this repository
+// cannot run locally, so unlike the rest of it there is no way to exercise
 // this binary for free - which is what -dry-run is for: it shows what would be
 // worked on and stops.
 package main
@@ -134,16 +134,11 @@ func run(logger *slog.Logger) error {
 		return nil
 	}
 
-	completer, model, err := agent.Provider{
-		Kind:            cfg.ModelProvider,
-		AnthropicAPIKey: cfg.AnthropicAPIKey,
-		AnthropicModel:  cfg.AnthropicModel,
-		BedrockModelID:  cfg.BedrockModelID,
-		BedrockClient:   awsx.Bedrock(awsCfg),
-	}.Build(ctx)
+	completer, err := agent.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel)
 	if err != nil {
 		return err
 	}
+	model := cfg.AnthropicModel
 
 	pricing := agent.Pricing{
 		InputMicrosPerMTok:  cfg.AgentInputPerMTok,

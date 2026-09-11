@@ -103,11 +103,6 @@ func (d *Deadlines) Claim(ctx context.Context, upto time.Time, limit int) ([]int
 	return ids, nil
 }
 
-// Drop removes a dispute that no longer needs watching.
-func (d *Deadlines) Drop(ctx context.Context, disputeID int64) error {
-	return d.rdb.ZRem(ctx, DeadlineKey, strconv.FormatInt(disputeID, 10)).Err()
-}
-
 // Pending is how many disputes are currently indexed, for the log line that
 // tells you whether a reconcile did anything.
 func (d *Deadlines) Pending(ctx context.Context) (int64, error) {

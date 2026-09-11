@@ -21,12 +21,6 @@ type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-func (s *Store) Ping(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	return s.pool.Ping(ctx)
-}
-
 // loaded is a Candidate plus the bookkeeping the write path needs.
 type loaded struct {
 	Candidate

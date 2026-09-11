@@ -64,21 +64,16 @@ type Config struct {
 	SQSMaxMessages      int
 	SQSWaitSeconds      int
 
-	// The representment assistant. Bedrock is not emulated by LocalStack, so
-	// unlike every other AWS client here this one always reaches the real
-	// thing and every run costs money - which is why the ceilings are
-	// configuration rather than constants.
-	// ModelProvider is "anthropic" or "bedrock".
+	// The representment assistant. Every run reaches a real model and costs
+	// money - which is why the ceilings are configuration rather than
+	// constants.
 	//
-	// Two, because they answer different situations: Bedrock needs an AWS
-	// account with model access and gets its credentials from the task role,
-	// which is the right shape in production; the direct API needs a key and
-	// nothing else, which is the only shape available to somebody trying this
-	// on a laptop.
-	ModelProvider string
-
 	// A key from console.anthropic.com. A claude.ai subscription is a separate
-	// product and cannot be used here.
+	// product and cannot be used here. There was a Bedrock provider beside
+	// this one, for a deployment where the ECS task role would supply the
+	// credential; it never executed - there is no account behind this project
+	// - and was removed rather than kept as untested code. The argument for it
+	// is in docs/DECISIONS.md.
 	AnthropicAPIKey string
 	AnthropicModel  string
 
@@ -93,7 +88,6 @@ type Config struct {
 	// signal.
 	PrecedentLimit int
 
-	BedrockModelID string
 	// AgentMaxCostMicros bounds one dispute across the generator and the
 	// verifier, in micro-dollars. An automation that costs more than the
 	// chargeback it works on has inverted its own business case.
@@ -158,13 +152,11 @@ func Load(dotenvPath string) (Config, error) {
 		SQSMaxMessages:   integer("SQS_MAX_MESSAGES", 10),
 		SQSWaitSeconds:   integer("SQS_WAIT_SECONDS", 20),
 
-		ModelProvider:      str("MODEL_PROVIDER", "anthropic"),
 		AnthropicAPIKey:    str("ANTHROPIC_API_KEY", ""),
 		AnthropicModel:     str("ANTHROPIC_MODEL", "claude-sonnet-5"),
 		VoyageAPIKey:       str("VOYAGE_API_KEY", ""),
 		VoyageModel:        str("VOYAGE_MODEL", "voyage-4"),
 		PrecedentLimit:     integer("PRECEDENT_LIMIT", 3),
-		BedrockModelID:     str("BEDROCK_MODEL_ID", ""),
 		AgentMaxCostMicros: int64(integer("AGENT_MAX_COST_MICROS", 250_000)),
 		AgentMaxAttempts:   integer("AGENT_MAX_ATTEMPTS", 2),
 		AgentBatchSize:     integer("AGENT_BATCH_SIZE", 5),
@@ -194,11 +186,6 @@ func Load(dotenvPath string) (Config, error) {
 	}
 	if cfg.S3EvidenceBucket == "" {
 		return Config{}, fmt.Errorf("S3_EVIDENCE_BUCKET is required")
-	}
-	switch cfg.ModelProvider {
-	case "anthropic", "bedrock":
-	default:
-		return Config{}, fmt.Errorf("MODEL_PROVIDER must be anthropic or bedrock, got %q", cfg.ModelProvider)
 	}
 	switch cfg.WebhookSecretSource {
 	case "secretsmanager", "database":

@@ -347,8 +347,3 @@ func (p *Pool) logTotals(ctx context.Context) {
 		"contended", p.contended.Load(),
 		"failed", p.failed.Load())
 }
-
-// Stats exposes the counters for tests.
-func (p *Pool) Stats() (decided, skipped, stale, contended, failed int64) {
-	return p.decided.Load(), p.skipped.Load(), p.stale.Load(), p.contended.Load(), p.failed.Load()
-}

@@ -15,13 +15,6 @@ type ctxKey int
 
 const requestIDKey ctxKey = iota
 
-// RequestID pulls the current request's id out of a context, for log lines
-// written deeper in the stack.
-func RequestID(ctx context.Context) string {
-	id, _ := ctx.Value(requestIDKey).(string)
-	return id
-}
-
 func newRequestID() string {
 	var buf [8]byte
 	if _, err := rand.Read(buf[:]); err != nil {

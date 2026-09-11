@@ -95,16 +95,11 @@ func run() error {
 		return err
 	}
 
-	completer, model, err := agent.Provider{
-		Kind:            cfg.ModelProvider,
-		AnthropicAPIKey: cfg.AnthropicAPIKey,
-		AnthropicModel:  cfg.AnthropicModel,
-		BedrockModelID:  cfg.BedrockModelID,
-		BedrockClient:   awsx.Bedrock(awsCfg),
-	}.Build(ctx)
+	completer, err := agent.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel)
 	if err != nil {
 		return err
 	}
+	model := cfg.AnthropicModel
 	fmt.Fprintf(os.Stderr, "running %d case(s) x %d sample(s) against %s, stopping at $%.2f\n",
 		len(cases), *samples, model, *maxCost)
 

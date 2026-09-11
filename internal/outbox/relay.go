@@ -147,20 +147,6 @@ func (r *Relay) drainOnce(ctx context.Context) (int, error) {
 	return len(ids), nil
 }
 
-// LogPublisher is the Phase 1 stand-in for SQS.
-type LogPublisher struct {
-	Logger *slog.Logger
-}
-
-func (p LogPublisher) Publish(ctx context.Context, msg Message) error {
-	p.Logger.InfoContext(ctx, "published",
-		"event_type", msg.EventType,
-		"aggregate", msg.AggregateType,
-		"aggregate_id", msg.AggregateID,
-		"outbox_id", msg.ID)
-	return nil
-}
-
 // Live wraps a Publisher and additionally broadcasts each message on a Redis
 // pub/sub channel so the dashboard can show arrivals as they happen.
 //
