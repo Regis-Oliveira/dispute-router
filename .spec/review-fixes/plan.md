@@ -1,6 +1,6 @@
 # Review fixes
 
-Status: **Phases 1 to 4 done (2026-09-11); Phase 5 next: 5.1 and 5.2 are DECIDEs.** Source: the adversarial review of 2026-09-10.
+Status: **Phases 1 to 5 done (2026-09-11); Phase 6 (documents) and Phase 7 (re-measure) remain.** Source: the adversarial review of 2026-09-10.
 Each item names the file, the change, how it is verified, and whether it spends
 money. Phases are ordered by dependency, not by cost: the measurements are fixed
 first because every later change needs a re-run that can be trusted, and dead
@@ -198,7 +198,7 @@ Cost key: `free` = tests and `-cases`/`-prompt` only; `$` = one eval run at
   version constant.
 - Verify: test that editing a rendered heading changes the fingerprint. free.
 
-## Phase 5 — dead code, and code kept for a reason
+## Phase 5 — dead code, and code kept for a reason — DONE (5.1 built cmd/ask; 5.2 deleted; 5.3 comparator rewritten, measurement pending in Phase 7)
 
 Run `go run golang.org/x/tools/cmd/deadcode@latest ./...` first and attach the
 list to the commit; the items below are the ones already known.

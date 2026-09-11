@@ -150,14 +150,13 @@ to be reconstructible.
 
 ## Model access
 
-**Bedrock via the ECS task role.** `AWS_REGION` + `bedrock:InvokeModel` on the
-task role, no API key anywhere. Consistent with the Secrets Manager decision —
-the same argument that took the webhook secret out of the database applies to a
-model credential.
-
-LocalStack does not emulate Bedrock, so local development uses a fake
-`Completer` behind an interface. That interface is the seam the evals run
-against too.
+**The Anthropic API, behind a `Completer` interface.** A Bedrock provider was
+built beside it - `bedrock:InvokeModel` on the ECS task role, no API key
+anywhere, the same argument that took the webhook secret out of the database -
+and never executed, because there is no account behind this project. It was
+removed in the review fixes rather than kept as untested code; the argument
+survives in `docs/DECISIONS.md`. The interface is the seam the evals and the
+tests run against.
 
 ---
 

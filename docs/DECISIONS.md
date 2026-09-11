@@ -378,6 +378,30 @@ of cardholder text wherever it appears, and the precedent claims are truncated
 as well as wrapped, because every extra sentence is both prompt paid for and
 injection surface offered.
 
+**The Bedrock provider was deleted, and the argument for it kept.** In a
+deployment the model credential should come from the ECS task role -
+`bedrock:InvokeModel`, no key anywhere, the same reasoning that moved the
+webhook secret out of the database. The provider was built and never ran:
+LocalStack does not emulate Bedrock and there is no account behind this
+project, so it was eighty lines that could only be trusted by reading them.
+Untested code that looks like a feature is a claim, and the honest state is a
+`Completer` interface with one real implementation and the design note above.
+
+**The loop got the surface it was built for.** `internal/agent/loop.go` - turn
+ceiling, cost ceiling, tool dispatch, `Halt` - was the general harness, and the
+drafting flow deliberately does not use it: two judges need one record. For a
+month it was a harness nothing ran. `cmd/ask` is the operator-facing surface it
+was kept for: one question over the four read-only tools, answered from tool
+results only, stopped by both ceilings. Sixty lines, and the alternative was to
+delete the loop and the tests that describe it.
+
+**The untrusted field has a producer.** `cardholder_claim` was the one free
+text on a dispute, and until the review nothing could write it but the seed:
+the webhook rejected unknown fields, so the quarantine defended a column the
+running system could never fill. The processor may now relay a claim, bounded
+at the door (4,000 bytes, valid UTF-8) and stored raw, and the simulator emits
+them from the seed's pool at the seed's rate, planted instructions included.
+
 **Precedent carries other cardholders' words, and that is a privacy limit
 this project has not closed.** The precedent block quotes the claims of other
 disputes into a prompt, and the vector path sends every settled claim to an

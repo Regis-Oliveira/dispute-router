@@ -496,6 +496,24 @@ that fails if a tool ever stops being read-only.
 make mcp-check
 ```
 
+### `cmd/ask/` — one question over the same tools
+
+The operator-facing surface the loop in `internal/agent/loop.go` was written
+for: a model in a loop over the four read-only tools, asked something in plain
+words, allowed to look things up, and stopped by a turn ceiling and a cost
+ceiling.
+
+```bash
+go run ./cmd/ask -dry-run                                  # the tools and the budget, spending nothing
+go run ./cmd/ask "which merchant has the most overdue chargebacks?"
+```
+
+It answers only from tool results, repeats the tools' own "truncated" notes
+rather than totalling what it saw, and says in words when a ceiling stopped it
+before it finished. The drafting flow deliberately does not use this loop - two
+judges need one record - so until this command existed the loop was a harness
+nothing ran.
+
 ## Where the context lives
 
 - **[`docs/DECISIONS.md`](docs/DECISIONS.md)** — why the project is shaped the
@@ -522,9 +540,10 @@ deleted — git is the archive.
   request body, so `reviewed_by` records who a caller *claimed* to be. Fine for
   a local dashboard, and the first thing that has to change before this service
   is exposed: an audit trail is worth what the identity in it is worth.
-- The agent runs against the Anthropic API (`MODEL_PROVIDER=anthropic`); the
-  Bedrock `Completer` has never executed, because LocalStack does not emulate
-  Bedrock and there is no AWS account behind this project.
+- The agent runs against the Anthropic API with a key from
+  console.anthropic.com. A Bedrock `Completer` existed beside it for a
+  deployment where the task role would supply the credential; it never
+  executed and was removed rather than kept as untested code.
 - Nothing is deployed anywhere; ECS needs a real AWS account. The Terraform is
   `fmt`-clean, `validate`s, and `plan`s to 60 resources under OpenTofu, but has
   never been applied.
