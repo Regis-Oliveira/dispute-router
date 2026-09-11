@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -182,6 +184,27 @@ func (s *Store) Review(ctx context.Context, runID int64) (ReviewDetail, error) {
 	return d, nil
 }
 
+// maxReviewerRunes bounds the name a caller supplies. Until there is a login
+// this is free text from an unauthenticated request, and it is written into
+// dispute_events.actor - which the agent's record renders. A name is a name:
+// one line, printable, short.
+const maxReviewerRunes = 64
+
+func validReviewer(reviewer string) error {
+	if strings.TrimSpace(reviewer) == "" {
+		return fmt.Errorf("%w: a reviewer is required", ErrInvalidInput)
+	}
+	if utf8.RuneCountInString(reviewer) > maxReviewerRunes {
+		return fmt.Errorf("%w: reviewer must be at most %d characters", ErrInvalidInput, maxReviewerRunes)
+	}
+	for _, r := range reviewer {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%w: reviewer must be a single line of printable text", ErrInvalidInput)
+		}
+	}
+	return nil
+}
+
 // Decide records a human decision.
 //
 // Submitted means the letter goes to the card network and the dispute becomes
@@ -204,8 +227,8 @@ func (s *Store) Decide(ctx context.Context, runID int64, decision, reviewer stri
 		return fmt.Errorf("%w: decision must be submitted or discarded, got %q", ErrInvalidInput, decision)
 	}
 
-	if strings.TrimSpace(reviewer) == "" {
-		return fmt.Errorf("%w: a reviewer is required", ErrInvalidInput)
+	if err := validReviewer(reviewer); err != nil {
+		return err
 	}
 
 	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {

@@ -137,6 +137,17 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 		return "", run, fmt.Errorf("assembling facts for dispute %d: %w", claim.DisputeID, err)
 	}
 
+	// The record's size is known before the call, so the ceiling is checked
+	// before the first token is bought. It used to be checked only between the
+	// two calls, which left the generator free to spend the whole budget on
+	// one enormous claim - and "never knowingly exceeded" was true only of the
+	// second call.
+	if estimate, err := a.generator.EstimateInputMicros(facts); err == nil && a.overBudget(run.CostMicros+estimate) {
+		run.Outcome = OutcomeBudget
+		run.Trace = &Trace{Note: "the record alone would spend the ceiling; generator not called"}
+		return OutcomeBudget, run, nil
+	}
+
 	genStarted := time.Now()
 	draft, err := a.generator.Write(ctx, facts)
 	// The cost is real whether or not a draft came back, so it is added before
@@ -174,9 +185,9 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	}
 	trace.CitationsOK = true
 
-	if run.CostMicros >= a.maxCostMicros {
-		// Checked between the two calls, which is the only place it can be
-		// checked: the price of a call is not known until it returns.
+	if a.overBudget(run.CostMicros) {
+		// Checked again between the two calls: the price of the first call
+		// is not known until it returns.
 		run.Outcome = OutcomeBudget
 		trace.Note = "budget spent on the draft; verifier not called"
 		return OutcomeBudget, run, nil
@@ -208,6 +219,13 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	}
 	run.Outcome = OutcomeDrafted
 	return OutcomeDrafted, run, nil
+}
+
+// overBudget compares spend to the ceiling. Zero means no ceiling, the same
+// convention the eval runner uses - a zero read as "nothing may be spent" would
+// stop every run before its first call and look like a working budget.
+func (a *Assistant) overBudget(micros int64) bool {
+	return a.maxCostMicros > 0 && micros >= a.maxCostMicros
 }
 
 // lastAttempt reports whether this run has used up the retries.

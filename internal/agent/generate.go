@@ -103,6 +103,25 @@ func NewGenerator(completer Completer, model string, pricing Pricing, maxTokens 
 	return &Generator{completer: completer, model: model, pricing: pricing, maxTokens: maxTokens}
 }
 
+// EstimateInputMicros prices the call before it is made.
+//
+// The record's length is known before the generator runs, and so is the
+// system prompt's, so the input side of the bill is knowable in advance to
+// within the error of "four characters per token". The estimate is deliberately
+// on the high side - it ignores the cache, which only makes the real call
+// cheaper - because a ceiling that errs low is not a ceiling. Output tokens are
+// bounded separately by MaxTokens.
+func (g *Generator) EstimateInputMicros(facts Facts) (int64, error) {
+	record, err := facts.Render()
+	if err != nil {
+		return 0, fmt.Errorf("generator: %w", err)
+	}
+	const charsPerToken = 4
+	const schemaTokens = 300 // the tool definition, roughly
+	tokens := int64(len(record)+len(generatorSystem))/charsPerToken + schemaTokens
+	return tokens * g.pricing.InputMicrosPerMTok / 1_000_000, nil
+}
+
 // Write drafts one representment.
 //
 // An error means no draft, not an empty one. As with the verifier, the caller
