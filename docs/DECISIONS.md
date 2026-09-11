@@ -360,6 +360,16 @@ of cardholder text wherever it appears, and the precedent claims are truncated
 as well as wrapped, because every extra sentence is both prompt paid for and
 injection surface offered.
 
+**Precedent carries other cardholders' words, and that is a privacy limit
+this project has not closed.** The precedent block quotes the claims of other
+disputes into a prompt, and the vector path sends every settled claim to an
+embedding provider. On seeded data that is fifteen sentences; on real data it
+is other customers' free text, with whatever names, addresses and order details
+they typed, leaving the system for two purposes they never agreed to. Known and
+not fixed here. The shape of the fix: scrub or hash personal data before
+embedding, and quote only the reason-code family and the outcome in the prompt
+rather than the words.
+
 **Precedent reaches both calls or neither.** The retrieved neighbours are on
 `Facts`, which the generator and the verifier both read. If only the generator
 could see them, it could reason from something the verifier — working from a

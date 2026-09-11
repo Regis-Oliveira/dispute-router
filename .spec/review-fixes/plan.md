@@ -1,6 +1,6 @@
 # Review fixes
 
-Status: **Phases 1 and 2 done (2026-09-10); Phase 3 next.** Source: the adversarial review of 2026-09-10.
+Status: **Phases 1 to 3 done (2026-09-10); Phase 4 next, and it opens with a DECIDE.** Source: the adversarial review of 2026-09-10.
 Each item names the file, the change, how it is verified, and whether it spends
 money. Phases are ordered by dependency, not by cost: the measurements are fixed
 first because every later change needs a re-run that can be trusted, and dead
@@ -106,7 +106,7 @@ Cost key: `free` = tests and `-cases`/`-prompt` only; `$` = one eval run at
   tried first and still printed 0.01, because the raw rank is tiny, not unscaled.
 - Verify: `-prompt` output. free.
 
-## Phase 3 — close the doors
+## Phase 3 — close the doors — DONE
 
 **3.1 Reviewer names never reach a prompt.** `internal/api/handler.go`,
 `internal/disputetools/tools.go`, `internal/agent/facts.go`
