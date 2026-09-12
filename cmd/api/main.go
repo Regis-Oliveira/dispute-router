@@ -22,6 +22,7 @@ import (
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/debugx"
 	"github.com/regisoliveira/dispute-router/internal/httpx"
 )
 
@@ -101,6 +102,10 @@ func run(logger *slog.Logger) error {
 	}
 
 	group, groupCtx := errgroup.WithContext(ctx)
+
+	// Runtime diagnostics on loopback, off unless PPROF_ADDR is set. On by
+	// convention at 127.0.0.1:6060 for this binary.
+	group.Go(func() error { return debugx.Serve(groupCtx, cfg.PprofAddr, logger) })
 
 	group.Go(func() error {
 		logger.Info("api listening", "addr", cfg.APIAddr, "cors", cfg.CORSOrigins)

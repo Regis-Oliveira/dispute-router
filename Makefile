@@ -80,14 +80,30 @@ stack:
 	@echo "terminal 4:  make dash     # :4200 the dashboard itself"
 	@echo "terminal 5:  make emit     # sends signed disputes at :8080"
 
+# Each service also serves the Go runtime's diagnostics on its own loopback
+# port (PPROF_ADDR): profiles, goroutine dumps, and the execution trace that
+# shows parallelism per logical processor. Loopback only; nothing is exposed.
 ingest:
-	go run ./cmd/ingest
+	PPROF_ADDR=127.0.0.1:6062 go run ./cmd/ingest
 
 api:
-	go run ./cmd/api
+	PPROF_ADDR=127.0.0.1:6060 go run ./cmd/api
 
 worker:
-	go run ./cmd/worker
+	PPROF_ADDR=127.0.0.1:6061 go run ./cmd/worker
+
+# Record ten seconds of a running service and open the trace viewer.
+#   make trace P=worker      (api → 6060, worker → 6061, ingest → 6062)
+# Generate load in another terminal first: make emit for ingest and api,
+# make worker + make emit for the worker.
+TRACE_PORT_api := 6060
+TRACE_PORT_worker := 6061
+TRACE_PORT_ingest := 6062
+P ?= worker
+trace:
+	@mkdir -p .traces
+	curl -sf -o .traces/$(P).out 'http://127.0.0.1:$(TRACE_PORT_$(P))/debug/pprof/trace?seconds=10'
+	go tool trace .traces/$(P).out
 
 # Stage three drafts in the review queue so the screen can be demonstrated
 # without spending anything on a model. Repeatable: run it between takes.

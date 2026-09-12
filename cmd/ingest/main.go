@@ -19,6 +19,7 @@ import (
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/debugx"
 	"github.com/regisoliveira/dispute-router/internal/httpx"
 	"github.com/regisoliveira/dispute-router/internal/ingest"
 	"github.com/regisoliveira/dispute-router/internal/outbox"
@@ -174,6 +175,10 @@ func run(logger *slog.Logger) error {
 	group.Go(func() error {
 		return relay.Run(groupCtx)
 	})
+
+	// Runtime diagnostics on loopback, off unless PPROF_ADDR is set.
+	// Convention: 127.0.0.1:6062 for this binary.
+	group.Go(func() error { return debugx.Serve(groupCtx, cfg.PprofAddr, logger) })
 
 	group.Go(func() error {
 		<-groupCtx.Done()

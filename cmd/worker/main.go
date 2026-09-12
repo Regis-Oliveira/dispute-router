@@ -20,6 +20,7 @@ import (
 
 	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/debugx"
 	"github.com/regisoliveira/dispute-router/internal/worker"
 )
 
@@ -110,6 +111,11 @@ func run(logger *slog.Logger) error {
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error { return workers.Run(groupCtx) })
 	group.Go(func() error { return consumer.Run(groupCtx) })
+	// Runtime diagnostics on loopback, off unless PPROF_ADDR is set. This is
+	// the process worth tracing: eight handlers waiting on Postgres and
+	// Redis is what parallelism looks like here, and the execution trace
+	// shows it per logical processor. Convention: 127.0.0.1:6061.
+	group.Go(func() error { return debugx.Serve(groupCtx, cfg.PprofAddr, logger) })
 
 	if err := group.Wait(); err != nil {
 		return err

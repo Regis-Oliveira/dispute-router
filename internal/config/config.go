@@ -97,6 +97,12 @@ type Config struct {
 	AgentInputPerMTok  int64
 	AgentOutputPerMTok int64
 
+	// PprofAddr serves the runtime's diagnostics (profiles, goroutine dumps,
+	// the execution trace) on its own loopback listener. Empty is off. Each
+	// binary has its own default port so all three can be on at once:
+	// ingest 6062, api 6060, worker 6061.
+	PprofAddr string
+
 	// Read API.
 	APIAddr        string
 	CORSOrigins    []string
@@ -163,7 +169,8 @@ func Load(dotenvPath string) (Config, error) {
 		AgentInputPerMTok:  int64(integer("AGENT_INPUT_MICROS_PER_MTOK", 3_000_000)),
 		AgentOutputPerMTok: int64(integer("AGENT_OUTPUT_MICROS_PER_MTOK", 15_000_000)),
 
-		APIAddr: str("API_ADDR", ":8081"),
+		PprofAddr: str("PPROF_ADDR", ""),
+		APIAddr:   str("API_ADDR", ":8081"),
 		// Named origins only. A reflected Origin or a bare "*" would let any
 		// page on the internet read this data out of an operator's browser.
 		CORSOrigins:    list("API_CORS_ORIGINS", []string{"http://localhost:4200"}),
