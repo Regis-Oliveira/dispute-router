@@ -106,6 +106,13 @@ type Trace struct {
 	CitationsOK bool   `json:"citations_ok"`
 	Escalated   bool   `json:"escalated,omitempty"`
 	Note        string `json:"note,omitempty"`
+
+	// How the record was assembled. A change in draft quality has to be
+	// attributable to a change in what the model was shown, and "vector, 3
+	// precedents" against "lexical, 0" is the first thing to compare.
+	Retrieval  Retrieval     `json:"retrieval"`
+	Precedents int           `json:"precedents"`
+	Assembly   time.Duration `json:"assembly_ns"`
 }
 
 type phase struct {
@@ -164,11 +171,13 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 		StartedAt:         started,
 	}
 
+	assembleStarted := time.Now()
 	facts, err := a.facts.For(ctx, claim.DisputeID)
 	if err != nil {
 		return "", run, fmt.Errorf("assembling facts for dispute %d: %w", claim.DisputeID, err)
 	}
 	facts.PriorFindings = claim.PriorFindings
+	assembly := time.Since(assembleStarted)
 
 	// The record's size is known before the call, so the ceiling is checked
 	// before the first token is bought. It used to be checked only between the
@@ -178,7 +187,8 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	if estimate, err := a.generator.EstimateInputMicros(facts); err == nil && a.overBudget(claim.SpentMicros+run.CostMicros+estimate) {
 		run.Outcome = OutcomeBudget
 		run.Escalated = a.lastAttempt(claim)
-		run.Trace = &Trace{Note: "the record alone would spend the ceiling; generator not called", Escalated: run.Escalated}
+		run.Trace = &Trace{Note: "the record alone would spend the ceiling; generator not called", Escalated: run.Escalated,
+			Retrieval: facts.Retrieval, Precedents: len(facts.Precedents), Assembly: assembly}
 		return OutcomeBudget, run, nil
 	}
 
@@ -191,7 +201,7 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	run.CostMicros += draft.CostMicros
 	trace := Trace{Generator: phase{
 		Usage: draft.Usage, CostMicros: draft.CostMicros, Latency: time.Since(genStarted),
-	}}
+	}, Retrieval: facts.Retrieval, Precedents: len(facts.Precedents), Assembly: assembly}
 	if len(facts.PriorFindings) > 0 {
 		trace.Note = fmt.Sprintf("redrafted with %d prior finding(s) in view", len(facts.PriorFindings))
 	}

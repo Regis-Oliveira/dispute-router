@@ -50,8 +50,18 @@ func run(logger *slog.Logger) error {
 		batch      = flag.Int("batch", 0, "how many disputes to drain (default from AGENT_BATCH_SIZE)")
 		showPrompt = flag.Bool("prompt", false, "print the record a model would be given for -dispute, and stop")
 		timeout    = flag.Duration("timeout", 5*time.Minute, "wall clock ceiling for the whole invocation")
+		report     = flag.Bool("report", false, "summarise every run in agent_runs and stop, without spending anything")
+		traceFile  = flag.String("trace", "", "write a Go execution trace of this invocation to the file (go tool trace <file>)")
 	)
 	flag.Parse()
+
+	if *traceFile != "" {
+		stopTrace, err := startTrace(*traceFile)
+		if err != nil {
+			return err
+		}
+		defer stopTrace()
+	}
 
 	cfg, err := config.Load(os.Getenv("DOTENV_PATH"))
 	if err != nil {
@@ -71,6 +81,10 @@ func run(logger *slog.Logger) error {
 
 	store := api.NewStore(pool)
 	runs := agent.NewRuns(pool)
+
+	if *report {
+		return printReport(ctx, pool, os.Stdout)
+	}
 
 	if *batch <= 0 {
 		*batch = cfg.AgentBatchSize

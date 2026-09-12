@@ -111,6 +111,23 @@ trace:
 	curl -sf -o .traces/$(P).out 'http://127.0.0.1:$(TRACE_PORT_$(P))/debug/pprof/trace?seconds=10'
 	go tool trace .traces/$(P).out
 
+# What the assistant has done and what it cost: outcomes, cost and latency
+# distributions, cache share, retrieval method, findings by rule. Free.
+agent-report:
+	DOTENV_PATH=.env go run ./cmd/agent -report
+
+# The whole flow with real models, measured. Needs ANTHROPIC_API_KEY (and
+# VOYAGE_API_KEY for the vector path) in .env. Costs about two cents a
+# dispute; N bounds the spend.
+#   make flow N=10
+N ?= 10
+flow:
+	@mkdir -p .traces docs/measurements
+	DOTENV_PATH=.env go run ./cmd/agent -batch $(N) -trace .traces/agent.out
+	DOTENV_PATH=.env go run ./cmd/agent -report | tee docs/measurements/$$(date +%F)-flow.txt
+	@echo
+	@echo "execution trace of the agent run:  go tool trace .traces/agent.out"
+
 # Stage three drafts in the review queue so the screen can be demonstrated
 # without spending anything on a model. Repeatable: run it between takes.
 demo-reset:

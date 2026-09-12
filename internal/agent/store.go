@@ -45,6 +45,12 @@ type Claim struct {
 // for one would be spending model tokens to argue against money that has not
 // been taken yet.
 //
+// A dispute due in the next five minutes is left alone. A draft is two model
+// calls and a person's attention, and a deadline that close will pass before
+// anyone reads it - the sweeper would expire the dispute under a run that had
+// already paid for it. The candidates are ordered by deadline, so without this
+// the ones about to expire would be drafted first.
+//
 // The attempt ceiling is what stops a dispute the verifier keeps rejecting from
 // being redrafted forever. Past it, the last run goes in front of a person -
 // escalation here means a human, because there is nothing else for it to mean.
@@ -54,7 +60,7 @@ func (r *Runs) Candidates(ctx context.Context, maxAttempts, limit int) ([]int64,
 		  FROM disputes d
 		 WHERE d.state = 'received'
 		   AND d.kind  = 'chargeback'
-		   AND d.deadline_at > now()
+		   AND d.deadline_at > now() + interval '5 minutes'
 		   AND (SELECT count(*) FROM agent_runs a WHERE a.dispute_id = d.id) < $1
 		 ORDER BY d.deadline_at
 		 LIMIT $2`, maxAttempts, limit)
