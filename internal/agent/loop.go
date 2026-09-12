@@ -35,6 +35,45 @@ type ContentBlock struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   string `json:"content,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
+
+	// thinking and redacted_thinking. A model may reason before it calls a
+	// tool, and the API requires that reasoning to come back verbatim, with
+	// its signature, on the next turn. The first multi-turn run against a real
+	// model failed with "thinking.thinking: Field required": the loop had
+	// echoed the block back with its text dropped, because these fields did
+	// not exist. Single-turn flows never notice; a loop has to round-trip
+	// everything it is handed.
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
+
+	// raw is the block exactly as the API sent it, and it is what goes back.
+	// Naming the fields above is not enough: a block the API returns can carry
+	// a field this struct does not know, or an empty string that omitempty
+	// would drop, and either way the API refuses the echo. A block we build
+	// ourselves has no raw form and marshals from its fields.
+	raw json.RawMessage
+}
+
+// contentBlockFields is ContentBlock without its methods, so the default
+// encoding can be reached from inside the custom one.
+type contentBlockFields ContentBlock
+
+func (b *ContentBlock) UnmarshalJSON(data []byte) error {
+	var fields contentBlockFields
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	*b = ContentBlock(fields)
+	b.raw = append(json.RawMessage(nil), data...)
+	return nil
+}
+
+func (b ContentBlock) MarshalJSON() ([]byte, error) {
+	if len(b.raw) > 0 {
+		return b.raw, nil
+	}
+	return json.Marshal(contentBlockFields(b))
 }
 
 type Message struct {
@@ -210,7 +249,11 @@ type ToolCall struct {
 	Input       json.RawMessage `json:"input"`
 	ResultBytes int             `json:"result_bytes"`
 	IsError     bool            `json:"is_error"`
-	Latency     time.Duration   `json:"latency_ns"`
+	// Rule is set when the call was refused: which rule refused it. Empty on
+	// a call that ran. This is what lets a session report say "refusals by
+	// rule" instead of "some errors".
+	Rule    string        `json:"rule,omitempty"`
+	Latency time.Duration `json:"latency_ns"`
 }
 
 type Turn struct {
@@ -395,6 +438,7 @@ func (l *Loop) runTools(ctx context.Context, uses []ToolUse) ([]ContentBlock, []
 				Input:       use.Input,
 				ResultBytes: len(out.Content),
 				IsError:     out.IsError,
+				Rule:        out.Rule,
 				Latency:     time.Since(started),
 			}
 			return nil

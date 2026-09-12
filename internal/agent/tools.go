@@ -74,7 +74,22 @@ type ToolResult struct {
 	ToolUseID string `json:"tool_use_id"`
 	Content   string `json:"content"`
 	IsError   bool   `json:"is_error,omitempty"`
+
+	// Rule names why a call was refused, for the trace and never for the
+	// wire. A refusal the model reads is prose; a refusal an operator counts
+	// is a rule id, and "refusals by rule" cannot be totalled from prose. The
+	// same reason every verifier finding carries a check name.
+	Rule string `json:"-"`
 }
+
+// The rules a tool call can be refused under. A closed set, so a report can
+// count them across sessions; the loop's own stops are named by Halt.
+const (
+	RuleUnknownTool      = "unknown_tool"
+	RuleInvalidArguments = "invalid_arguments"
+	RuleNotFound         = "not_found"
+	RuleResultTooLarge   = "result_too_large"
+)
 
 // ---------------------------------------------------------------------------
 // registry
@@ -136,7 +151,7 @@ func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
 		// Worth answering rather than aborting: a model that guessed a tool
 		// name can pick a real one if it is told which exist. Aborting throws
 		// away the run over a typo.
-		return refuse(use, fmt.Sprintf("no tool named %q; available tools are %v", use.Name, r.Names())), nil
+		return refuse(use, RuleUnknownTool, fmt.Sprintf("no tool named %q; available tools are %v", use.Name, r.Names())), nil
 	}
 
 	value, err := def.Invoke(ctx, use.Input)
@@ -146,10 +161,11 @@ func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
 		if ctx.Err() != nil {
 			return ToolResult{}, fmt.Errorf("tool %s: %w", use.Name, ctx.Err())
 		}
-		if !isModelActionable(err) {
+		rule, actionable := ruleFor(err)
+		if !actionable {
 			return ToolResult{}, fmt.Errorf("tool %s: %w", use.Name, err)
 		}
-		return refuse(use, err.Error()), nil
+		return refuse(use, rule, err.Error()), nil
 	}
 
 	// Compact, not indented. Indentation is easier on a human eye and costs
@@ -163,7 +179,7 @@ func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
 		// Refused, not truncated. Half a JSON document is not a smaller answer,
 		// it is an unparseable one, and a model handed one will either fail to
 		// read it or - worse - read the part it got and treat it as the whole.
-		return refuse(use, fmt.Sprintf(
+		return refuse(use, RuleResultTooLarge, fmt.Sprintf(
 			"result is %d bytes, over the %d byte limit; narrow the request, for example with a smaller limit or a tighter filter",
 			len(encoded), maxResultBytes)), nil
 	}
@@ -171,24 +187,29 @@ func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
 	return ToolResult{Type: "tool_result", ToolUseID: use.ID, Content: string(encoded)}, nil
 }
 
-// isModelActionable says whether an error describes something about the request
-// rather than something about the system.
+// ruleFor says whether an error describes something about the request rather
+// than something about the system, and names the rule when it does.
 //
-// Both sentinels come from the packages that produce them - the store for a
+// The sentinels come from the packages that produce them - the store for a
 // dispute that does not exist, the tool catalog for arguments that did not
 // decode - so this stays a question about the domain instead of a guess about
-// error text.
-func isModelActionable(err error) bool {
-	return errors.Is(err, disputetools.ErrInvalidArguments) ||
-		errors.Is(err, api.ErrNotFound) ||
-		errors.Is(err, api.ErrInvalidInput)
+// error text. Anything else is infrastructure, and not actionable.
+func ruleFor(err error) (rule string, actionable bool) {
+	switch {
+	case errors.Is(err, disputetools.ErrInvalidArguments), errors.Is(err, api.ErrInvalidInput):
+		return RuleInvalidArguments, true
+	case errors.Is(err, api.ErrNotFound):
+		return RuleNotFound, true
+	}
+	return "", false
 }
 
-func refuse(use ToolUse, reason string) ToolResult {
+func refuse(use ToolUse, rule, reason string) ToolResult {
 	return ToolResult{
 		Type:      "tool_result",
 		ToolUseID: use.ID,
 		Content:   reason,
 		IsError:   true,
+		Rule:      rule,
 	}
 }

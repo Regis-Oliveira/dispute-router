@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/regisoliveira/dispute-router/internal/api"
+	"github.com/regisoliveira/dispute-router/internal/disputetools"
 )
 
 // Most of what matters at this boundary is decided before a query runs, so
@@ -178,4 +179,32 @@ func TestAFullPageFitsUnderTheCeiling(t *testing.T) {
 	}
 	t.Logf("a full 50-row page is %d bytes, %.0f%% of the ceiling",
 		len(result.Content), 100*float64(len(result.Content))/float64(maxResultBytes))
+}
+
+// A refusal the model reads is prose; a refusal an operator counts is a rule.
+// Every way the registry can say no names the rule it said no under.
+func TestEveryRefusalNamesItsRule(t *testing.T) {
+	registry := offlineRegistry()
+	ctx := context.Background()
+
+	unknown, err := registry.Run(ctx, ToolUse{ID: "t1", Name: "drop_table", Input: json.RawMessage(`{}`)})
+	if err != nil || unknown.Rule != RuleUnknownTool {
+		t.Errorf("unknown tool: rule %q, err %v; want %q", unknown.Rule, err, RuleUnknownTool)
+	}
+
+	badArg, err := registry.Run(ctx, ToolUse{ID: "t2", Name: "list_disputes", Input: json.RawMessage(`{"merchant_id":"x"}`)})
+	if err != nil || badArg.Rule != RuleInvalidArguments {
+		t.Errorf("unknown argument: rule %q, err %v; want %q", badArg.Rule, err, RuleInvalidArguments)
+	}
+
+	// A result over the ceiling, from a tool that exists only in this test.
+	huge := &Registry{byName: map[string]disputetools.Definition{
+		"huge": {Name: "huge", Invoke: func(context.Context, json.RawMessage) (any, error) {
+			return strings.Repeat("x", maxResultBytes+1), nil
+		}},
+	}}
+	big, err := huge.Run(ctx, ToolUse{ID: "t3", Name: "huge", Input: json.RawMessage(`{}`)})
+	if err != nil || big.Rule != RuleResultTooLarge || !big.IsError {
+		t.Errorf("oversized result: rule %q, is_error %v, err %v; want %q", big.Rule, big.IsError, err, RuleResultTooLarge)
+	}
 }

@@ -199,6 +199,7 @@ ask:
 	go run ./cmd/ask -dry-run
 	@echo
 	@echo "to spend on it:  go run ./cmd/ask \"$(Q)\""
+	@echo "and keep a log:  go run ./cmd/ask -log .traces/ask.jsonl \"$(Q)\""
 
 dlq:
 	go run ./cmd/dlq peek

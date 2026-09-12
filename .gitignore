@@ -22,3 +22,14 @@ infra/terraform/localstack.auto.tfvars
 # and their checksums, exactly like package-lock.json, so everyone and CI
 # resolve the same provider - and a compromised registry cannot swap one in.
 .traces/
+# binaries `go build ./cmd/<x>/` drops in the root
+/agent
+/api
+/ask
+/dlq
+/embed
+/eval
+/ingest
+/mcp
+/retrieval
+/worker

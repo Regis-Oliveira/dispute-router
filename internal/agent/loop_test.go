@@ -289,3 +289,62 @@ func TestAConfiguredCacheRateWins(t *testing.T) {
 		t.Errorf("configured cache read rate cost %d, want 150000", got)
 	}
 }
+
+// A model may think before it calls a tool, and the API insists the thinking
+// come back verbatim on the next turn. The loop echoes the assistant's content
+// as it was; this pins that nothing is dropped on the way round. The tool call
+// is to a name that does not exist, so the run needs no database and reaches
+// its second turn through a refusal.
+func TestThinkingBlocksSurviveTheRoundTrip(t *testing.T) {
+	thinking := ContentBlock{Type: "thinking", Thinking: "the queue summary will answer this", Signature: "sig-abc"}
+	script := &ScriptedCompleter{Responses: []Response{
+		{StopReason: "tool_use", Content: []ContentBlock{
+			thinking,
+			{Type: "tool_use", ID: "toolu_1", Name: "no_such_tool", Input: json.RawMessage(`{}`)},
+		}},
+		Says("done", Usage{}),
+	}}
+	loop := NewLoop(script, offlineRegistry(), "test-model", Pricing{}, Budget{MaxTurns: 3, MaxCostMicros: 1_000_000, MaxTokens: 256})
+	if _, err := loop.Run(context.Background(), "system", "what is due?"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(script.Requests) != 2 {
+		t.Fatalf("expected two requests, got %d", len(script.Requests))
+	}
+	assistant := script.Requests[1].Messages[1]
+	if assistant.Role != "assistant" || len(assistant.Content) != 2 {
+		t.Fatalf("second request's assistant message = %+v", assistant)
+	}
+	got := assistant.Content[0]
+	if got.Type != "thinking" || got.Thinking != thinking.Thinking || got.Signature != thinking.Signature {
+		t.Errorf("thinking block did not survive the round trip: %+v", got)
+	}
+	encoded, _ := json.Marshal(got)
+	if !strings.Contains(string(encoded), `"thinking":"the queue summary will answer this"`) || !strings.Contains(string(encoded), `"signature":"sig-abc"`) {
+		t.Errorf("thinking block serialises without its text or signature: %s", encoded)
+	}
+}
+
+// And a block that arrived from the API goes back byte for byte, whatever
+// shape it had: an empty thinking string, a field this code has never heard
+// of. The first real multi-turn run failed on exactly this - the echo had
+// dropped a field the API requires.
+func TestBlocksFromTheAPIAreEchoedVerbatim(t *testing.T) {
+	wire := `{"type":"thinking","thinking":"","signature":"sig-1","future_field":{"x":1}}`
+	var block ContentBlock
+	if err := json.Unmarshal([]byte(wire), &block); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	back, err := json.Marshal(block)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if string(back) != wire {
+		t.Errorf("block changed on the way round:\n got %s\nwant %s", back, wire)
+	}
+	// And a block this code builds still marshals from its fields.
+	ours, _ := json.Marshal(ContentBlock{Type: "tool_result", ToolUseID: "t1", Content: "ok"})
+	if string(ours) != `{"type":"tool_result","tool_use_id":"t1","content":"ok"}` {
+		t.Errorf("a locally built block marshals wrongly: %s", ours)
+	}
+}

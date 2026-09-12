@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -47,6 +48,7 @@ func run() error {
 		maxCost = flag.Float64("max-cost", 0.05, "stop once this many dollars have been spent")
 		turns   = flag.Int("turns", 8, "at most this many model turns")
 		asJSON  = flag.Bool("json", false, "print the full result, trace included, as JSON")
+		logPath = flag.String("log", "", "append one JSON line per question to this file (for example .traces/ask.jsonl)")
 		timeout = flag.Duration("timeout", 3*time.Minute, "wall clock ceiling")
 	)
 	flag.Parse()
@@ -72,7 +74,7 @@ func run() error {
 	budget := agent.Budget{
 		MaxTurns:      *turns,
 		MaxCostMicros: int64(*maxCost * 1_000_000),
-		MaxTokens:     1024,
+		MaxTokens:     4096, // thinking counts against this; 1,024 cut the first real answer off mid-sentence
 	}
 
 	if *dryRun || question == "" {
@@ -111,19 +113,109 @@ func run() error {
 		fmt.Printf("\n[stopped: %s - the answer above is not finished]\n", result.Halt)
 	}
 
-	calls := 0
-	for _, turn := range result.Turns {
-		calls += len(turn.ToolCalls)
-	}
-	fmt.Fprintf(os.Stderr, "\n%d turn(s), %d tool call(s), %d in / %d out tokens, $%.4f\n",
-		len(result.Turns), calls, result.Usage.InputTokens, result.Usage.OutputTokens,
-		float64(result.CostMicros)/1_000_000)
-	for _, turn := range result.Turns {
-		for _, call := range turn.ToolCalls {
-			fmt.Fprintf(os.Stderr, "  %s %s -> %d bytes%s\n",
-				call.Name, string(call.Input), call.ResultBytes,
-				map[bool]string{true: " (error)", false: ""}[call.IsError])
+	session := summarise(question, cfg.AnthropicModel, result)
+	session.print(os.Stderr)
+	if *logPath != "" {
+		if err := session.appendTo(*logPath); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// A session report: what one question cost and what the loop did to answer
+// it. The same shape cmd/agent -report gives a drafting run, for the same
+// reason - the trace already holds every fact below, and a fact nobody
+// summarises is a fact nobody checks.
+type session struct {
+	At          time.Time        `json:"at"`
+	Question    string           `json:"question"`
+	Model       string           `json:"model"`
+	Halt        agent.Halt       `json:"halt"`
+	Turns       int              `json:"turns"`
+	ToolCalls   int              `json:"tool_calls"`
+	CallsByTool map[string]int   `json:"calls_by_tool"`
+	Refusals    map[string]int   `json:"refusals_by_rule"`
+	Usage       agent.Usage      `json:"usage"`
+	CostMicros  int64            `json:"cost_micros"`
+	Tools       []agent.ToolCall `json:"tools"`
+}
+
+func summarise(question, model string, result agent.Result) session {
+	s := session{
+		At: time.Now().UTC(), Question: question, Model: model, Halt: result.Halt,
+		Turns: len(result.Turns), CallsByTool: map[string]int{}, Refusals: map[string]int{},
+		Usage: result.Usage, CostMicros: result.CostMicros,
+	}
+	for _, turn := range result.Turns {
+		for _, call := range turn.ToolCalls {
+			s.ToolCalls++
+			s.CallsByTool[call.Name]++
+			if call.IsError {
+				rule := call.Rule
+				if rule == "" {
+					rule = "unattributed"
+				}
+				s.Refusals[rule]++
+			}
+			s.Tools = append(s.Tools, call)
+		}
+	}
+	return s
+}
+
+func (s session) print(w *os.File) {
+	fmt.Fprintf(w, "\n== SESSION ==\n")
+	fmt.Fprintf(w, "  stopped:   %s\n", s.Halt)
+	fmt.Fprintf(w, "  turns:     %d\n", s.Turns)
+	fmt.Fprintf(w, "  tools:     %d call(s)", s.ToolCalls)
+	for _, name := range sortedKeys(s.CallsByTool) {
+		fmt.Fprintf(w, "  %s x%d", name, s.CallsByTool[name])
+	}
+	fmt.Fprintln(w)
+	if len(s.Refusals) == 0 {
+		fmt.Fprintf(w, "  refusals:  none\n")
+	} else {
+		fmt.Fprintf(w, "  refusals: ")
+		for _, rule := range sortedKeys(s.Refusals) {
+			fmt.Fprintf(w, "  %s x%d", rule, s.Refusals[rule])
+		}
+		fmt.Fprintln(w)
+	}
+	cacheable := s.Usage.InputTokens + s.Usage.CacheReadInputTokens + s.Usage.CacheCreationInputTokens
+	fmt.Fprintf(w, "  tokens:    %d in / %d out", s.Usage.InputTokens, s.Usage.OutputTokens)
+	if cacheable > 0 {
+		fmt.Fprintf(w, "  (%.0f%% of input from cache)", 100*float64(s.Usage.CacheReadInputTokens)/float64(cacheable))
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  cost:      $%.4f\n", float64(s.CostMicros)/1_000_000)
+	for _, call := range s.Tools {
+		mark := ""
+		if call.IsError {
+			mark = "  refused: " + call.Rule
+		}
+		fmt.Fprintf(w, "    %s %s -> %d bytes%s\n", call.Name, string(call.Input), call.ResultBytes, mark)
+	}
+}
+
+// appendTo writes the session as one JSON line. A file of these answers
+// "what did operators ask this week, and what did it cost" with jq, without a
+// table: questions do not reach a card network, so they do not need the
+// append-only trigger letters get.
+func (s session) appendTo(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("session log: %w", err)
+	}
+	defer f.Close()
+	return json.NewEncoder(f).Encode(s)
+}
+
+func sortedKeys(m map[string]int) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
