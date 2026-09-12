@@ -1,0 +1,23 @@
+runs  10
+
+OUTCOMES                 
+  insufficient_evidence  10  100%
+  escalated to a person  0
+  second attempts        0
+
+COST                       
+  total                    $0.1535
+  per run                  $0.0153
+  tokens                   22602 in / 4344 out
+  input served from cache  53%  (28638 read, 3182 written)
+
+LATENCY (wall, per run)  
+  assemble the record    p50 43ms    p95 300ms
+  generator call         p50 4.573s  p95 5.485s
+  verifier call          p50 1.478s  p95 1.56s
+  whole run              p50 6.275s  p95 7.088s
+
+RETRIEVAL                           
+  none                              8  80%
+  vector                            2  20%
+  runs with at least one precedent  2  20%
