@@ -39,6 +39,13 @@ func Serve(ctx context.Context, addr string, logger *slog.Logger) error {
 	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// The readable version: the goroutine dump grouped and counted, the
+	// runtime's numbers, refreshed by the process itself.
+	mux.HandleFunc("/debug/live", livePage)
+	mux.HandleFunc("/debug/runtime.json", runtimeJSON)
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/debug/live", http.StatusFound)
+	})
 
 	server := &http.Server{
 		Addr:              addr,
@@ -50,7 +57,7 @@ func Serve(ctx context.Context, addr string, logger *slog.Logger) error {
 
 	done := make(chan error, 1)
 	go func() {
-		logger.Info("diagnostics listening", "addr", addr, "hint", "curl 'http://"+addr+"/debug/pprof/trace?seconds=10'")
+		logger.Info("diagnostics listening", "addr", addr, "live", "http://"+addr+"/debug/live")
 		err := server.ListenAndServe()
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil

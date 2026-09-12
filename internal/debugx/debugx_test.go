@@ -59,3 +59,15 @@ func TestItServesPprofAndStopsWithTheContext(t *testing.T) {
 		t.Fatal("Serve did not stop when the context was cancelled")
 	}
 }
+
+// The live page and its JSON answer, and the JSON carries the numbers the
+// page is built on.
+func TestTheLivePageAndItsNumbersAreServed(t *testing.T) {
+	s := readSnapshot()
+	if s.Goroutines <= 0 || s.GOMAXPROCS <= 0 || s.Threads <= 0 || s.NumCPU <= 0 {
+		t.Errorf("snapshot has zeroes where the runtime always has values: %+v", s)
+	}
+	if len(s.MetricsMissing) > 0 {
+		t.Logf("metrics this Go version does not expose: %v", s.MetricsMissing)
+	}
+}

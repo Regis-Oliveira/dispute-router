@@ -64,6 +64,12 @@ verify:
 emit:
 	cd $(SIM) && npm run emit -- --rate 20
 
+# The same, with deadlines forty seconds out instead of days, so the worker
+# claims each one on its next tick. For watching the worker work (open
+# http://127.0.0.1:6061/debug/live beside it); not realistic traffic.
+emit-rush:
+	cd $(SIM) && npm run emit -- --rate 120 --rush
+
 # The network coming back with a verdict on a representment. Needs the worker
 # to have run first: it is what moves chargebacks to 'represented'.
 rule:

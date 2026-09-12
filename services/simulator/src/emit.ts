@@ -87,14 +87,24 @@ function claimFor(rng: () => number, reasonCode: string): string | undefined {
   return pick(rng, pool);
 }
 
-function buildEvent(rng: () => number, candidate: Candidate): DisputeWebhook {
+/**
+ * A rushed dispute is due in a moment rather than in days, so the worker
+ * claims it on its next tick instead of filing it away until its deadline
+ * approaches. For watching the worker work, not for realism: real deadlines
+ * are days, and the worker's whole design is that it only touches what is due.
+ */
+const RUSH_DEADLINE_MS = 40_000;
+
+function buildEvent(rng: () => number, candidate: Candidate, rush = false): DisputeWebhook {
   const kind: DisputeKind = chance(rng, 0.7) ? "alert" : "chargeback";
   const codes = REASON_CODES[candidate.card_network];
   const reason = weighted(rng, codes.map((code) => [code, code.weight] as const));
   const [minHours, maxHours] = DEADLINE_HOURS[kind];
 
   const openedAt = new Date();
-  const respondBy = new Date(openedAt.getTime() + int(rng, minHours, maxHours) * HOUR_MS);
+  const respondBy = new Date(
+    openedAt.getTime() + (rush ? RUSH_DEADLINE_MS : int(rng, minHours, maxHours) * HOUR_MS),
+  );
   const claim = claimFor(rng, reason.code);
 
   return {
@@ -141,7 +151,12 @@ async function post(event: DisputeWebhook, secret: string): Promise<string> {
  * `--replay` resends every event a second time. Until Phase 1's Redis dedupe
  * exists, that is how you see the bug: two disputes, one event.
  */
-export async function emit(options: { rate: number; count: number; replay: boolean }): Promise<void> {
+export async function emit(options: {
+  rate: number;
+  count: number;
+  replay: boolean;
+  rush: boolean;
+}): Promise<void> {
   const rng = makeRng(Date.now() & 0xffffffff);
   const intervalMs = Math.max(50, Math.round(60_000 / options.rate));
 
@@ -173,7 +188,7 @@ export async function emit(options: { rate: number; count: number; replay: boole
 
   while (options.count === 0 || sent < options.count) {
     const candidate = pick(rng, candidates);
-    const event = buildEvent(rng, candidate);
+    const event = buildEvent(rng, candidate, options.rush);
     const attempts = options.replay ? 2 : 1;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {

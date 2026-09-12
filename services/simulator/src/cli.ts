@@ -51,7 +51,12 @@ async function main(): Promise<void> {
       await verify();
       break;
     case "emit":
-      await emit({ rate: option("rate", 30), count: option("count", 0), replay: flag("replay") });
+      await emit({
+        rate: option("rate", 30),
+        count: option("count", 0),
+        replay: flag("replay"),
+        rush: flag("rush"),
+      });
       break;
     case "rule":
       await rule({ count: option("count", 25), rate: option("rate", 600) });
