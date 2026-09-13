@@ -15,9 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// ChargebackFeeMinor is what the network charges the merchant when a
+// chargebackFeeMinor is what the network charges the merchant when a
 // chargeback is lost, on top of the disputed amount.
-const ChargebackFeeMinor int64 = 1500
+const chargebackFeeMinor int64 = 1500
 
 // Every posting is idempotent through the unique external_ref on
 // ledger_transactions: 'dispute:1234:hold' can exist exactly once. A retry
@@ -143,12 +143,12 @@ func SettleLoss(ctx context.Context, tx pgx.Tx, disputeID, merchantID, amountMin
 	return write(ctx, tx,
 		ref(disputeID, "chargeback"), "representment_lost", currency,
 		why,
-		merchantID, at, map[string]int64{"fee_minor": ChargebackFeeMinor},
+		merchantID, at, map[string]int64{"fee_minor": chargebackFeeMinor},
 		[]posting{
 			{account: "disputes_payable", merchantScoped: true, direction: "debit", amountMinor: amountMinor},
 			{account: "settlement_clearing", direction: "credit", amountMinor: amountMinor},
-			{account: "merchant_balance", merchantScoped: true, direction: "debit", amountMinor: ChargebackFeeMinor},
-			{account: "fee_revenue", direction: "credit", amountMinor: ChargebackFeeMinor},
+			{account: "merchant_balance", merchantScoped: true, direction: "debit", amountMinor: chargebackFeeMinor},
+			{account: "fee_revenue", direction: "credit", amountMinor: chargebackFeeMinor},
 		},
 	)
 }

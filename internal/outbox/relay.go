@@ -12,12 +12,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Publisher is whatever the messages go to. Phase 1 logs them; Phase 4 swaps in
-// SQS without the relay changing.
+// Publisher is whatever the messages go to. The relay was written against this
+// interface before a queue existed, which is why SQSPublisher and Live could
+// be slotted in without the relay changing.
 type Publisher interface {
+	// Publish delivers one message; an error leaves its row unpublished.
 	Publish(ctx context.Context, msg Message) error
 }
 
+// Message is one outbox row as the publisher sees it.
 type Message struct {
 	ID            int64
 	AggregateType string
@@ -26,6 +29,7 @@ type Message struct {
 	Payload       json.RawMessage
 }
 
+// Relay polls the outbox table and hands unpublished rows to a Publisher.
 type Relay struct {
 	pool      *pgxpool.Pool
 	publisher Publisher
@@ -34,6 +38,8 @@ type Relay struct {
 	logger    *slog.Logger
 }
 
+// NewRelay builds a relay that polls every interval and takes at most
+// batchSize rows per pass.
 func NewRelay(pool *pgxpool.Pool, publisher Publisher, interval time.Duration, batchSize int, logger *slog.Logger) *Relay {
 	return &Relay{
 		pool:      pool,
@@ -162,6 +168,7 @@ type Live struct {
 	Logger  *slog.Logger
 }
 
+// Publish delivers through Next, then broadcasts on the Redis channel.
 func (p Live) Publish(ctx context.Context, msg Message) error {
 	if err := p.Next.Publish(ctx, msg); err != nil {
 		return err

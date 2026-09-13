@@ -63,8 +63,9 @@ type Redriver struct {
 	Target string
 }
 
-// Depth reports roughly how many messages a queue holds. Approximate: SQS
-// excludes in-flight messages and lags, so it is for reporting, not deciding.
+// Depth reports roughly how many messages any queue holds; queueURL need not be
+// Source or Target. Approximate: SQS excludes in-flight messages and lags, so
+// it is for reporting, not deciding.
 func (r *Redriver) Depth(ctx context.Context, queueURL string) (int, error) {
 	out, err := r.Client.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
 		QueueUrl: aws.String(queueURL),

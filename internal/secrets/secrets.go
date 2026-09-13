@@ -23,6 +23,8 @@ import (
 //
 // Plural, because rotation is not an instant: see signing.VerifyAny.
 type Resolver interface {
+	// SecretsFor returns the keys a merchant may currently sign with, newest
+	// first, or nothing at all for a merchant it does not know.
 	SecretsFor(ctx context.Context, merchantExternalID string) ([]string, error)
 }
 
@@ -35,6 +37,7 @@ type FromDatabase struct {
 	Pool *pgxpool.Pool
 }
 
+// SecretsFor returns the one key the merchants row holds.
 func (d FromDatabase) SecretsFor(ctx context.Context, merchantExternalID string) ([]string, error) {
 	var secret string
 	err := d.Pool.QueryRow(ctx,
@@ -57,11 +60,11 @@ func (d FromDatabase) SecretsFor(ctx context.Context, merchantExternalID string)
 //
 //	{"mrc_northwind": ["whsec_new", "whsec_previous"]}
 type FromManager struct {
-	Client   *secretsmanager.Client
-	SecretID string
-	// TTL bounds how long a rotated key takes to take effect. It is the real
+	client   *secretsmanager.Client
+	secretID string
+	// ttl bounds how long a rotated key takes to take effect. It is the real
 	// rotation latency, so it wants to be minutes, not hours.
-	TTL time.Duration
+	ttl time.Duration
 
 	mu        sync.RWMutex
 	cache     map[string][]string
@@ -72,10 +75,13 @@ type FromManager struct {
 	refresh sync.Mutex
 }
 
+// NewFromManager reads secretID through client and caches the document for ttl.
 func NewFromManager(client *secretsmanager.Client, secretID string, ttl time.Duration) *FromManager {
-	return &FromManager{Client: client, SecretID: secretID, TTL: ttl}
+	return &FromManager{client: client, secretID: secretID, ttl: ttl}
 }
 
+// SecretsFor answers from the cached document, refetching it once the TTL has
+// lapsed.
 func (m *FromManager) SecretsFor(ctx context.Context, merchantExternalID string) ([]string, error) {
 	if cached, ok := m.lookup(merchantExternalID); ok {
 		return cached, nil
@@ -99,7 +105,7 @@ func (m *FromManager) lookup(merchantExternalID string) ([]string, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	if m.cache == nil || time.Since(m.fetchedAt) > m.TTL {
+	if m.cache == nil || time.Since(m.fetchedAt) > m.ttl {
 		return nil, false
 	}
 	secrets, ok := m.cache[merchantExternalID]
@@ -112,22 +118,22 @@ func (m *FromManager) load(ctx context.Context) error {
 
 	// Somebody else may have refreshed while this call waited for the lock.
 	m.mu.RLock()
-	fresh := m.cache != nil && time.Since(m.fetchedAt) <= m.TTL
+	fresh := m.cache != nil && time.Since(m.fetchedAt) <= m.ttl
 	m.mu.RUnlock()
 	if fresh {
 		return nil
 	}
 
-	out, err := m.Client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
-		SecretId: aws.String(m.SecretID),
+	out, err := m.client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: aws.String(m.secretID),
 	})
 	if err != nil {
-		return fmt.Errorf("read %s: %w", m.SecretID, err)
+		return fmt.Errorf("read %s: %w", m.secretID, err)
 	}
 
 	raw := aws.ToString(out.SecretString)
 	if raw == "" {
-		return fmt.Errorf("%s has no string value", m.SecretID)
+		return fmt.Errorf("%s has no string value", m.secretID)
 	}
 
 	// Each merchant maps to one key or a list of them; both shapes are accepted
@@ -135,7 +141,7 @@ func (m *FromManager) load(ctx context.Context) error {
 	// single merchant.
 	var loose map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &loose); err != nil {
-		return fmt.Errorf("parse %s: %w", m.SecretID, err)
+		return fmt.Errorf("parse %s: %w", m.secretID, err)
 	}
 
 	parsed := make(map[string][]string, len(loose))

@@ -22,20 +22,6 @@ func processCPUSeconds() float64 {
 		float64(ru.Stime.Sec) + float64(ru.Stime.Usec)/1e6
 }
 
-// The live page is the goroutine dump made readable, plus the runtime's own
-// numbers, refreshed every two seconds by the process that owns them.
-//
-// It lives here rather than in the dashboard or an artifact for one reason:
-// only a page served by the process can fetch the process's loopback
-// endpoints. The Angular app runs on another origin and a published artifact
-// is blocked from fetching localhost at all.
-//
-// What it can and cannot show, said plainly on the page: goroutines, threads,
-// heap and GC come straight from runtime/metrics; "cores busy" is an average
-// derived from CPU seconds per wall second, because the runtime does not
-// expose which P is running what at an instant - that is what the execution
-// trace (make trace) is for.
-
 var started = time.Now()
 
 // snapshot is what /debug/runtime.json returns.
@@ -166,6 +152,19 @@ func runtimeJSON(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(readSnapshot())
 }
 
+// livePage serves the goroutine dump made readable, plus the runtime's own
+// numbers, refreshed every two seconds by the process that owns them.
+//
+// It lives here rather than in the dashboard or an artifact for one reason:
+// only a page served by the process can fetch the process's loopback
+// endpoints. The Angular app runs on another origin and a published artifact
+// is blocked from fetching localhost at all.
+//
+// What it can and cannot show, said plainly on the page: goroutines, threads,
+// heap and GC come straight from runtime/metrics; "cores busy" is an average
+// derived from CPU seconds per wall second, because the runtime does not
+// expose which P is running what at an instant - that is what the execution
+// trace (make trace) is for.
 func livePage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

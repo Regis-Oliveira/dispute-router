@@ -17,12 +17,18 @@ import (
 	"time"
 )
 
-const DefaultTolerance = 5 * time.Minute
+// defaultTolerance is the window the tests verify against; the binaries take
+// theirs from config.SignatureTolerance.
+const defaultTolerance = 5 * time.Minute
 
 var (
+	// ErrMalformedHeader is a header without a parseable t= and v1= pair.
 	ErrMalformedHeader = errors.New("signature header is malformed")
-	ErrStaleTimestamp  = errors.New("signature timestamp is outside the tolerance window")
-	ErrMismatch        = errors.New("signature does not match")
+	// ErrStaleTimestamp is a header whose timestamp is outside the tolerance
+	// window in either direction.
+	ErrStaleTimestamp = errors.New("signature timestamp is outside the tolerance window")
+	// ErrMismatch is a well-formed, fresh header whose HMAC does not match.
+	ErrMismatch = errors.New("signature does not match")
 )
 
 // Header is the value of X-Processor-Signature: "t=1735689600,v1=<hex>".
@@ -31,6 +37,7 @@ type Header struct {
 	Signature []byte
 }
 
+// ParseHeader splits a header value into its timestamp and signature.
 func ParseHeader(value string) (Header, error) {
 	var (
 		parsed Header

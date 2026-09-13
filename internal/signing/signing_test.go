@@ -12,7 +12,7 @@ func TestVerifyAcceptsItsOwnSignature(t *testing.T) {
 	body := []byte(`{"id":"evt_1","type":"dispute.opened"}`)
 	now := time.Unix(1_767_225_600, 0).UTC()
 
-	if err := Verify(secret, body, Sign(secret, body, now), now, DefaultTolerance); err != nil {
+	if err := Verify(secret, body, Sign(secret, body, now), now, defaultTolerance); err != nil {
 		t.Fatalf("Verify() = %v, want nil", err)
 	}
 }
@@ -24,7 +24,7 @@ func TestVerifyRejectsATamperedBody(t *testing.T) {
 	tampered := []byte(`{"amount_minor":9000}`)
 	now := time.Now()
 
-	err := Verify(secret, tampered, Sign(secret, original, now), now, DefaultTolerance)
+	err := Verify(secret, tampered, Sign(secret, original, now), now, defaultTolerance)
 	if !errors.Is(err, ErrMismatch) {
 		t.Fatalf("Verify() = %v, want ErrMismatch", err)
 	}
@@ -34,7 +34,7 @@ func TestVerifyRejectsAnotherMerchantsSecret(t *testing.T) {
 	body := []byte(`{"id":"evt_1"}`)
 	now := time.Now()
 
-	err := Verify("whsec_someone_else", body, Sign(secret, body, now), now, DefaultTolerance)
+	err := Verify("whsec_someone_else", body, Sign(secret, body, now), now, defaultTolerance)
 	if !errors.Is(err, ErrMismatch) {
 		t.Fatalf("Verify() = %v, want ErrMismatch", err)
 	}
@@ -51,7 +51,7 @@ func TestVerifyRejectsReplayOutsideTolerance(t *testing.T) {
 		"too future": signedAt.Add(-10 * time.Minute),
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := Verify(secret, body, Sign(secret, body, signedAt), now, DefaultTolerance)
+			err := Verify(secret, body, Sign(secret, body, signedAt), now, defaultTolerance)
 			if !errors.Is(err, ErrStaleTimestamp) {
 				t.Fatalf("Verify() = %v, want ErrStaleTimestamp", err)
 			}
@@ -108,7 +108,7 @@ func TestVerifyAnyAcceptsEitherSideOfARotation(t *testing.T) {
 		"signed with the old key": current,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if err := VerifyAny(secrets, body, Sign(secret, body, now), now, DefaultTolerance); err != nil {
+			if err := VerifyAny(secrets, body, Sign(secret, body, now), now, defaultTolerance); err != nil {
 				t.Errorf("VerifyAny() = %v, want nil", err)
 			}
 		})
@@ -119,7 +119,7 @@ func TestVerifyAnyStillRejectsAStranger(t *testing.T) {
 	body := []byte(`{"id":"evt_1"}`)
 	now := time.Now()
 
-	err := VerifyAny([]string{"whsec_a", "whsec_b"}, body, Sign("whsec_c", body, now), now, DefaultTolerance)
+	err := VerifyAny([]string{"whsec_a", "whsec_b"}, body, Sign("whsec_c", body, now), now, defaultTolerance)
 	if !errors.Is(err, ErrMismatch) {
 		t.Fatalf("VerifyAny() = %v, want ErrMismatch", err)
 	}
@@ -129,7 +129,7 @@ func TestVerifyAnyWithNoSecretsRejects(t *testing.T) {
 	body := []byte(`{"id":"evt_1"}`)
 	now := time.Now()
 
-	if err := VerifyAny(nil, body, Sign("whsec_a", body, now), now, DefaultTolerance); !errors.Is(err, ErrMismatch) {
+	if err := VerifyAny(nil, body, Sign("whsec_a", body, now), now, defaultTolerance); !errors.Is(err, ErrMismatch) {
 		t.Fatalf("VerifyAny() = %v, want ErrMismatch", err)
 	}
 }
@@ -141,7 +141,7 @@ func TestVerifyAnyReportsAStaleTimestampWithoutTryingEverySecret(t *testing.T) {
 	signedAt := time.Now()
 
 	err := VerifyAny([]string{"a", "b", "c"}, body, Sign("a", body, signedAt),
-		signedAt.Add(time.Hour), DefaultTolerance)
+		signedAt.Add(time.Hour), defaultTolerance)
 	if !errors.Is(err, ErrStaleTimestamp) {
 		t.Fatalf("VerifyAny() = %v, want ErrStaleTimestamp", err)
 	}

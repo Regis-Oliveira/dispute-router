@@ -22,6 +22,8 @@ type SQSPublisher struct {
 	QueueURL string
 }
 
+// Publish sends the message as one JSON envelope with its event type and outbox
+// id as message attributes.
 func (p SQSPublisher) Publish(ctx context.Context, msg Message) error {
 	body, err := json.Marshal(struct {
 		OutboxID      int64           `json:"outbox_id"`
