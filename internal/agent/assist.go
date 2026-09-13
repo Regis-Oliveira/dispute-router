@@ -148,7 +148,7 @@ type Phase struct {
 // citation check runs in host code before the verifier is paid for, because a
 // draft citing a file that is not on the dispute is already rejected and asking
 // a model to read it to discover that is slower, dearer and less certain.
-func (a *Assistant) Assist(ctx context.Context, disputeID int64) (string, error) {
+func (a *Assistant) Assist(ctx context.Context, disputeID int64) (Outcome, error) {
 	claim, err := a.runs.Hold(ctx, disputeID)
 	if err != nil {
 		return "", err
@@ -183,7 +183,7 @@ func (a *Assistant) Assist(ctx context.Context, disputeID int64) (string, error)
 	return outcome, nil
 }
 
-func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, error) {
+func (a *Assistant) attempt(ctx context.Context, claim Claim) (Outcome, Run, error) {
 	started := time.Now()
 	run := Run{
 		Model:             a.model,

@@ -23,7 +23,9 @@ type EvidenceSource interface {
 	Open(ctx context.Context, disputeID int64, key string) (api.EvidenceObject, error)
 }
 
-// The three answers to "what is in this file", as the model reads them.
+// EvidenceStatus is the answer to "what is in this file", as the model reads
+// it. Three values, and they go into the record verbatim rather than into a
+// database column, so the prompt is the contract they have to keep.
 //
 // Before the contents were read at all, the record listed a filename and a
 // size, and the first dispute with a file behind it showed what that buys: the
@@ -32,10 +34,12 @@ type EvidenceSource interface {
 // such thing, and both were right. A name is not a document. The status is on
 // every file so that a file whose text could not be read is never mistaken for
 // one that was read and said nothing.
+type EvidenceStatus string
+
 const (
-	EvidenceRead    = "read"     // the text below is the whole file
-	EvidenceCut     = "cut"      // the text below is the start of the file
-	EvidenceNotRead = "not read" // there is no text below, and Note says why
+	EvidenceRead    EvidenceStatus = "read"     // the text below is the whole file
+	EvidenceCut     EvidenceStatus = "cut"      // the text below is the start of the file
+	EvidenceNotRead EvidenceStatus = "not read" // there is no text below, and Note says why
 )
 
 // maxEvidenceFileRunes bounds one file at the prompt boundary and

@@ -255,7 +255,7 @@ func printReport(report eval.Report) {
 
 	if len(report.FailuresByRule) > 0 {
 		fmt.Println("\nfailures by rule, across all runs:")
-		rules := make([]string, 0, len(report.FailuresByRule))
+		rules := make([]eval.Rule, 0, len(report.FailuresByRule))
 		for rule := range report.FailuresByRule {
 			rules = append(rules, rule)
 		}
@@ -311,7 +311,7 @@ func failureSummary(r eval.Result) string {
 	if len(byRule) == 0 {
 		return ""
 	}
-	rules := make([]string, 0, len(byRule))
+	rules := make([]eval.Rule, 0, len(byRule))
 	for rule := range byRule {
 		rules = append(rules, rule)
 	}
@@ -322,7 +322,7 @@ func failureSummary(r eval.Result) string {
 		if n := byRule[rule]; n > 1 {
 			parts = append(parts, fmt.Sprintf("%s x%d", rule, n))
 		} else {
-			parts = append(parts, rule)
+			parts = append(parts, string(rule))
 		}
 	}
 	return strings.Join(parts, ", ")

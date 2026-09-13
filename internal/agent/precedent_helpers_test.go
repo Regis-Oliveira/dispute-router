@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func draftResponseFor(t *testing.T, recommendation, letter string) Response {
+func draftResponseFor(t *testing.T, recommendation Recommendation, letter string) Response {
 	t.Helper()
 	input, err := json.Marshal(map[string]any{
 		"recommendation": recommendation,

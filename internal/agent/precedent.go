@@ -25,17 +25,48 @@ type Precedent struct {
 	// How it was found, and how close. Carried into the prompt so the drafter
 	// can weigh a near match differently from a distant one - and carried into
 	// the trace so a bad draft can be traced to a bad neighbour.
-	Method     string  `json:"method"`
-	Similarity float64 `json:"similarity"`
+	Method     RetrievalMethod `json:"method"`
+	Similarity float64         `json:"similarity"`
 }
+
+// RetrievalMethod names how precedent was looked for. It has no database
+// column behind it - it is written into agent_runs.trace as JSON and read back
+// by the report - so nothing but this file constrains the values, which is
+// exactly why they are a closed set here: the report buckets runs by method,
+// and a fifth spelling arriving from somewhere would show up as its own bucket
+// rather than as an error.
+//
+// RetrievalFailed is the odd one: not a strategy but the absence of one, kept
+// in the same vocabulary because the field it lands in is the same field, and
+// the report has to be able to count it.
+type RetrievalMethod string
+
+const (
+	// RetrievalVector is nearest-neighbour over the embedded claims.
+	RetrievalVector RetrievalMethod = "vector"
+
+	// RetrievalLexical is full-text ranking over the same claims - the
+	// baseline the vector path has to beat, and the fallback when the corpus
+	// has not been embedded.
+	RetrievalLexical RetrievalMethod = "lexical"
+
+	// RetrievalNone means there was nothing to match on: no cardholder claim.
+	// The common case, not the edge one.
+	RetrievalNone RetrievalMethod = "none"
+
+	// RetrievalFailed means the search itself errored. The draft is still
+	// written - retrieval failing is not the record failing - and Note carries
+	// what went wrong.
+	RetrievalFailed RetrievalMethod = "failed"
+)
 
 // Retrieval is how precedents were found for one draft, recorded so that a
 // change in draft quality can be attributed to a change in retrieval.
 type Retrieval struct {
-	Method string `json:"method"`
-	Model  string `json:"model,omitempty"`
-	Found  int    `json:"found"`
-	Note   string `json:"note,omitempty"`
+	Method RetrievalMethod `json:"method"`
+	Model  string          `json:"model,omitempty"`
+	Found  int             `json:"found"`
+	Note   string          `json:"note,omitempty"`
 }
 
 // Retriever finds precedent for a dispute.
@@ -70,7 +101,7 @@ func (r *Retriever) For(ctx context.Context, disputeID int64, merchantExternalID
 	if strings.TrimSpace(claim) == "" {
 		// Nothing to match on. Most cardholders file through their bank and
 		// say nothing, so this is the common case, not the edge one.
-		return nil, Retrieval{Method: "none", Note: "no cardholder claim to match against"}, nil
+		return nil, Retrieval{Method: RetrievalNone, Note: "no cardholder claim to match against"}, nil
 	}
 
 	if r.embedder != nil {
@@ -80,7 +111,7 @@ func (r *Retriever) For(ctx context.Context, disputeID int64, merchantExternalID
 		}
 		if len(precedents) > 0 {
 			return precedents, Retrieval{
-				Method: "vector", Model: r.embedder.Model(), Found: len(precedents),
+				Method: RetrievalVector, Model: r.embedder.Model(), Found: len(precedents),
 			}, nil
 		}
 		// An embedder with an empty corpus is a configuration state, not an
@@ -91,7 +122,7 @@ func (r *Retriever) For(ctx context.Context, disputeID int64, merchantExternalID
 			return nil, Retrieval{}, err
 		}
 		return precedents, Retrieval{
-			Method: "lexical", Found: len(precedents),
+			Method: RetrievalLexical, Found: len(precedents),
 			Note: "no embedded neighbours; corpus may not be backfilled",
 		}, nil
 	}
@@ -100,7 +131,7 @@ func (r *Retriever) For(ctx context.Context, disputeID int64, merchantExternalID
 	if err != nil {
 		return nil, Retrieval{}, err
 	}
-	return precedents, Retrieval{Method: "lexical", Found: len(precedents)}, nil
+	return precedents, Retrieval{Method: RetrievalLexical, Found: len(precedents)}, nil
 }
 
 const precedentColumns = `
@@ -148,7 +179,7 @@ func (r *Retriever) NearestTo(ctx context.Context, disputeID int64, merchant str
 	}
 	defer rows.Close()
 
-	return scanPrecedents(rows, "vector")
+	return scanPrecedents(rows, RetrievalVector)
 }
 
 // orQuery turns a whole claim into a tsquery joined by OR.
@@ -186,7 +217,7 @@ func (r *Retriever) Lexical(ctx context.Context, disputeID int64, merchant, clai
 	}
 	defer rows.Close()
 
-	return scanPrecedents(rows, "lexical")
+	return scanPrecedents(rows, RetrievalLexical)
 }
 
 type scannable interface {
@@ -195,7 +226,7 @@ type scannable interface {
 	Err() error
 }
 
-func scanPrecedents(rows scannable, method string) ([]Precedent, error) {
+func scanPrecedents(rows scannable, method RetrievalMethod) ([]Precedent, error) {
 	out := []Precedent{}
 	for rows.Next() {
 		var p Precedent

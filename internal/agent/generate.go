@@ -13,27 +13,38 @@ import (
 // name what it is looking at.
 const RepresentmentTool = "write_representment"
 
-// What the generator can conclude. Two outcomes, because a generator that must
-// always produce a rebuttal will manufacture one - the way out has to be a
-// first-class answer rather than a failure.
+// Recommendation is what the generator concluded. Two values, because a
+// generator that must always produce a rebuttal will manufacture one - the way
+// out has to be a first-class answer rather than a failure.
+//
+// It mirrors the CHECK on agent_runs.recommendation, and the same two words
+// are named to the model in draftInput's jsonschema description, so a value
+// changed here without both the migration and that text stops matching either
+// end.
+type Recommendation string
+
 const (
-	RecommendRepresent    = "represent"
-	RecommendInsufficient = "insufficient_evidence"
+	// RecommendRepresent means the record supports contesting the dispute.
+	RecommendRepresent Recommendation = "represent"
+
+	// RecommendInsufficient means it does not, and the letter says what would
+	// have to be on file instead.
+	RecommendInsufficient Recommendation = "insufficient_evidence"
 )
 
 type draftInput struct {
-	Recommendation string   `json:"recommendation" jsonschema:"Either represent, when the record supports a rebuttal, or insufficient_evidence when it does not"`
-	Letter         string   `json:"letter" jsonschema:"The representment itself, addressed to the issuing bank. When the recommendation is insufficient_evidence, one paragraph saying what the record would need to contain instead"`
-	CitedEvidence  []string `json:"cited_evidence,omitempty" jsonschema:"The exact filenames from evidence_on_file that the letter refers to. Empty if it refers to none"`
+	Recommendation Recommendation `json:"recommendation" jsonschema:"Either represent, when the record supports a rebuttal, or insufficient_evidence when it does not"`
+	Letter         string         `json:"letter" jsonschema:"The representment itself, addressed to the issuing bank. When the recommendation is insufficient_evidence, one paragraph saying what the record would need to contain instead"`
+	CitedEvidence  []string       `json:"cited_evidence,omitempty" jsonschema:"The exact filenames from evidence_on_file that the letter refers to. Empty if it refers to none"`
 }
 
 // Draft is what the generator produced, plus what it cost.
 type Draft struct {
-	Recommendation string   `json:"recommendation"`
-	Letter         string   `json:"letter"`
-	CitedEvidence  []string `json:"cited_evidence,omitempty"`
-	Usage          Usage    `json:"usage"`
-	CostMicros     int64    `json:"cost_micros"`
+	Recommendation Recommendation `json:"recommendation"`
+	Letter         string         `json:"letter"`
+	CitedEvidence  []string       `json:"cited_evidence,omitempty"`
+	Usage          Usage          `json:"usage"`
+	CostMicros     int64          `json:"cost_micros"`
 
 	// written, like Verdict.checked, is set only by a parsed answer, so a zero
 	// Draft is never mistaken for one the model produced.

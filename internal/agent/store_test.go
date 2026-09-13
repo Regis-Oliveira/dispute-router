@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func aRun(outcome string, escalated bool) Run {
+func aRun(outcome Outcome, escalated bool) Run {
 	return Run{
 		Model: "test-model", PromptFingerprint: "sha256:test",
 		ToolSurface: []string{RepresentmentTool, VerdictTool},
@@ -164,7 +164,7 @@ func TestEscalationRoutesWithoutRelabelling(t *testing.T) {
 		t.Errorf("state = %q, want draft_ready; an escalated run goes to a person", got)
 	}
 
-	var outcome string
+	var outcome Outcome
 	var findings int
 	if err := pool.QueryRow(ctx, `
 		SELECT outcome, jsonb_array_length(findings) FROM agent_runs WHERE dispute_id = $1`,

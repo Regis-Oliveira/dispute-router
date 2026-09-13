@@ -38,7 +38,7 @@ func TestLexicalRetrievalFindsRealPrecedent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
-	if retrieval.Method != "lexical" {
+	if retrieval.Method != RetrievalLexical {
 		t.Fatalf("method = %q", retrieval.Method)
 	}
 	if len(precedents) == 0 {
@@ -84,7 +84,7 @@ func TestVectorRetrievalRoundTrips(t *testing.T) {
 	}
 	t.Logf("vector: method=%s found=%d", retrieval.Method, len(precedents))
 
-	if retrieval.Method == "vector" {
+	if retrieval.Method == RetrievalVector {
 		// Neighbours come back nearest first, and similarity is a cosine so it
 		// cannot leave [-1, 1]. A value outside it means the distance operator
 		// and the similarity expression disagree.

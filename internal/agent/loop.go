@@ -270,7 +270,7 @@ type ToolCall struct {
 	// Rule is set when the call was refused: which rule refused it. Empty on
 	// a call that ran. This is what lets a session report say "refusals by
 	// rule" instead of "some errors".
-	Rule    string        `json:"rule,omitempty"`
+	Rule    Rule          `json:"rule,omitempty"`
 	Latency time.Duration `json:"latency_ns"`
 }
 

@@ -35,8 +35,8 @@ func startTrace(path string) (func(), error) {
 // aggregates, plus the stored trace and findings decoded into the types that
 // wrote them.
 type runRow struct {
-	Outcome        string
-	Recommendation string
+	Outcome        agent.Outcome
+	Recommendation agent.Recommendation
 	Attempt        int
 	InputTokens    int
 	OutputTokens   int
@@ -94,7 +94,7 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 	var withFiles, withFilesRead int
 	var walls, gens, vers, assemblies []time.Duration
 	for _, r := range runs {
-		outcomes[r.Outcome]++
+		outcomes[string(r.Outcome)]++
 		cost += int(r.CostMicros)
 		tokensIn += r.InputTokens
 		tokensOut += r.OutputTokens
@@ -109,7 +109,10 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 		gens = append(gens, r.Trace.Generator.Latency)
 		walls = append(walls, r.Wall)
 		assemblies = append(assemblies, r.Trace.Assembly)
-		method := r.Trace.Retrieval.Method
+		// The buckets are display labels rather than the vocabulary itself:
+		// a row written before the trace carried a method has none, and
+		// "unrecorded" is not a retrieval strategy.
+		method := string(r.Trace.Retrieval.Method)
 		if method == "" {
 			method = "unrecorded"
 		}
@@ -130,7 +133,7 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 			retries++
 		}
 		for _, f := range r.Findings {
-			checks[f.Check]++
+			checks[string(f.Check)]++
 		}
 	}
 

@@ -56,16 +56,32 @@ type ToolResult struct {
 	// wire. A refusal the model reads is prose; a refusal an operator counts
 	// is a rule id, and "refusals by rule" cannot be totalled from prose. The
 	// same reason every verifier finding carries a check name.
-	Rule string
+	Rule Rule
 }
 
-// The rules a tool call can be refused under. A closed set, so a report can
-// count them across sessions; the loop's own stops are named by Halt.
+// Rule names why a tool call was refused. A closed set, so a report can count
+// them across sessions; the loop's own stops are named by Halt.
+//
+// The zero value means the call was not refused, which is why every refusal
+// path names one explicitly.
+type Rule string
+
 const (
-	RuleUnknownTool      = "unknown_tool"
-	RuleInvalidArguments = "invalid_arguments"
-	RuleNotFound         = "not_found"
-	RuleResultTooLarge   = "result_too_large"
+	// RuleUnknownTool is a name the registry does not hold. Answered rather
+	// than fatal: a model that guessed can pick a real name if it is told
+	// which exist.
+	RuleUnknownTool Rule = "unknown_tool"
+
+	// RuleInvalidArguments is input the tool could not decode or would not
+	// accept.
+	RuleInvalidArguments Rule = "invalid_arguments"
+
+	// RuleNotFound is a well-formed request for something that is not there.
+	RuleNotFound Rule = "not_found"
+
+	// RuleResultTooLarge is an answer over maxResultBytes. Refused whole
+	// rather than cut, because half a JSON document is not a smaller answer.
+	RuleResultTooLarge Rule = "result_too_large"
 )
 
 // ---------------------------------------------------------------------------
@@ -177,7 +193,7 @@ func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
 // dispute that does not exist, the tool catalog for arguments that did not
 // decode - so this stays a question about the domain instead of a guess about
 // error text. Anything else is infrastructure, and not actionable.
-func ruleFor(err error) (rule string, actionable bool) {
+func ruleFor(err error) (rule Rule, actionable bool) {
 	switch {
 	case errors.Is(err, disputetools.ErrInvalidArguments), errors.Is(err, api.ErrInvalidInput):
 		return RuleInvalidArguments, true
@@ -187,7 +203,7 @@ func ruleFor(err error) (rule string, actionable bool) {
 	return "", false
 }
 
-func refuse(use ToolUse, rule, reason string) ToolResult {
+func refuse(use ToolUse, rule Rule, reason string) ToolResult {
 	return ToolResult{
 		ToolUseID: use.ID,
 		Content:   reason,

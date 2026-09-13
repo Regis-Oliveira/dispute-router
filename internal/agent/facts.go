@@ -86,9 +86,9 @@ type EvidenceRef struct {
 	ContentType string `json:"content_type,omitempty"`
 	// Status is EvidenceRead, EvidenceCut or EvidenceNotRead; Note says how
 	// much was cut or why nothing was read.
-	Status string `json:"contents"`
-	Note   string `json:"note,omitempty"`
-	Text   string `json:"-"`
+	Status EvidenceStatus `json:"contents"`
+	Note   string         `json:"note,omitempty"`
+	Text   string         `json:"-"`
 }
 
 // ErrNoEvidenceSource is returned rather than reporting an empty evidence list.
@@ -190,7 +190,7 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 			// without precedent is worse, not wrong, and refusing to draft at
 			// all because a search was unavailable would be the expensive
 			// version of a cautious answer.
-			retrieval = Retrieval{Method: "failed", Note: err.Error()}
+			retrieval = Retrieval{Method: RetrievalFailed, Note: err.Error()}
 		}
 		facts.Precedents = precedents
 		facts.Retrieval = retrieval
@@ -552,7 +552,7 @@ func (f Facts) renderPrecedent() string {
 		// word "similarity" it told the drafter every match was distant. The
 		// lexical path names its method and gives no number.
 		match := "found by text search"
-		if p.Method == "vector" {
+		if p.Method == RetrievalVector {
 			match = fmt.Sprintf("similarity %.2f", p.Similarity)
 		}
 		fmt.Fprintf(&b, "\n%s - %s, reason %s, %s, %s\nTheir claim:\n",

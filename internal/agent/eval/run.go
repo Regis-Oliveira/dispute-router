@@ -71,12 +71,12 @@ type Sample struct {
 	// The draft itself. A grader's verdict is not reviewable without the text
 	// it was passed - "wrong_figure" says a number is wrong and not which one
 	// the letter actually used.
-	Recommendation string `json:"recommendation,omitempty"`
-	Letter         string `json:"letter,omitempty"`
+	Recommendation agent.Recommendation `json:"recommendation,omitempty"`
+	Letter         string               `json:"letter,omitempty"`
 
 	// What the same dispute produced with the attack removed. Empty unless the
 	// case asked for a control.
-	ControlRecommendation string `json:"control_recommendation,omitempty"`
+	ControlRecommendation agent.Recommendation `json:"control_recommendation,omitempty"`
 
 	Usage      agent.Usage   `json:"usage"`
 	CostMicros int64         `json:"cost_micros"`
@@ -99,8 +99,8 @@ type Result struct {
 
 	// Which retrieval strategy actually ran, and how much it found. The same
 	// for every sample of a case, since the record is assembled once.
-	Retrieval  string `json:"retrieval,omitempty"`
-	Precedents int    `json:"precedents"`
+	Retrieval  agent.RetrievalMethod `json:"retrieval,omitempty"`
+	Precedents int                   `json:"precedents"`
 
 	Usage      agent.Usage `json:"usage"`
 	CostMicros int64       `json:"cost_micros"`
@@ -135,8 +135,8 @@ func (r Result) Unstable() bool {
 }
 
 // FailuresByRule counts, across samples, how often each rule was broken.
-func (r Result) FailuresByRule() map[string]int {
-	out := map[string]int{}
+func (r Result) FailuresByRule() map[Rule]int {
+	out := map[Rule]int{}
 	for _, sample := range r.Samples {
 		for _, g := range sample.Grades {
 			if !g.Passed {
@@ -164,8 +164,8 @@ type Report struct {
 	// average over a thing that moves.
 	UnstableCases int `json:"unstable_cases"`
 
-	FailuresByRule  map[string]int `json:"failures_by_rule"`
-	TotalCostMicros int64          `json:"total_cost_micros"`
+	FailuresByRule  map[Rule]int `json:"failures_by_rule"`
+	TotalCostMicros int64        `json:"total_cost_micros"`
 
 	Usage agent.Usage `json:"usage"`
 
@@ -210,7 +210,7 @@ func (r *Runner) withoutTheAttack(ctx context.Context, facts agent.Facts) (agent
 // Run drafts for each case, Samples times, and grades every draft.
 func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 	samples := max(1, r.Samples)
-	report := Report{FailuresByRule: map[string]int{}, Samples: samples}
+	report := Report{FailuresByRule: map[Rule]int{}, Samples: samples}
 
 	for _, c := range cases {
 		if r.MaxTotalCostMicros > 0 && report.TotalCostMicros >= r.MaxTotalCostMicros {

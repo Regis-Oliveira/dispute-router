@@ -156,7 +156,10 @@ func summarise(question, model string, result agent.Result) session {
 			s.ToolCalls++
 			s.CallsByTool[call.Name]++
 			if call.IsError {
-				rule := call.Rule
+				// A display label, not the vocabulary: a refused call with no
+				// rule on it is a bug worth seeing in the tally rather than a
+				// fifth rule.
+				rule := string(call.Rule)
 				if rule == "" {
 					rule = "unattributed"
 				}
@@ -196,7 +199,7 @@ func (s session) print(w io.Writer) {
 	for _, call := range s.Tools {
 		mark := ""
 		if call.IsError {
-			mark = "  refused: " + call.Rule
+			mark = "  refused: " + string(call.Rule)
 		}
 		fmt.Fprintf(w, "    %s %s -> %d bytes%s\n", call.Name, string(call.Input), call.ResultBytes, mark)
 	}

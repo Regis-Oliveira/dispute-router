@@ -220,6 +220,15 @@ func population(ctx context.Context, pool *pgxpool.Pool, t target) (candidates, 
 	return
 }
 
+// methodEnglish labels the results of englishRanked below.
+//
+// Deliberately local, and deliberately not in agent's RetrievalMethod set: the
+// agent has no English-configuration strategy, nothing here is written to
+// agent_runs.trace, and adding a fifth constant to the production vocabulary
+// so a comparison harness could borrow it would put a strategy in the report's
+// buckets that no run can ever produce.
+const methodEnglish agent.RetrievalMethod = "english"
+
 // englishRanked is the stop-word-aware baseline: the same OR query, but with
 // the 'english' configuration on both sides, so "I", "the" and "my" are not
 // terms and "delivered" matches "delivery". Computed on the fly - there is no
@@ -247,7 +256,7 @@ func englishRanked(ctx context.Context, pool *pgxpool.Pool, t target, k int) ([]
 			&p.AmountMinor, &p.Currency, &p.Similarity); err != nil {
 			return nil, err
 		}
-		p.Method = "english"
+		p.Method = methodEnglish
 		out = append(out, p)
 	}
 	return out, rows.Err()

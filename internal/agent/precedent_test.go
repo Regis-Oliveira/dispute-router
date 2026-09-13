@@ -92,7 +92,7 @@ func TestNoClaimMeansNoSearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
-	if len(precedents) != 0 || retrieval.Method != "none" {
+	if len(precedents) != 0 || retrieval.Method != RetrievalNone {
 		t.Errorf("precedents=%d method=%q; an absent claim triggered a search",
 			len(precedents), retrieval.Method)
 	}
@@ -110,7 +110,7 @@ func TestWithoutAnEmbedderRetrievalIsLexical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
-	if retrieval.Method != "lexical" {
+	if retrieval.Method != RetrievalLexical {
 		t.Errorf("method = %q, want lexical", retrieval.Method)
 	}
 }
@@ -123,7 +123,7 @@ func TestPrecedentIsLabelledAsNotThisDispute(t *testing.T) {
 		Precedents: []Precedent{{
 			Reference: "dsp_other_0001", ReasonCode: "13.1", Outcome: "won",
 			AmountMinor: 9900, Currency: "USD", Claim: "nothing was delivered",
-			Method: "lexical", Similarity: 0.8,
+			Method: RetrievalLexical, Similarity: 0.8,
 		}},
 	}
 

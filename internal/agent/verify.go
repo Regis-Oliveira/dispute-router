@@ -20,17 +20,37 @@ const draftLabel = "DRAFT"
 // Check names the rule a finding is about. Kept as a closed set so that
 // failures can be counted and compared across runs - free-text reasons cannot
 // be aggregated, and an eval that cannot aggregate cannot show a regression.
+//
+// The five values are named to the model in Finding.Check's jsonschema
+// description and in the verifier's system prompt, both of which are hashed
+// into every run's prompt fingerprint. A value renamed here without the two
+// texts is a set the model has never been told about.
+type Check string
+
 const (
-	CheckUnsupportedClaim = "unsupported_claim"
-	CheckWrongFigure      = "wrong_figure"
-	CheckMissingEvidence  = "missing_evidence"
-	CheckPromise          = "promise"
-	CheckWrongReasonCode  = "wrong_reason_code"
+	// CheckUnsupportedClaim is a fact asserted that the record does not hold.
+	CheckUnsupportedClaim Check = "unsupported_claim"
+
+	// CheckWrongFigure is an amount, date or count that does not match the
+	// record's exactly.
+	CheckWrongFigure Check = "wrong_figure"
+
+	// CheckMissingEvidence is a document cited that is not on the dispute, or
+	// a claim about what a file shows that its text does not show. Also raised
+	// host-side by CheckCitations, without a model call.
+	CheckMissingEvidence Check = "missing_evidence"
+
+	// CheckPromise is the letter committing the merchant to anything.
+	CheckPromise Check = "promise"
+
+	// CheckWrongReasonCode is a letter arguing against a different dispute
+	// than the one that was filed.
+	CheckWrongReasonCode Check = "wrong_reason_code"
 )
 
 // Finding is one rule a draft broke, with the words it broke it in.
 type Finding struct {
-	Check string `json:"check" jsonschema:"Which rule was broken: unsupported_claim, wrong_figure, missing_evidence, promise, or wrong_reason_code"`
+	Check Check `json:"check" jsonschema:"Which rule was broken: unsupported_claim, wrong_figure, missing_evidence, promise, or wrong_reason_code"`
 	// A finding has to point at text. One that cannot quote the draft is
 	// usually an impression rather than a defect, and an impression is not
 	// something a reviewer can act on.

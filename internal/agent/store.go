@@ -138,15 +138,37 @@ func (r *Runs) Release(ctx context.Context, claim Claim) error {
 	return nil
 }
 
-// Outcome mirrors the CHECK on agent_runs.outcome, in full: OutcomeFailed is
-// never written by this package (a fault is not recorded as a run) but the
-// constraint names it, and a mirror that omits a value stops being one.
+// Outcome is what one attempt produced. It mirrors the CHECK on
+// agent_runs.outcome, in full: OutcomeFailed is never written by this package
+// (a fault is not recorded as a run) but the constraint names it, and a mirror
+// that omits a value stops being one.
+//
+// The strings are the database's. A value changed here without a migration is
+// a write Postgres refuses at runtime, and a constant added here without one
+// is the same.
+type Outcome string
+
 const (
-	OutcomeDrafted      = "drafted"
-	OutcomeRejected     = "rejected"
-	OutcomeInsufficient = "insufficient_evidence"
-	OutcomeBudget       = "budget_exceeded"
-	OutcomeFailed       = "failed"
+	// OutcomeDrafted is a letter the verifier passed.
+	OutcomeDrafted Outcome = "drafted"
+
+	// OutcomeRejected is a letter the verifier, or the citation check before
+	// it, found something in. The letter is kept; it goes to a person.
+	OutcomeRejected Outcome = "rejected"
+
+	// OutcomeInsufficient is the generator declining: the record does not
+	// support a rebuttal. A real answer, not a failure.
+	OutcomeInsufficient Outcome = "insufficient_evidence"
+
+	// OutcomeBudget means the ceiling was reached before the run could finish.
+	// agent_runs refuses a recommendation on such a row, because nothing
+	// checked whatever letter was paid for.
+	OutcomeBudget Outcome = "budget_exceeded"
+
+	// OutcomeFailed is a fault rather than an outcome: no draft and no
+	// verdict. Never written - a run that fails is released, not recorded -
+	// and kept because the CHECK constraint names it.
+	OutcomeFailed Outcome = "failed"
 )
 
 // Run is everything one attempt produced.
@@ -154,8 +176,8 @@ type Run struct {
 	Model             string
 	PromptFingerprint string
 	ToolSurface       []string
-	Outcome           string
-	Recommendation    string
+	Outcome           Outcome
+	Recommendation    Recommendation
 	Letter            string
 	CitedEvidence     []string
 	Findings          []Finding
@@ -204,9 +226,13 @@ func (r *Runs) Record(ctx context.Context, claim Claim, run Run) error {
 	}
 
 	return pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		// Null rather than empty: agent_runs.recommendation is CHECKed against
+		// two values and an empty string is neither. Copied out as a plain
+		// string so the column sees the same text it always has.
 		var recommendation *string
 		if run.Recommendation != "" {
-			recommendation = &run.Recommendation
+			value := string(run.Recommendation)
+			recommendation = &value
 		}
 
 		if _, err := tx.Exec(ctx, `
@@ -258,7 +284,7 @@ func (r *Runs) Record(ctx context.Context, claim Claim, run Run) error {
 // the deadline is still moving, so the last attempt goes in front of a person
 // with its findings attached rather than being redrafted until the dispute
 // expires.
-func nextState(outcome string, escalated bool) (state dispute.State, awaitingReview bool) {
+func nextState(outcome Outcome, escalated bool) (state dispute.State, awaitingReview bool) {
 	if escalated {
 		return dispute.StateDraftReady, true
 	}
