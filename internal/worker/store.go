@@ -175,6 +175,12 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 			return err
 		}
 
+	case ActionClose:
+		// Nothing to post. The refund that answers this alert is already in
+		// the ledger under the dispute that made it, and the transaction's
+		// refund total already says so. Writing another entry here would be
+		// the double refund every other layer exists to prevent.
+
 	case ActionExpire:
 		// An expired chargeback is a lost one: the window to argue closed, so
 		// the held funds go to the issuer and the merchant pays the fee. An

@@ -259,6 +259,24 @@ a letter, the worker has none, and the only path to `represented` is now a
 person approving a draft. Fraud and evidence-led codes both escalate; the
 category survives as the reason in the audit trail.
 
+**An alert on a charge already refunded in full is answered, not escalated.**
+The seed puts several disputes on one transaction, and once one alert on it
+was auto-refunded every later alert on the same charge claimed more than was
+left. The balance rule caught that - correctly, the CHECK constraint would
+have refused the write - and escalated it with a reason that read like a data
+fault: twenty-two alerts in front of a person, each to be looked at again just
+after its deadline and expired, "a failure written down", for a refund that
+had already happened. The full-refund case is now its own decision: close the
+alert as refunded, write the fact into the audit trail, and post nothing,
+because the refund is already in the ledger under the dispute that made it
+and a second entry would be the double refund every other layer exists to
+prevent. The merchant's ceiling does not enter into it, since nothing is
+being refunded for a ceiling to bound. A partial remainder still escalates:
+that one really is a question about the data. A chargeback on a fully
+refunded charge still escalates too - "credit already issued" is the
+representment, but it is a letter, and the worker writes none - with a reason
+that says what the person will find.
+
 **Drafts awaiting a reviewer expire like everything else.** `draft_ready` was
 invisible to the sweeper - deliberately, so a draft a person was reading would
 not be redrafted - and the review endpoint checked state but not the clock. So

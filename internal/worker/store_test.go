@@ -136,6 +136,96 @@ func TestApplyRefundPostsABalancedEntry(t *testing.T) {
 	}
 }
 
+// refundedCandidate is a received alert on a charge an earlier dispute already
+// refunded in full: the rows the seed leaves behind whenever a transaction
+// carries more than one dispute.
+func refundedCandidate(t *testing.T, ctx context.Context, tx pgx.Tx) loaded {
+	t.Helper()
+
+	var l loaded
+	err := tx.QueryRow(ctx, `
+		SELECT d.id, d.merchant_id, d.kind, d.state, d.reason_code,
+		       d.amount_minor, d.currency, d.deadline_at,
+		       d.resolved_at IS NOT NULL, d.version,
+		       m.auto_refund_ceiling_minor,
+		       t.amount_minor - t.refunded_minor
+		  FROM disputes d
+		  JOIN merchants m ON m.id = d.merchant_id
+		  JOIN transactions t ON t.id = d.transaction_id
+		 WHERE d.state = 'received' AND d.kind = 'alert'
+		   AND t.refunded_minor >= t.amount_minor
+		 LIMIT 1`,
+	).Scan(&l.ID, &l.MerchantID, &l.Kind, &l.State, &l.ReasonCode,
+		&l.AmountMinor, &l.Currency, &l.DeadlineAt, &l.Resolved, &l.Version,
+		&l.AutoRefundCeilingMinor, &l.RefundableRemainingMinor)
+
+	if err != nil {
+		t.Skipf("no open alert on a fully refunded charge to test against: %v", err)
+	}
+	return l
+}
+
+// Closing an alert whose charge was already refunded moves the state and
+// writes the audit event, and moves nothing else: no ledger entry, and the
+// transaction's refund total exactly as it was. The refund it records was
+// posted under the dispute that made it.
+func TestClosingAnAlreadyRefundedAlertMovesNoMoney(t *testing.T) {
+	ctx := context.Background()
+	pool := testPool(t)
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	candidate := refundedCandidate(t, ctx, tx)
+	// The decision is handed in rather than taken from Decide: the rule is
+	// covered without a database in rules_test, and the rows this picks from
+	// are often past their deadline, which is a different decision.
+	decision := Decision{Action: ActionClose, ToState: "refunded", Reason: "test"}
+
+	var before int64
+	if err := tx.QueryRow(ctx, `
+		SELECT t.refunded_minor FROM transactions t JOIN disputes d ON d.transaction_id = t.id
+		 WHERE d.id = $1`, candidate.ID).Scan(&before); err != nil {
+		t.Fatalf("read refund total: %v", err)
+	}
+
+	if err := applyTx(ctx, tx, candidate, decision, "test-worker"); err != nil {
+		t.Fatalf("applyTx: %v", err)
+	}
+	if _, err := tx.Exec(ctx, "SET CONSTRAINTS ALL IMMEDIATE"); err != nil {
+		t.Fatalf("constraints: %v", err)
+	}
+
+	var state string
+	var resolvedAt *time.Time
+	var after int64
+	if err := tx.QueryRow(ctx, `
+		SELECT d.state, d.resolved_at, t.refunded_minor
+		  FROM disputes d JOIN transactions t ON t.id = d.transaction_id
+		 WHERE d.id = $1`, candidate.ID).Scan(&state, &resolvedAt, &after); err != nil {
+		t.Fatalf("re-read dispute: %v", err)
+	}
+	if state != "refunded" || resolvedAt == nil {
+		t.Errorf("state = %q, resolved_at = %v; want refunded and resolved", state, resolvedAt)
+	}
+	if after != before {
+		t.Errorf("refund total moved from %d to %d; closing must move no money", before, after)
+	}
+
+	var entries int
+	if err := tx.QueryRow(ctx, `
+		SELECT count(*) FROM ledger_transactions WHERE external_ref = $1`,
+		fmt.Sprintf("dispute:%d:refund", candidate.ID)).Scan(&entries); err != nil {
+		t.Fatalf("count postings: %v", err)
+	}
+	if entries != 0 {
+		t.Errorf("%d ledger transaction(s) posted for a close; want none", entries)
+	}
+}
+
 // The unique external_ref is the last line of defence: a worker retrying after
 // a commit it did not see must not pay twice.
 func TestARefundCannotBePostedTwice(t *testing.T) {

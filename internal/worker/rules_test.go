@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -206,8 +207,8 @@ func TestRefundsCannotExceedWhatIsLeftOnTheCharge(t *testing.T) {
 		"room to spare":          {2500, 10000, ActionRefund},
 		"exactly the last of it": {2500, 2500, ActionRefund},
 		"one minor unit short":   {2500, 2499, ActionEscalate},
-		"nothing left":           {2500, 0, ActionEscalate},
-		"already over-refunded":  {2500, -100, ActionEscalate},
+		"nothing left":           {2500, 0, ActionClose},
+		"already over-refunded":  {2500, -100, ActionClose},
 	}
 
 	for name, tc := range tests {
@@ -230,7 +231,7 @@ func TestRefundsCannotExceedWhatIsLeftOnTheCharge(t *testing.T) {
 func TestCeilingIsReportedBeforeTheBalance(t *testing.T) {
 	c := alert(func(c *Candidate) {
 		c.AmountMinor = 999_999
-		c.RefundableRemainingMinor = 0
+		c.RefundableRemainingMinor = 100
 	})
 	got := Decide(c, now)
 	if got.Action != ActionEscalate {
@@ -238,6 +239,48 @@ func TestCeilingIsReportedBeforeTheBalance(t *testing.T) {
 	}
 	if got.Reason != "alert above the merchant's auto-refund ceiling" {
 		t.Errorf("Reason = %q, want the ceiling to be reported first", got.Reason)
+	}
+}
+
+// An alert on a charge that was already refunded in full is answered. It
+// closes as refunded, moves no money, and does so whatever the merchant's
+// ceiling says, because nothing is being refunded for a ceiling to bound.
+func TestAnAlertOnAChargeAlreadyRefundedIsClosedWithoutMoney(t *testing.T) {
+	for name, mutate := range map[string]func(*Candidate){
+		"within the ceiling": func(c *Candidate) {},
+		"above the ceiling":  func(c *Candidate) { c.AmountMinor = 999_999 },
+		"no ceiling at all":  func(c *Candidate) { c.AutoRefundCeilingMinor = nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := alert(func(c *Candidate) {
+				mutate(c)
+				c.RefundableRemainingMinor = 0
+			})
+			got := Decide(c, now)
+			if got.Action != ActionClose {
+				t.Fatalf("Action = %q, want close (reason: %s)", got.Action, got.Reason)
+			}
+			if got.ToState != "refunded" {
+				t.Errorf("ToState = %q, want refunded", got.ToState)
+			}
+			if got.Reason == "" {
+				t.Error("no reason")
+			}
+		})
+	}
+}
+
+// The same charge under a chargeback is still a person's decision - the
+// letter is "credit already issued", and the worker writes no letters - but
+// the reason names what they will find.
+func TestAChargebackOnAChargeAlreadyRefundedStillEscalates(t *testing.T) {
+	c := chargeback(func(c *Candidate) { c.RefundableRemainingMinor = 0 })
+	got := Decide(c, now)
+	if got.Action != ActionEscalate || got.ToState != "" {
+		t.Fatalf("decision = %+v, want escalate with no state change", got)
+	}
+	if !strings.Contains(got.Reason, "already refunded in full") {
+		t.Errorf("Reason = %q does not say the charge was refunded", got.Reason)
 	}
 }
 

@@ -269,6 +269,7 @@ database:
 | Situation | Decision |
 | --- | --- |
 | Past its deadline, still open | **expire** — a failure written down, not an outcome chosen |
+| Alert on a charge already refunded in full | **close** as refunded — the answer is "already refunded", and no money moves |
 | Alert, within the merchant's ceiling, room left on the charge | **refund** |
 | Alert, above the ceiling or over the refundable remainder | **escalate** |
 | Chargeback, any reason code | **escalate** — the assistant drafts, a person submits |

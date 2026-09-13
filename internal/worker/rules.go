@@ -13,6 +13,12 @@ const (
 	// is filed at all - no fee, no ratio damage.
 	ActionRefund Action = "refund"
 
+	// ActionClose ends an alert whose money has already been returned. It
+	// moves the dispute to refunded and moves nothing else: the refund that
+	// answers this alert was posted by an earlier dispute on the same charge,
+	// and the state records that fact rather than repeating the payment.
+	ActionClose Action = "close"
+
 	// ActionEscalate is the worker declining to decide. No state change, no
 	// money moved: the dispute stays where it is with its clock running and a
 	// human picks it up.
@@ -131,6 +137,23 @@ func Decide(c Candidate, now time.Time) Decision {
 
 	switch c.Kind {
 	case "alert":
+		// An alert on a charge that has already been refunded in full is
+		// answered, and the answer is "already refunded". Nothing is left to
+		// give back, so the merchant's ceiling does not enter into it: no money
+		// moves, and the only decision is to write the fact down and close
+		// the alert. This used to escalate under the balance rule below, which
+		// put twenty-two of them in front of a person with a reason that read
+		// like a data fault, to be looked at again just after the deadline
+		// and expired - "a failure written down" - for a refund that had
+		// already happened.
+		if c.RefundableRemainingMinor <= 0 {
+			return Decision{
+				Action:  ActionClose,
+				ToState: "refunded",
+				Reason:  "original charge already refunded in full; nothing left to return and no money moved",
+			}
+		}
+
 		// An alert is the cheap window. Refunding inside it costs the sale;
 		// letting it lapse costs the sale, a fee, and a mark against the
 		// merchant's chargeback ratio. Below the merchant's own ceiling the
@@ -150,11 +173,13 @@ func Decide(c Candidate, now time.Time) Decision {
 
 		// Refunding more than is left on the original charge is not a thing
 		// that can happen, so this is a question about the data rather than
-		// about the dispute: either the charge was already refunded elsewhere,
-		// or several disputes are claiming the same money. The database's
+		// about the dispute: part of the charge was refunded elsewhere, and
+		// this alert claims more than the rest. The database's
 		// CHECK (refunded_minor <= amount_minor) would refuse the write, but
 		// arriving there means the worker retries a permanent condition
-		// forever. It is a decision, so it is decided here.
+		// forever. It is a decision, so it is decided here. The full-refund
+		// case was decided above; what reaches this rule is a partial one,
+		// which is a question for a person.
 		if c.AmountMinor > c.RefundableRemainingMinor {
 			return Decision{
 				Action: ActionEscalate,
@@ -178,6 +203,17 @@ func Decide(c Candidate, now time.Time) Decision {
 		// leave the dispute where the assistant will find it and to expire it
 		// if nobody does. The category still matters, because it is the
 		// reason written into the audit trail.
+		//
+		// A chargeback on a charge already refunded in full is the one case
+		// where the letter writes itself - "credit already issued" is the
+		// representment - but it is still a letter, so it is still a person's.
+		// The reason says what the person will find.
+		if c.RefundableRemainingMinor <= 0 {
+			return Decision{
+				Action: ActionEscalate,
+				Reason: "original charge already refunded in full; a credit-issued representment needs a person",
+			}
+		}
 		switch categoryOf(c.ReasonCode) {
 		case categoryService, categoryProcessing:
 			return Decision{
