@@ -28,6 +28,8 @@ dispute-router simulator
     --rate <n>    events per minute       (default 30)
     --count <n>   stop after n events     (default 0 = forever)
     --replay      send every event twice  (proves idempotency, or its absence)
+    --rush        deadlines seconds away, so the worker acts on its next tick
+    --refunded    alerts on charges already refunded in full (the worker closes them)
 
   rule options
     --count <n>   how many disputes to rule on (default 25)
@@ -56,6 +58,7 @@ async function main(): Promise<void> {
         count: option("count", 0),
         replay: flag("replay"),
         rush: flag("rush"),
+        refunded: flag("refunded"),
       });
       break;
     case "rule":

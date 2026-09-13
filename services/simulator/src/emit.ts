@@ -95,8 +95,12 @@ function claimFor(rng: () => number, reasonCode: string): string | undefined {
  */
 const RUSH_DEADLINE_MS = 40_000;
 
-function buildEvent(rng: () => number, candidate: Candidate, rush = false): DisputeWebhook {
-  const kind: DisputeKind = chance(rng, 0.7) ? "alert" : "chargeback";
+function buildEvent(
+  rng: () => number,
+  candidate: Candidate,
+  rush = false,
+  kind: DisputeKind = chance(rng, 0.7) ? "alert" : "chargeback",
+): DisputeWebhook {
   const codes = REASON_CODES[candidate.card_network];
   const reason = weighted(rng, codes.map((code) => [code, code.weight] as const));
   const [minHours, maxHours] = DEADLINE_HOURS[kind];
@@ -150,15 +154,26 @@ async function post(event: DisputeWebhook, secret: string): Promise<string> {
  *
  * `--replay` resends every event a second time. Until Phase 1's Redis dedupe
  * exists, that is how you see the bug: two disputes, one event.
+ *
+ * `--refunded` draws from charges already refunded in full instead of from
+ * undisputed ones, and sends alerts only: a second alert on a charge the
+ * merchant already gave back, which the worker answers by closing the alert
+ * with no money moved. Nothing else produces that case on demand, and a rule
+ * nothing can exercise is a rule nobody has watched work.
  */
 export async function emit(options: {
   rate: number;
   count: number;
   replay: boolean;
   rush: boolean;
+  refunded: boolean;
 }): Promise<void> {
   const rng = makeRng(Date.now() & 0xffffffff);
   const intervalMs = Math.max(50, Math.round(60_000 / options.rate));
+
+  const draw = options.refunded
+    ? "t.refunded_minor >= t.amount_minor"
+    : "NOT EXISTS (SELECT 1 FROM disputes d WHERE d.transaction_id = t.id)";
 
   const { rows: candidates } = await withClient((client) =>
     client.query<Candidate>(`
@@ -170,7 +185,7 @@ export async function emit(options: {
         FROM transactions t
         JOIN merchants m ON m.id = t.merchant_id
        WHERE t.captured_at > now() - INTERVAL '120 days'
-         AND NOT EXISTS (SELECT 1 FROM disputes d WHERE d.transaction_id = t.id)
+         AND ${draw}
        ORDER BY random()
        LIMIT 2000`),
   );
@@ -188,7 +203,9 @@ export async function emit(options: {
 
   while (options.count === 0 || sent < options.count) {
     const candidate = pick(rng, candidates);
-    const event = buildEvent(rng, candidate, options.rush);
+    const event = options.refunded
+      ? buildEvent(rng, candidate, options.rush, "alert")
+      : buildEvent(rng, candidate, options.rush);
     const attempts = options.replay ? 2 : 1;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
