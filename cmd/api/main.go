@@ -38,7 +38,7 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load(".env")
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
@@ -62,12 +62,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	awsCfg, err := awsx.Load(ctx, awsx.Config{
-		Region:          cfg.AWSRegion,
-		Endpoint:        cfg.AWSEndpoint,
-		AccessKeyID:     cfg.AWSAccessKey,
-		SecretAccessKey: cfg.AWSSecretKey,
-	})
+	awsCfg, err := awsx.Load(ctx, cfg.AWS())
 	if err != nil {
 		return err
 	}
@@ -76,7 +71,7 @@ func run(logger *slog.Logger) error {
 	// connection, short enough that a URL pasted into a chat is dead by the
 	// time anyone else opens it.
 	evidence := api.NewEvidence(
-		awsx.S3(awsCfg, cfg.AWSEndpoint),
+		awsx.S3(awsCfg),
 		cfg.S3EvidenceBucket,
 		15*time.Minute,
 	)

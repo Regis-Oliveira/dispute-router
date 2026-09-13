@@ -54,7 +54,7 @@ func run() error {
 	flag.Parse()
 	question := strings.TrimSpace(strings.Join(flag.Args(), " "))
 
-	cfg, err := config.Load(os.Getenv("DOTENV_PATH"))
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}

@@ -38,7 +38,7 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load(dotenvPath())
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
@@ -71,16 +71,4 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	return nil
-}
-
-// dotenvPath resolves the repo-root .env.
-//
-// An MCP client starts this process with an unpredictable working directory, so
-// the path is configurable and the default only works when launched from the
-// repo root. The client config passes it explicitly.
-func dotenvPath() string {
-	if explicit := os.Getenv("DOTENV_PATH"); explicit != "" {
-		return explicit
-	}
-	return ".env"
 }

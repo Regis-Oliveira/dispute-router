@@ -40,7 +40,7 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load(dotenvPath())
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
@@ -70,12 +70,7 @@ func run(logger *slog.Logger) error {
 
 	// One AWS config, built before either the secret resolver or the outbox
 	// publisher asks for a client.
-	awsCfg, err := awsx.Load(ctx, awsx.Config{
-		Region:          cfg.AWSRegion,
-		Endpoint:        cfg.AWSEndpoint,
-		AccessKeyID:     cfg.AWSAccessKey,
-		SecretAccessKey: cfg.AWSSecretKey,
-	})
+	awsCfg, err := awsx.Load(ctx, cfg.AWS())
 	if err != nil {
 		return err
 	}
@@ -88,7 +83,7 @@ func run(logger *slog.Logger) error {
 	var resolver secrets.Resolver = secrets.FromDatabase{Pool: pool}
 	if cfg.WebhookSecretSource == "secretsmanager" {
 		resolver = secrets.NewFromManager(
-			awsx.SecretsManager(awsCfg, cfg.AWSEndpoint),
+			awsx.SecretsManager(awsCfg),
 			cfg.WebhookSecretID,
 			cfg.WebhookSecretTTL,
 		)
@@ -153,7 +148,7 @@ func run(logger *slog.Logger) error {
 	// pattern bought: the queue underneath it was always a swappable detail.
 	publisher := outbox.Live{
 		Next: outbox.SQSPublisher{
-			Client:   awsx.SQS(awsCfg, cfg.AWSEndpoint),
+			Client:   awsx.SQS(awsCfg),
 			QueueURL: cfg.SQSQueueURL,
 		},
 		Client:  rdb,
@@ -195,13 +190,4 @@ func run(logger *slog.Logger) error {
 	}
 	logger.Info("stopped cleanly")
 	return nil
-}
-
-// dotenvPath resolves the repo-root .env relative to the working directory the
-// Makefile runs from (services/ingest).
-func dotenvPath() string {
-	if explicit := os.Getenv("DOTENV_PATH"); explicit != "" {
-		return explicit
-	}
-	return ".env"
 }

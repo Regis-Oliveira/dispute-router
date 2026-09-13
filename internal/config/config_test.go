@@ -12,7 +12,8 @@ import (
 func loadWithout(t *testing.T) (Config, error) {
 	t.Helper()
 	t.Setenv("DATABASE_URL", "postgres://localhost/test")
-	return Load(filepath.Join(t.TempDir(), ".env"))
+	t.Setenv("DOTENV_PATH", filepath.Join(t.TempDir(), ".env"))
+	return Load()
 }
 
 func TestUnparseableValueIsAnError(t *testing.T) {

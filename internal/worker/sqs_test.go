@@ -40,7 +40,7 @@ func testSQS(t *testing.T) *sqs.Client {
 		t.Fatalf("aws config: %v", err)
 	}
 
-	client := awsx.SQS(cfg, endpoint)
+	client := awsx.SQS(cfg)
 	if _, err := client.ListQueues(context.Background(), &sqs.ListQueuesInput{}); err != nil {
 		t.Skipf("localstack unreachable: %v", err)
 	}

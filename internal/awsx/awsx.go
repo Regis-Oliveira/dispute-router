@@ -19,10 +19,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 )
 
+// Config is what Load needs to decide where AWS is.
 type Config struct {
 	Region string
 	// Endpoint points at LocalStack. Empty means the real AWS, resolved by the
-	// SDK's normal endpoint rules.
+	// SDK's normal endpoint rules. Load applies it to every client built from
+	// the returned aws.Config, so no caller needs to carry it a second time.
 	Endpoint string
 	// Static credentials for LocalStack. Left empty in a real deployment so the
 	// SDK uses the environment, the shared config, or the instance role -
@@ -32,9 +34,14 @@ type Config struct {
 	SecretAccessKey string
 }
 
+// Load resolves region, credentials and endpoint once; the service
+// constructors below take the result.
 func Load(ctx context.Context, cfg Config) (aws.Config, error) {
 	options := []func(*config.LoadOptions) error{
 		config.WithRegion(cfg.Region),
+	}
+	if cfg.Endpoint != "" {
+		options = append(options, config.WithBaseEndpoint(cfg.Endpoint))
 	}
 
 	if cfg.AccessKeyID != "" {
@@ -50,34 +57,24 @@ func Load(ctx context.Context, cfg Config) (aws.Config, error) {
 	return loaded, nil
 }
 
-// SQS returns a client, pointed at the endpoint when one is set.
-func SQS(cfg aws.Config, endpoint string) *sqs.Client {
-	return sqs.NewFromConfig(cfg, func(o *sqs.Options) {
-		if endpoint != "" {
-			o.BaseEndpoint = aws.String(endpoint)
-		}
-	})
+// SQS returns a client.
+func SQS(cfg aws.Config) *sqs.Client {
+	return sqs.NewFromConfig(cfg)
 }
 
 // S3 returns a client.
 //
 // UsePathStyle matters for LocalStack: the modern S3 addressing scheme puts the
 // bucket in the hostname (bucket.s3.amazonaws.com), which needs DNS that does
-// not exist locally. Path style keeps the bucket in the URL path instead.
-func S3(cfg aws.Config, endpoint string) *s3.Client {
+// not exist locally. Path style keeps the bucket in the URL path instead. A
+// custom endpoint is the signal that we are local.
+func S3(cfg aws.Config) *s3.Client {
 	return s3.NewFromConfig(cfg, func(o *s3.Options) {
-		if endpoint != "" {
-			o.BaseEndpoint = aws.String(endpoint)
-			o.UsePathStyle = true
-		}
+		o.UsePathStyle = cfg.BaseEndpoint != nil
 	})
 }
 
 // SecretsManager returns a client.
-func SecretsManager(cfg aws.Config, endpoint string) *secretsmanager.Client {
-	return secretsmanager.NewFromConfig(cfg, func(o *secretsmanager.Options) {
-		if endpoint != "" {
-			o.BaseEndpoint = aws.String(endpoint)
-		}
-	})
+func SecretsManager(cfg aws.Config) *secretsmanager.Client {
+	return secretsmanager.NewFromConfig(cfg)
 }

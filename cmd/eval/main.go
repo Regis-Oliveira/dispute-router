@@ -59,7 +59,7 @@ func run() error {
 	)
 	flag.Parse()
 
-	cfg, err := config.Load(os.Getenv("DOTENV_PATH"))
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
@@ -87,11 +87,7 @@ func run() error {
 		return list(ctx, pool, cases)
 	}
 
-	awsCfg, err := awsx.Load(ctx, awsx.Config{
-		Region:          cfg.AWSRegion,
-		AccessKeyID:     cfg.AWSAccessKey,
-		SecretAccessKey: cfg.AWSSecretKey,
-	})
+	awsCfg, err := awsx.Load(ctx, cfg.AWS())
 	if err != nil {
 		return err
 	}
@@ -109,7 +105,7 @@ func run() error {
 		OutputMicrosPerMTok: cfg.AgentOutputPerMTok,
 	}
 	facts := agent.NewFactSource(api.NewStore(pool),
-		api.NewEvidence(awsx.S3(awsCfg, cfg.AWSEndpoint), cfg.S3EvidenceBucket, time.Minute))
+		api.NewEvidence(awsx.S3(awsCfg), cfg.S3EvidenceBucket, time.Minute))
 
 	// Precedent retrieval. The embedder is optional: without a key the
 	// retriever uses full-text search, which is the baseline anyway.

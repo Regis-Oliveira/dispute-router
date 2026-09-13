@@ -79,7 +79,7 @@ func run() error {
 	)
 	flag.Parse()
 
-	cfg, err := config.Load(os.Getenv("DOTENV_PATH"))
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}

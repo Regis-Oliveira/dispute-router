@@ -34,7 +34,7 @@ func testRedriver(t *testing.T) *Redriver {
 	if err != nil {
 		t.Fatalf("aws config: %v", err)
 	}
-	client := awsx.SQS(cfg, endpoint)
+	client := awsx.SQS(cfg)
 	if _, err := client.ListQueues(t.Context(), &sqs.ListQueuesInput{}); err != nil {
 		t.Skipf("localstack unreachable: %v", err)
 	}

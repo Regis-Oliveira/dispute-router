@@ -28,7 +28,7 @@ func testManager(t *testing.T, document string, ttl time.Duration) *FromManager 
 		t.Fatalf("aws config: %v", err)
 	}
 
-	client := awsx.SecretsManager(cfg, endpoint)
+	client := awsx.SecretsManager(cfg)
 	name := "test/webhook-secrets-" + time.Now().Format("150405.000000")
 
 	if _, err := client.CreateSecret(context.Background(), &secretsmanager.CreateSecretInput{

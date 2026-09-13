@@ -63,7 +63,7 @@ func run(logger *slog.Logger) error {
 		defer stopTrace()
 	}
 
-	cfg, err := config.Load(os.Getenv("DOTENV_PATH"))
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
@@ -98,16 +98,12 @@ func run(logger *slog.Logger) error {
 		return dry(ctx, logger, runs, *disputeID, cfg.AgentMaxAttempts, *batch)
 	}
 
-	awsCfg, err := awsx.Load(ctx, awsx.Config{
-		Region:          cfg.AWSRegion,
-		AccessKeyID:     cfg.AWSAccessKey,
-		SecretAccessKey: cfg.AWSSecretKey,
-	})
+	awsCfg, err := awsx.Load(ctx, cfg.AWS())
 	if err != nil {
 		return err
 	}
 
-	evidence := awsx.S3(awsCfg, cfg.AWSEndpoint)
+	evidence := awsx.S3(awsCfg)
 	facts := agent.NewFactSource(store, api.NewEvidence(evidence, cfg.S3EvidenceBucket, time.Minute))
 
 	// Precedent retrieval. The embedder is optional: without a key the

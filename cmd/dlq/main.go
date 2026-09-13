@@ -54,23 +54,18 @@ func run(command string, args []string) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
-	cfg, err := config.Load(".env")
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 
-	awsCfg, err := awsx.Load(ctx, awsx.Config{
-		Region:          cfg.AWSRegion,
-		Endpoint:        cfg.AWSEndpoint,
-		AccessKeyID:     cfg.AWSAccessKey,
-		SecretAccessKey: cfg.AWSSecretKey,
-	})
+	awsCfg, err := awsx.Load(ctx, cfg.AWS())
 	if err != nil {
 		return err
 	}
 
 	redriver := &dlq.Redriver{
-		Client: awsx.SQS(awsCfg, cfg.AWSEndpoint),
+		Client: awsx.SQS(awsCfg),
 		Source: cfg.SQSDLQURL,
 		Target: cfg.SQSQueueURL,
 	}

@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/regisoliveira/dispute-router/internal/awsx"
 )
 
 // Config is every setting the binaries read, with the environment as the only
@@ -116,8 +118,8 @@ type Config struct {
 }
 
 // Load reads .env (if present) and then the environment, which wins.
-func Load(dotenvPath string) (Config, error) {
-	if err := loadDotEnv(dotenvPath); err != nil {
+func Load() (Config, error) {
+	if err := loadDotEnv(dotenvPath()); err != nil {
 		return Config{}, err
 	}
 
@@ -266,6 +268,28 @@ func (e *env) dur(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// AWS is the part of the configuration awsx.Load needs, mapped in one place so
+// no binary can forget a field.
+func (c Config) AWS() awsx.Config {
+	return awsx.Config{
+		Region:          c.AWSRegion,
+		Endpoint:        c.AWSEndpoint,
+		AccessKeyID:     c.AWSAccessKey,
+		SecretAccessKey: c.AWSSecretKey,
+	}
+}
+
+// dotenvPath is DOTENV_PATH when set, else the repo-root .env relative to the
+// working directory. The Makefile runs every binary from the root; an MCP
+// client starts cmd/mcp with an unpredictable working directory, which is why
+// the path is configurable and the client config passes it explicitly.
+func dotenvPath() string {
+	if explicit := os.Getenv("DOTENV_PATH"); explicit != "" {
+		return explicit
+	}
+	return ".env"
 }
 
 // loadDotEnv reads the same repo-root .env the Node simulator reads, so both

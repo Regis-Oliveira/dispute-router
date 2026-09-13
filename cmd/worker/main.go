@@ -35,7 +35,7 @@ func run(logger *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	cfg, err := config.Load(".env")
+	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
@@ -82,18 +82,13 @@ func run(logger *slog.Logger) error {
 
 	// The SQS consumer schedules a dispute the moment it arrives; the reconcile
 	// pass inside the pool remains the guarantee that nothing is ever missed.
-	awsCfg, err := awsx.Load(ctx, awsx.Config{
-		Region:          cfg.AWSRegion,
-		Endpoint:        cfg.AWSEndpoint,
-		AccessKeyID:     cfg.AWSAccessKey,
-		SecretAccessKey: cfg.AWSSecretKey,
-	})
+	awsCfg, err := awsx.Load(ctx, cfg.AWS())
 	if err != nil {
 		return err
 	}
 
 	consumer := worker.NewConsumer(worker.ConsumerOptions{
-		Client:      awsx.SQS(awsCfg, cfg.AWSEndpoint),
+		Client:      awsx.SQS(awsCfg),
 		QueueURL:    cfg.SQSQueueURL,
 		Deadlines:   deadlines,
 		Logger:      logger,
