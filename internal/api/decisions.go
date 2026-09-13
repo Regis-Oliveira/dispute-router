@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 )
 
@@ -86,31 +85,33 @@ func (s *Store) Decisions(ctx context.Context, f DecisionFilters) (DecisionList,
 		f.Offset = 0
 	}
 
-	var where []string
-	var args []any
-
-	add := func(clause string, value any) {
-		args = append(args, value)
-		where = append(where, fmt.Sprintf(clause, len(args)))
-	}
-
-	where = append(where, "a.review IS NOT NULL")
+	// The same builder the disputes list uses, rather than a second copy of it
+	// written as a closure: a condition and the value it tests stay paired, and
+	// there is one place where that is true of this package.
+	var b builder
+	b.conds = append(b.conds, "a.review IS NOT NULL")
 	if f.Reviewer != "" {
-		add("a.reviewed_by = $%d", f.Reviewer)
+		b.add("a.reviewed_by = $%d", f.Reviewer)
 	}
 	if f.Decision != "" {
-		add("a.review = $%d", f.Decision)
+		b.add("a.review = $%d", f.Decision)
 	}
 	if f.OnlyOverrides {
-		where = append(where, "(a.outcome = 'rejected' AND a.review = 'submitted')")
+		b.conds = append(b.conds, "(a.outcome = 'rejected' AND a.review = 'submitted')")
 	}
-	clause := strings.Join(where, " AND ")
+	where := b.where()
 
 	var total int64
 	if err := s.pool.QueryRow(ctx,
-		`SELECT count(*) FROM agent_runs a WHERE `+clause, args...).Scan(&total); err != nil {
+		`SELECT count(*) FROM agent_runs a`+where, b.args...).Scan(&total); err != nil {
 		return DecisionList{}, fmt.Errorf("count decisions: %w", err)
 	}
+
+	// Copied, not appended in place. append on b.args can write the limit and
+	// the offset into the backing array the count query above is still reading
+	// from - safe today only because that query had already returned, which is
+	// a fact about statement order rather than about this code.
+	args := append(append([]any{}, b.args...), f.Limit, f.Offset)
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT a.id, d.id, d.external_id, m.name, d.amount_minor, d.currency,
@@ -121,11 +122,10 @@ func (s *Store) Decisions(ctx context.Context, f DecisionFilters) (DecisionList,
 		       d.state
 		  FROM agent_runs a
 		  JOIN disputes  d ON d.id = a.dispute_id
-		  JOIN merchants m ON m.id = d.merchant_id
-		 WHERE `+clause+`
-		 ORDER BY a.reviewed_at DESC
-		 LIMIT $`+fmt.Sprint(len(args)+1)+` OFFSET $`+fmt.Sprint(len(args)+2),
-		append(args, f.Limit, f.Offset)...)
+		  JOIN merchants m ON m.id = d.merchant_id`+where+`
+		 ORDER BY a.reviewed_at DESC`+
+		fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(b.args)+1, len(b.args)+2),
+		args...)
 	if err != nil {
 		return DecisionList{}, fmt.Errorf("list decisions: %w", err)
 	}
