@@ -6,6 +6,7 @@ import type { DisputeKind, DisputeState } from '../core/api.types';
 const STATES: readonly DisputeState[] = [
   'received',
   'resolving',
+  'draft_ready',
   'represented',
   'refunded',
   'won',

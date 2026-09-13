@@ -97,7 +97,7 @@ const CHECKS: readonly Check[] = [
         SELECT d.merchant_id, d.currency, COALESCE(SUM(d.amount_minor), 0) AS amount
           FROM disputes d
          WHERE d.kind = 'chargeback'
-           AND d.state IN ('received', 'resolving', 'represented')
+           AND d.state IN ('received', 'resolving', 'draft_ready', 'represented')
          GROUP BY d.merchant_id, d.currency
       )
       SELECT COALESCE(h.merchant_id, e.merchant_id) AS merchant_id,
@@ -232,7 +232,7 @@ async function report(): Promise<void> {
     const { rows: urgent } = await client.query<{ n: number; soonest: Date | null }>(`
       SELECT count(*) AS n, min(deadline_at) AS soonest
         FROM disputes
-       WHERE state IN ('received','resolving') AND deadline_at > now()`);
+       WHERE state IN ('received','resolving','draft_ready') AND deadline_at > now()`);
     const first = urgent[0];
     console.log(
       `\nopen and on the clock: ${first?.n ?? 0} disputes` +
@@ -241,9 +241,11 @@ async function report(): Promise<void> {
 
     const { rows: overdue } = await client.query<{ n: number }>(`
       SELECT count(*) AS n FROM disputes
-       WHERE state IN ('received','resolving') AND deadline_at <= now()`);
-    // A dispute past its deadline that is still 'received' means nobody acted
-    // in time and nobody recorded that either. The seeder never produces one;
+       WHERE state IN ('received','resolving','draft_ready') AND deadline_at <= now()`);
+    // A dispute past its deadline that is still received, resolving or
+    // draft_ready means nobody acted in time and nobody recorded that either.
+    // draft_ready counts: the worker expires a draft nobody approved, so one
+    // sitting here past its deadline means that sweeper is stuck. The seeder never produces one;
     // if this is ever non-zero once Phase 3 is running, the worker is stuck.
     console.log(`past deadline but still unhandled: ${overdue[0]?.n ?? 0} (should always be 0)`);
 
@@ -259,7 +261,7 @@ async function report(): Promise<void> {
     const { rows: held } = await client.query<{ n: number; amount: number; currency: Currency }>(`
       SELECT count(*) AS n, COALESCE(SUM(amount_minor), 0) AS amount, currency
         FROM disputes
-       WHERE kind = 'chargeback' AND state IN ('received','resolving','represented')
+       WHERE kind = 'chargeback' AND state IN ('received','resolving','draft_ready','represented')
        GROUP BY currency ORDER BY 3`);
 
     console.log("\nfunds held pending a decision");

@@ -118,7 +118,7 @@ const descAmounts = "Amounts appear twice: `amount` is the figure to quote, alre
 
 // ListDisputesInput is the list_disputes arguments.
 type ListDisputesInput struct {
-	State     string `json:"state,omitempty" jsonschema:"Comma-separated states: received, resolving, represented, refunded, won, lost, expired"`
+	State     string `json:"state,omitempty" jsonschema:"Comma-separated states: received, resolving, draft_ready, represented, refunded, won, lost, expired"`
 	Kind      string `json:"kind,omitempty" jsonschema:"alert or chargeback. Alerts are pre-dispute warnings with hours to act; chargebacks are already filed"`
 	Merchant  string `json:"merchant,omitempty" jsonschema:"Merchant external id, for example mrc_northwind"`
 	DueWithin string `json:"due_within,omitempty" jsonschema:"Only open disputes whose deadline falls inside this window, for example 24h. Already-overdue disputes match too and are flagged with overdue=true"`

@@ -185,19 +185,16 @@ func parseFilters(r *http.Request) (Filters, error) {
 }
 
 var (
-	// knownStates is missing draft_ready, and that is a bug rather than a
-	// policy: the state was added to the schema by migration 000003 and never
-	// reached this whitelist, so ?state=draft_ready - a dispute sitting in the
-	// review queue - is answered "unknown state". The same omission is in the
-	// dashboard's DisputeState union, its filter control, the schema tag on
-	// disputetools.ListDisputesInput.State, and the simulator's money
-	// invariant. Fixing it here alone would let the API accept a value no
-	// client can ask for, so it is one change that does all five; recorded
-	// here because this is where it was discovered.
+	// Every state the schema allows, so that a filter can name any row the
+	// database can hold. draft_ready was added by migration 000003 and for
+	// five days reached none of the four places that list states by hand: this
+	// whitelist, the dashboard's union and filter control, the schema tag the
+	// agent reads, and the simulator's money invariant - which failed, because
+	// a chargeback awaiting review still holds its funds.
 	knownStates = stringSet(
-		dispute.StateReceived, dispute.StateResolving, dispute.StateRefunded,
-		dispute.StateRepresented, dispute.StateWon, dispute.StateLost,
-		dispute.StateExpired,
+		dispute.StateReceived, dispute.StateResolving, dispute.StateDraftReady,
+		dispute.StateRefunded, dispute.StateRepresented, dispute.StateWon,
+		dispute.StateLost, dispute.StateExpired,
 	)
 	knownKinds    = stringSet(dispute.KindAlert, dispute.KindChargeback)
 	knownNetworks = stringSet("visa", "mastercard", "amex", "discover")

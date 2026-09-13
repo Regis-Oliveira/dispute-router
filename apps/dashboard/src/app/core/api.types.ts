@@ -18,6 +18,7 @@ export type DisputeKind = 'alert' | 'chargeback';
 export type DisputeState =
   | 'received'
   | 'resolving'
+  | 'draft_ready'
   | 'refunded'
   | 'represented'
   | 'won'
