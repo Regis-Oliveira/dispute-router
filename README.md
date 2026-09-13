@@ -478,7 +478,8 @@ out:
   to ship: it collapses every access decision into "can it write SQL".
 - **No presigned evidence URLs.** A presigned URL is a bearer credential with a
   TTL, and handing one to a model puts it in a transcript that gets logged and
-  pasted into tickets. File names are the useful part.
+  pasted into tickets. Where a model needs what a file says - the drafting
+  agent does - host code reads the bytes and puts the text on the record.
 - **No unmasked customer emails.** `customer_ref` already answers "is this the
   same person"; the address itself never needs to leave the database.
 

@@ -428,6 +428,30 @@ record fixed before either call ran — has never seen, and a correct draft woul
 come back rejected as unsupported. Retrieval that only one of two judges can see
 is worse than no retrieval.
 
+**A filename is not a document.** The record used to list each file on the
+dispute by name, size and upload time, and the first dispute with a file behind
+it showed what that buys: the generator cited `delivery-confirmation.pdf` as
+"supporting that the order was delivered", the verifier rejected the sentence
+because the record held no such thing, and both were right. Ten of ten runs in
+the first measured flow declined for the same reason. The bytes now come to
+host code, which extracts the text - plain text and CSV as they are, PDFs
+through their text layer - and puts it on the record in its own fenced block,
+where both judges read it. The presigned URL still goes nowhere near a model;
+the service reads the object, and a key outside the dispute's own prefix is
+refused so a record for one dispute can never be assembled from another's
+file. A file that was fetched and could not be read - an image, a scan with no
+text layer, a PDF that does not parse - is listed as *not read* with the
+reason, because "this file says nothing" and "this file could not be read"
+lead a drafter to different letters; a file that could not be fetched fails
+the record instead, so a bucket that is down is a retry and not a confident
+"nothing readable on file". Text is capped per file and per record at the
+prompt boundary, on the same reasoning as the claim, and the cap is stated on
+the file rather than discovered by the model. The first dispute drafted this
+way (`docs/measurements/2026-09-13-evidence.txt`) was the first `represent`
+the system has produced that passed the verifier.
+*Consequence:* images and scans are named but never read. OCR would be the
+next step, and it should go through the same host-side path.
+
 **Measured, twice, and the second measurement corrected the first.** Over 78
 open disputes, top-3 each, both strategies always return three results — every
 target merchant has at least five settled claims — so "found something" is

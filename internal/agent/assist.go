@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/jsonschema-go/jsonschema"
 )
@@ -113,6 +114,32 @@ type Trace struct {
 	Retrieval  Retrieval     `json:"retrieval"`
 	Precedents int           `json:"precedents"`
 	Assembly   time.Duration `json:"assembly_ns"`
+
+	// What the model was shown of the files on the dispute: how many there
+	// were, how many had text in the record, and how much. "Represent, citing
+	// a file" and "insufficient evidence" are the outcomes the file decides,
+	// and a run that could not read the file is a different run from one that
+	// read it.
+	Evidence evidenceTrace `json:"evidence"`
+}
+
+type evidenceTrace struct {
+	Files int `json:"files"`
+	Read  int `json:"read"`
+	Runes int `json:"runes"`
+}
+
+// evidenceShown counts what reached the record.
+func evidenceShown(facts Facts) evidenceTrace {
+	t := evidenceTrace{Files: len(facts.Evidence)}
+	for _, file := range facts.Evidence {
+		if file.Status == EvidenceNotRead {
+			continue
+		}
+		t.Read++
+		t.Runes += utf8.RuneCountInString(file.Text)
+	}
+	return t
 }
 
 type phase struct {
@@ -188,7 +215,7 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 		run.Outcome = OutcomeBudget
 		run.Escalated = a.lastAttempt(claim)
 		run.Trace = &Trace{Note: "the record alone would spend the ceiling; generator not called", Escalated: run.Escalated,
-			Retrieval: facts.Retrieval, Precedents: len(facts.Precedents), Assembly: assembly}
+			Retrieval: facts.Retrieval, Precedents: len(facts.Precedents), Assembly: assembly, Evidence: evidenceShown(facts)}
 		return OutcomeBudget, run, nil
 	}
 
@@ -201,7 +228,7 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	run.CostMicros += draft.CostMicros
 	trace := Trace{Generator: phase{
 		Usage: draft.Usage, CostMicros: draft.CostMicros, Latency: time.Since(genStarted),
-	}, Retrieval: facts.Retrieval, Precedents: len(facts.Precedents), Assembly: assembly}
+	}, Retrieval: facts.Retrieval, Precedents: len(facts.Precedents), Assembly: assembly, Evidence: evidenceShown(facts)}
 	if len(facts.PriorFindings) > 0 {
 		trace.Note = fmt.Sprintf("redrafted with %d prior finding(s) in view", len(facts.PriorFindings))
 	}

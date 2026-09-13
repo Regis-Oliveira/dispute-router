@@ -69,6 +69,10 @@ type runRow struct {
 		Precedents int   `json:"precedents"`
 		Assembly   int64 `json:"assembly_ns"`
 		Escalated  bool  `json:"escalated"`
+		Evidence   struct {
+			Files int `json:"files"`
+			Read  int `json:"read"`
+		} `json:"evidence"`
 	}
 }
 
@@ -114,6 +118,7 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 	retrieval := map[string]int{}
 	checks := map[string]int{}
 	var cost, tokensIn, tokensOut, cacheRead, cacheWrite, escalated, retries, withPrecedent int
+	var withFiles, withFilesRead int
 	var walls, gens, vers, assemblies []int64
 	for _, r := range runs {
 		outcomes[r.Outcome]++
@@ -138,6 +143,12 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 		retrieval[method]++
 		if r.Trace.Precedents > 0 {
 			withPrecedent++
+		}
+		if r.Trace.Evidence.Files > 0 {
+			withFiles++
+		}
+		if r.Trace.Evidence.Read > 0 {
+			withFilesRead++
 		}
 		if r.Escalated {
 			escalated++
@@ -180,6 +191,10 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 		fmt.Fprintf(tw, "  %s\t%d\t%s\n", k, retrieval[k], pct(retrieval[k], len(runs)))
 	}
 	fmt.Fprintf(tw, "  runs with at least one precedent\t%d\t%s\n", withPrecedent, pct(withPrecedent, len(runs)))
+
+	fmt.Fprintf(tw, "\nEVIDENCE\t\n")
+	fmt.Fprintf(tw, "  runs with a file on the dispute\t%d\t%s\n", withFiles, pct(withFiles, len(runs)))
+	fmt.Fprintf(tw, "  runs with a file's text in the record\t%d\t%s\n", withFilesRead, pct(withFilesRead, len(runs)))
 
 	if len(checks) > 0 {
 		fmt.Fprintf(tw, "\nFINDINGS BY RULE\t\n")

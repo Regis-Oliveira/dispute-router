@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -14,12 +17,36 @@ import (
 	"github.com/regisoliveira/dispute-router/internal/disputetools"
 )
 
-// A lister that hands back a file complete with the presigned URL the real one
-// produces, so the test can check what survives the crossing.
-type fakeEvidence struct{ files []api.EvidenceFile }
+// A source that hands back a file complete with the presigned URL the real
+// one produces, so the test can check what survives the crossing. Contents,
+// where a test wants them, are keyed by the file's key; a file with none opens
+// as an empty text file.
+type fakeEvidence struct {
+	files    []api.EvidenceFile
+	contents map[string]fakeObject
+}
+
+type fakeObject struct {
+	contentType string
+	body        []byte
+}
 
 func (f fakeEvidence) List(context.Context, int64) ([]api.EvidenceFile, error) {
 	return f.files, nil
+}
+
+func (f fakeEvidence) Open(_ context.Context, _ int64, key string) (api.EvidenceObject, error) {
+	object := f.contents[key]
+	if object.contentType == "" {
+		object.contentType = "text/plain"
+	}
+	return api.EvidenceObject{
+		Key:         key,
+		Name:        path.Base(key),
+		ContentType: object.contentType,
+		SizeBytes:   int64(len(object.body)),
+		Body:        io.NopCloser(bytes.NewReader(object.body)),
+	}, nil
 }
 
 // Returns the pool alongside the store: a couple of these tests need to pick a

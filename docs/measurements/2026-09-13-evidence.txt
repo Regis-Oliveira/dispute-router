@@ -1,0 +1,25 @@
+The first dispute drafted with a file's text on the record.
+
+dispute   11343  dsp_paperclip_0009ewo, 13.1, 52.50 USD
+claim     "Tracking said delivered but there was nothing at my door."
+evidence  1789309260-delivery-confirmation.pdf, 745 bytes, read (206 characters)
+          a one-page PDF with a text layer, uploaded for this run
+
+outcome         drafted, recommendation represent
+cited_evidence  {1789309260-delivery-confirmation.pdf}
+findings        none, from the citation check or the verifier
+cost            $0.0402 (the system prompts changed, so nothing was served from cache)
+
+The letter names the file and says only what its text says: parcel, delivery
+date and time, billing address, left at the front door, photo held by the
+carrier, no signature required. It does not say the cardholder received it.
+
+For comparison, the same reason code and the same claim on dispute 12063 the
+day before, with the same file listed by name only: attempt 1 declined for
+lack of evidence, attempt 2 wrote "supporting that the order was delivered"
+and the verifier rejected it as unsupported. Both were right about the record
+they were given. The file that sat on 12063 turns out to be a hand-made PDF
+with placeholder cross-reference offsets; the parser refuses it, and the
+record now says so where its text would have been:
+
+  not read: PDF could not be parsed: malformed PDF: cross-reference table not found

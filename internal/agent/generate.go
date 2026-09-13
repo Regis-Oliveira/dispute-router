@@ -74,7 +74,7 @@ The RECORD block is everything you know. You cannot look anything up, and you mu
 What this means in practice:
 
 - Amounts are copied from the record exactly as it writes them, for example 57.99 USD or 5,000 JPY. Do no arithmetic and no conversion: do not add, subtract, restate or round an amount, and do not write one from memory. Dates and counts are copied the same way.
-- Evidence is cited by its exact filename from evidence_on_file, and only from there. If a receipt would win this case and there is no receipt on file, the case is not won.
+- Evidence is cited by its exact filename from evidence_on_file, and only from there. What a file shows is what its text in the EVIDENCE block shows: you may say a receipt shows a delivery date when its text does, and not otherwise. A file marked not read is a name you may say is on file, never a document you may describe. If a receipt would win this case and there is no receipt on file, the case is not won.
 - Never commit the merchant to anything: no refund, no policy, no future action, no guarantee.
 - Answer the reason code that was actually filed. Read dispute.reason_code and argue against that, not against what the dispute resembles.
 - Prior disputes from the same customer are in customer_history and are often the strongest thing you have. A first-time claim and a fifth read very differently.

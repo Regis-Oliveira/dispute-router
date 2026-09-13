@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 	"time"
@@ -205,4 +206,43 @@ func (e *Evidence) List(ctx context.Context, disputeID int64) ([]EvidenceFile, e
 		})
 	}
 	return files, nil
+}
+
+// EvidenceObject is one file's bytes, open for reading, with what S3 knows
+// about it. Body is the caller's to close.
+type EvidenceObject struct {
+	Key         string
+	Name        string
+	ContentType string
+	SizeBytes   int64
+	Body        io.ReadCloser
+}
+
+// Open reads one file on one dispute.
+//
+// This is the path the drafting agent takes to a file's contents, and it is
+// the reason there is still no presigned URL anywhere near a model: the bytes
+// come to host code, which decides what a prompt sees. The dispute is a
+// parameter and not just the key because a key is a string a caller could
+// have got from anywhere; refusing one outside the dispute's own prefix means
+// a record for dispute A can never be assembled from a file on dispute B,
+// whatever produced the key.
+func (e *Evidence) Open(ctx context.Context, disputeID int64, key string) (EvidenceObject, error) {
+	if !strings.HasPrefix(key, e.prefix(disputeID)) {
+		return EvidenceObject{}, fmt.Errorf("%w: key %q is not on dispute %d", ErrInvalidInput, key, disputeID)
+	}
+	out, err := e.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(e.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return EvidenceObject{}, fmt.Errorf("open evidence %s: %w", key, err)
+	}
+	return EvidenceObject{
+		Key:         key,
+		Name:        path.Base(key),
+		ContentType: aws.ToString(out.ContentType),
+		SizeBytes:   aws.ToInt64(out.ContentLength),
+		Body:        out.Body,
+	}, nil
 }
