@@ -51,6 +51,8 @@ type Retriever struct {
 	limit    int
 }
 
+// NewRetriever binds a retriever to a pool; a nil embedder means lexical only,
+// and limit at or below zero means 3.
 func NewRetriever(pool *pgxpool.Pool, embedder Embedder, limit int) *Retriever {
 	if limit <= 0 {
 		limit = 3
@@ -84,7 +86,7 @@ func (r *Retriever) For(ctx context.Context, disputeID int64, merchantExternalID
 		// An embedder with an empty corpus is a configuration state, not an
 		// answer. Falling through to lexical is better than returning nothing
 		// and letting the draft look like there is no precedent.
-		precedents, err = r.byText(ctx, disputeID, merchantExternalID, claim)
+		precedents, err = r.Lexical(ctx, disputeID, merchantExternalID, claim)
 		if err != nil {
 			return nil, Retrieval{}, err
 		}
@@ -94,7 +96,7 @@ func (r *Retriever) For(ctx context.Context, disputeID int64, merchantExternalID
 		}, nil
 	}
 
-	precedents, err := r.byText(ctx, disputeID, merchantExternalID, claim)
+	precedents, err := r.Lexical(ctx, disputeID, merchantExternalID, claim)
 	if err != nil {
 		return nil, Retrieval{}, err
 	}
@@ -163,14 +165,10 @@ func (r *Retriever) NearestTo(ctx context.Context, disputeID int64, merchant str
 // would disagree with Postgres about what a word is.
 const orQuery = `nullif(array_to_string(tsvector_to_array(to_tsvector('simple', $1)), ' | '), '')::tsquery`
 
-// byText is the baseline: full-text ranking over the same claims.
-// Lexical is the baseline search, exported for the same reason as NearestTo:
-// a comparison needs to run both halves side by side.
+// Lexical is the baseline: full-text ranking over the same claims. Exported
+// for the same reason as NearestTo: a comparison needs to run both halves side
+// by side.
 func (r *Retriever) Lexical(ctx context.Context, disputeID int64, merchant, claim string) ([]Precedent, error) {
-	return r.byText(ctx, disputeID, merchant, claim)
-}
-
-func (r *Retriever) byText(ctx context.Context, disputeID int64, merchant, claim string) ([]Precedent, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT `+precedentColumns+`,
 		       ts_rank(d.claim_tsv, `+orQuery+`) AS similarity

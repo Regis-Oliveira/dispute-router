@@ -18,8 +18,8 @@ import (
 // of the fields those shapes use, with omitempty keeping each one to the fields
 // its own type actually carries.
 //
-// Written out rather than imported, for the reason given at the top of
-// tools.go: Bedrock's InvokeModel takes this JSON verbatim.
+// Written out rather than imported, for the reason given on the wire types in
+// tools.go: kept SDK-free so another completer can share them.
 type ContentBlock struct {
 	Type string `json:"type"`
 
@@ -59,6 +59,7 @@ type ContentBlock struct {
 // encoding can be reached from inside the custom one.
 type contentBlockFields ContentBlock
 
+// UnmarshalJSON decodes the fields and keeps the raw block for the echo.
 func (b *ContentBlock) UnmarshalJSON(data []byte) error {
 	var fields contentBlockFields
 	if err := json.Unmarshal(data, &fields); err != nil {
@@ -69,6 +70,8 @@ func (b *ContentBlock) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// MarshalJSON sends a block the API produced back verbatim and encodes one
+// this package built from its fields.
 func (b ContentBlock) MarshalJSON() ([]byte, error) {
 	if len(b.raw) > 0 {
 		return b.raw, nil
@@ -76,11 +79,13 @@ func (b ContentBlock) MarshalJSON() ([]byte, error) {
 	return json.Marshal(contentBlockFields(b))
 }
 
+// Message is one turn of the conversation, from either side.
 type Message struct {
 	Role    string         `json:"role"`
 	Content []ContentBlock `json:"content"`
 }
 
+// Request is one call to the Messages API.
 type Request struct {
 	Model     string    `json:"model,omitempty"`
 	System    string    `json:"system,omitempty"`
@@ -118,6 +123,7 @@ type ToolChoice struct {
 	Name string `json:"name,omitempty"`
 }
 
+// Usage is the token count of one response, or of several added together.
 type Usage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
@@ -135,6 +141,7 @@ func (u *Usage) Add(other Usage) {
 	u.CacheReadInputTokens += other.CacheReadInputTokens
 }
 
+// Response is what the Messages API answered.
 type Response struct {
 	Content    []ContentBlock `json:"content"`
 	StopReason string         `json:"stop_reason"`
@@ -144,10 +151,11 @@ type Response struct {
 // Completer is the seam between the loop and whatever answers it.
 //
 // The loop is the part being built and the part worth testing; the transport is
-// not. Behind this interface sits Bedrock in production and a scripted fake in
-// the tests, which is also what lets the eval set run deterministically and for
-// free. The same shape as the Publisher seam in internal/outbox, for the same
-// reason: when SQS replaced the log publisher, the relay did not change a line.
+// not. Behind this interface sits Anthropic in production and a scripted double
+// in the tests, which is also what lets the eval set run deterministically and
+// for free. The same shape as the Publisher seam in internal/outbox, for the
+// same reason: when SQS replaced the log publisher, the relay did not change a
+// line.
 type Completer interface {
 	Complete(ctx context.Context, req Request) (Response, error)
 }
@@ -256,6 +264,7 @@ type ToolCall struct {
 	Latency time.Duration `json:"latency_ns"`
 }
 
+// Turn is one round trip of the loop, as recorded for the audit trail.
 type Turn struct {
 	Index      int           `json:"index"`
 	StopReason string        `json:"stop_reason"`
@@ -295,6 +304,7 @@ type Loop struct {
 	model     string
 }
 
+// NewLoop binds a loop to a completer, a tool set and the budget that bounds it.
 func NewLoop(completer Completer, tools *Registry, model string, pricing Pricing, budget Budget) *Loop {
 	return &Loop{completer: completer, tools: tools, pricing: pricing, budget: budget, model: model}
 }
@@ -417,7 +427,7 @@ func (l *Loop) finish(result *Result, record Turn) {
 // Results are written into a slice by index rather than appended from the
 // goroutines. Order does not affect correctness - each tool_result carries the
 // tool_use_id it answers - but a trace whose order changes between runs cannot
-// be diffed, and the eval set in step 7 depends on being able to diff it.
+// be diffed, and the eval set depends on being able to diff it.
 func (l *Loop) runTools(ctx context.Context, uses []ToolUse) ([]ContentBlock, []ToolCall, error) {
 	blocks := make([]ContentBlock, len(uses))
 	calls := make([]ToolCall, len(uses))

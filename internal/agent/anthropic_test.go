@@ -43,14 +43,14 @@ func TestTheRequestCarriesWhatTheAPIExpects(t *testing.T) {
 		raw, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(raw, &seen.body)
 
-		// Deliberately checked here rather than asserted on a struct: the model
-		// belongs in the body for this API and in the call for Bedrock, and
-		// getting that backwards is the mistake this test exists for.
+		// Deliberately checked here rather than asserted on a struct: for this
+		// API the model belongs in the body and the version in a header, and
+		// getting either wrong is the mistake this test exists for.
 		if !strings.Contains(string(raw), `"model"`) {
 			t.Error("the request body carries no model")
 		}
 		if strings.Contains(string(raw), "anthropic_version") {
-			t.Error("the request body carries anthropic_version, which is Bedrock's field")
+			t.Error("the request body carries anthropic_version, which belongs in the header")
 		}
 
 		w.Header().Set("content-type", "application/json")

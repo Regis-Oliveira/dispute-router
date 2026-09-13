@@ -99,6 +99,8 @@ type EvidenceRef struct {
 // first is how a misconfiguration turns into a stream of confident rejections.
 var ErrNoEvidenceSource = errors.New("agent: no evidence source configured")
 
+// FactSource assembles Facts for one dispute from the store, the evidence
+// bucket and, when configured, precedent retrieval and base rates.
 type FactSource struct {
 	tools     *disputetools.Set
 	evidence  EvidenceSource
@@ -106,6 +108,8 @@ type FactSource struct {
 	pool      *pgxpool.Pool
 }
 
+// NewFactSource reads the record through the dispute tools and the files
+// through evidence.
 func NewFactSource(store *api.Store, evidence EvidenceSource) *FactSource {
 	return &FactSource{tools: disputetools.New(store), evidence: evidence}
 }
@@ -174,7 +178,7 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 	}
 
 	if f.pool != nil {
-		rates, err := BaseRates(ctx, f.pool, dispute.Merchant, dispute.ReasonCode, dispute.Kind)
+		rates, err := baseRates(ctx, f.pool, dispute.Merchant, dispute.ReasonCode, dispute.Kind)
 		if err != nil {
 			// Same rule as retrieval: a draft written without the population
 			// numbers is worse, not wrong, and refusing to draft because an
@@ -385,7 +389,7 @@ func quarantine(text string, maxRunes int) string {
 	return fence(claimLabel, text, maxRunes)
 }
 
-// render turns the record into the block both the generator and the verifier
+// Render turns the record into the block both the generator and the verifier
 // read.
 //
 // The cardholder's claim is lifted out of the JSON and quarantined in its own
@@ -397,9 +401,10 @@ func quarantine(text string, maxRunes int) string {
 //
 // Both calls use this, so the quarantine is a property of the record rather
 // than of one prompt someone remembered to write carefully.
-// Render is exported because "what will the model actually see" is a question
-// worth being able to ask from outside this package - cmd/agent -prompt answers
-// it for free, and retrieval, quarantine and truncation are all visible in the
+//
+// Exported because "what will the model actually see" is a question worth
+// being able to ask from outside this package - cmd/agent -prompt answers it
+// for free, and retrieval, quarantine and truncation are all visible in the
 // output and none of them are visible in a draft.
 func (f Facts) Render() (string, error) {
 	// The view has no field for the claim, so it cannot appear twice - once

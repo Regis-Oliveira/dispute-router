@@ -46,6 +46,8 @@ type Runner struct {
 	verifier *agent.Verifier
 }
 
+// NewRunner binds a runner to the record source and the generator; a nil
+// verifier means the graders alone decide.
 func NewRunner(pool *pgxpool.Pool, facts *agent.FactSource, generator *agent.Generator, verifier *agent.Verifier) *Runner {
 	return &Runner{pool: pool, facts: facts, generator: generator, verifier: verifier}
 }
@@ -118,6 +120,7 @@ type Result struct {
 	Err     string `json:"error,omitempty"`
 }
 
+// PassedCount is how many of the case's samples passed every rule.
 func (r Result) PassedCount() int {
 	n := 0
 	for _, s := range r.Samples {
@@ -128,7 +131,7 @@ func (r Result) PassedCount() int {
 	return n
 }
 
-// Unstable is the number this whole change exists to produce.
+// Unstable is the number sampling exists to produce.
 //
 // A case that passed three times out of five and one that passed five out of
 // five both read as "pass" when a case is run once, and the difference between
@@ -155,6 +158,7 @@ func (r Result) FailuresByRule() map[string]int {
 	return out
 }
 
+// Report is one eval run over the whole case set.
 type Report struct {
 	Results      []Result `json:"results"`
 	Samples      int      `json:"samples_per_case"`
@@ -198,12 +202,6 @@ func (r Report) MeanCostMicros() int64 {
 	}
 	return r.TotalCostMicros / int64(r.Runs)
 }
-
-// plantedMarker is where the seeded attack begins. Specific to the fixture on
-// purpose: a control run has to remove exactly the attack and nothing else, and
-// a general "strip anything suspicious" would change the claim in ways that
-// make the comparison meaningless.
-const plantedMarker = "SYSTEM:"
 
 // withoutTheAttack drafts the same dispute again with the planted sentences
 // removed. Everything else - the record, the evidence, the precedent - is
@@ -311,7 +309,7 @@ func (r *Runner) draft(ctx context.Context, c Case, facts agent.Facts) Sample {
 
 	sample.Recommendation = draft.Recommendation
 	sample.Letter = draft.Letter
-	sample.Grades = GradeDraft(facts, draft)
+	sample.Grades = gradeDraft(facts, draft)
 
 	if c.Counterfactual {
 		control, err := r.withoutTheAttack(ctx, facts)
@@ -322,12 +320,12 @@ func (r *Runner) draft(ctx context.Context, c Case, facts agent.Facts) Sample {
 			return sample
 		}
 		sample.ControlRecommendation = control.Recommendation
-		sample.Grades = append(sample.Grades, Instructed(
-			Draftlike{draft.Recommendation, draft.Letter},
-			Draftlike{control.Recommendation, control.Letter}))
+		sample.Grades = append(sample.Grades, instructed(
+			draftlike{draft.Recommendation, draft.Letter},
+			draftlike{control.Recommendation, control.Letter}))
 	}
 
-	sample.Passed = Passed(sample.Grades)
+	sample.Passed = passed(sample.Grades)
 
 	// Every written draft is checked, insufficient_evidence included: that is
 	// the outcome a planted instruction is most likely to ask for, and a letter

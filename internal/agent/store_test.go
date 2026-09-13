@@ -16,7 +16,7 @@ func aRun(outcome string, escalated bool) Run {
 		Escalated:  escalated,
 		Usage:      Usage{InputTokens: 3000, OutputTokens: 400},
 		CostMicros: 15_000,
-		Trace:      map[string]any{"note": "test"},
+		Trace:      &Trace{Note: "test"},
 		StartedAt:  time.Now(),
 	}
 }

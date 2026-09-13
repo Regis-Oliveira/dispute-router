@@ -10,22 +10,6 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-// The generator writes the draft. It is one call, and it is given no tools that
-// fetch anything.
-//
-// That is a change from the original plan, and the reason is worth keeping. If
-// the generator could look things up, it could cite something true that the
-// verifier - working from a fixed record assembled before either call ran -
-// has never seen, and the verifier would reject a correct draft as
-// unsupported. Two judges need one record. Pre-loading it also makes the run
-// deterministic and single-turn, which is what lets the eval set compare
-// changes to the prompt rather than changes in what the model chose to fetch.
-//
-// The loop in loop.go is not wasted by this: it is the general harness, and
-// cmd/agent will use it for the operator-facing surface that answers questions
-// about the queue over the read-only tools. But this flow does not need it, and
-// running it here to justify having built it would be the wrong reason.
-
 // RepresentmentTool and VerdictTool are exported because they are recorded on
 // every run in agent_runs.tool_surface: the surface a run was given is part of
 // what makes it reproducible, and a caller that reads a row has to be able to
@@ -69,6 +53,16 @@ func (d Draft) Recommended() bool {
 	return d.written && d.Recommendation == RecommendRepresent
 }
 
+// NewWrittenDraftForTest marks d as written, as if the generator had produced
+// it. Test-only: it is the one door past the fail-closed written flag, so that
+// the graders in internal/agent/eval can be tested against a handwritten draft
+// without scripting a generator call. Production code must never call it; it
+// is exported only because agenttest cannot reach the field otherwise.
+func NewWrittenDraftForTest(d Draft) Draft {
+	d.written = true
+	return d
+}
+
 const generatorSystem = `You draft chargeback representments: the letter a merchant sends an issuing bank to contest a dispute. A human reviews everything you write before it goes anywhere, and your job is to give that reviewer something accurate enough to send, not something persuasive enough to be worth checking.
 
 The RECORD block is everything you know. You cannot look anything up, and you must not assert anything that is not in it. This is the rule the whole task turns on, so it is worth being plain about why: a representment that asserts a fact the merchant cannot evidence is worse than sending nothing. The issuer asks for proof, the merchant does not have it, and the case is lost on a claim nobody needed to make. "It is probably true" and "it follows from the rest" are the two forms this mistake takes. Neither is a reason to write it.
@@ -91,7 +85,21 @@ Where a PRECEDENT block is present it lists settled disputes at this merchant wi
 
 Answer with the ` + RepresentmentTool + ` tool.`
 
-// Generator writes representment drafts from an assembled record.
+// Generator writes representment drafts from an assembled record. It is one
+// call, and it is given no tools that fetch anything.
+//
+// That is a change from the original plan, and the reason is worth keeping. If
+// the generator could look things up, it could cite something true that the
+// verifier - working from a fixed record assembled before either call ran -
+// has never seen, and the verifier would reject a correct draft as
+// unsupported. Two judges need one record. Pre-loading it also makes the run
+// deterministic and single-turn, which is what lets the eval set compare
+// changes to the prompt rather than changes in what the model chose to fetch.
+//
+// The loop in loop.go is not wasted by this: it is the general harness, and
+// cmd/ask runs it as the operator-facing surface that answers questions about
+// the queue over the read-only tools. But this flow does not need it, and
+// running it here to justify having built it would be the wrong reason.
 type Generator struct {
 	completer Completer
 	model     string

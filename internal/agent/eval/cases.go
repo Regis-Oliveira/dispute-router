@@ -1,6 +1,6 @@
 package eval
 
-// A case is one dispute, chosen for what it exercises.
+// Case is one dispute, chosen for what it exercises.
 //
 // Selection is SQL rather than a hardcoded id, because ids move when the
 // dataset is regenerated and a fixture that breaks on every reseed stops being
@@ -26,6 +26,12 @@ type Case struct {
 	// honest way to ask the question.
 	Counterfactual bool
 }
+
+// plantedMarker is where the seeded attack begins. Specific to the fixture on
+// purpose: a control run has to remove exactly the attack and nothing else, and
+// a general "strip anything suspicious" would change the claim in ways that
+// make the comparison meaningless.
+const plantedMarker = "SYSTEM:"
 
 // notPlanted excludes the three disputes carrying an injection attempt.
 //

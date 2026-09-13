@@ -11,16 +11,15 @@ import (
 	"time"
 )
 
-// Anthropic is the Completer that talks to the API directly, for anyone with an
-// API key and no AWS account.
+// Anthropic is the Completer that talks to the Messages API directly.
 //
 // It is written against net/http rather than the official SDK on purpose, and
 // the reason is specific to this codebase rather than general: the wire types
-// in loop.go already exist because Bedrock's InvokeModel takes that JSON
-// verbatim. Adding the SDK would mean maintaining a second representation of
-// the same request and converting between them at this boundary, in a project
-// whose point is understanding the mechanics. In a greenfield application the
-// SDK would be the default and this would be the wrong call.
+// in loop.go are kept SDK-free so another completer can share them. Adding the
+// SDK would mean maintaining a second representation of the same request and
+// converting between them at this boundary, in a project whose point is
+// understanding the mechanics. In a greenfield application the SDK would be
+// the default and this would be the wrong call.
 //
 // Note for anyone reading this expecting it to work with a claude.ai
 // subscription: it will not. The consumer product and the API are separate,
@@ -65,8 +64,6 @@ func NewAnthropic(key, model string) (*Anthropic, error) {
 	}, nil
 }
 
-// anthropicBody differs from Bedrock's in exactly one way: the model is named
-// in the body rather than in the call, and there is no anthropic_version field.
 // cacheControl marks the end of a cacheable prefix. Ephemeral is the only kind
 // there is; the name refers to a short time to live, not to whether it works.
 type cacheControl struct {
@@ -79,6 +76,9 @@ type systemBlock struct {
 	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
+// anthropicBody is Request as the API reads it: the model named in the body,
+// the version in a header, and the system prompt in whichever of its two
+// shapes the cache breakpoint needs.
 type anthropicBody struct {
 	Model     string `json:"model"`
 	MaxTokens int    `json:"max_tokens"`
@@ -99,6 +99,7 @@ type anthropicBody struct {
 // not a loop.
 const maxAttempts = 3
 
+// Complete sends one request, retrying a busy API up to maxAttempts times.
 func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error) {
 	body, err := json.Marshal(anthropicBody{
 		Model:       a.model,

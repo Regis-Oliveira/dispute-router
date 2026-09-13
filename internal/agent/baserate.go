@@ -35,6 +35,7 @@ type BaseRate struct {
 	Expired int `json:"expired"`
 }
 
+// Settled is how many disputes were actually argued to an outcome.
 func (b BaseRate) Settled() int { return b.Won + b.Lost }
 
 // minBaseRateSample is where a proportion starts meaning anything.
@@ -45,6 +46,7 @@ func (b BaseRate) Settled() int { return b.Won + b.Lost }
 // noise with a percent sign. Under ten, the counts go out and the rate does not.
 const minBaseRateSample = 10
 
+// Reliable reports whether the sample is large enough for WinRate to mean anything.
 func (b BaseRate) Reliable() bool { return b.Settled() >= minBaseRateSample }
 
 // WinRate is only meaningful when Reliable.
@@ -55,13 +57,13 @@ func (b BaseRate) WinRate() float64 {
 	return float64(b.Won) / float64(b.Settled())
 }
 
-// BaseRates returns the reason-specific rate and the merchant-wide one.
+// baseRates returns the reason-specific rate and the merchant-wide one.
 //
 // Two scopes because the narrow one is the better answer and the wide one is
 // the one that exists. A merchant with four settled disputes under this reason
 // code has nothing to say about it, and falling back to the whole merchant is
 // weaker but not noise.
-func BaseRates(ctx context.Context, pool *pgxpool.Pool, merchant, reasonCode, kind string) ([]BaseRate, error) {
+func baseRates(ctx context.Context, pool *pgxpool.Pool, merchant, reasonCode, kind string) ([]BaseRate, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT scope, won, lost, expired FROM (
 		  SELECT 'merchant+reason' AS scope, 1 AS ord,

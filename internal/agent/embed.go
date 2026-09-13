@@ -54,6 +54,7 @@ const (
 	voyageMaxBatch = 128
 )
 
+// Voyage is the Embedder over Voyage AI's embeddings endpoint.
 type Voyage struct {
 	client *http.Client
 	key    string
@@ -64,6 +65,7 @@ type Voyage struct {
 	endpoint string
 }
 
+// NewVoyage builds the client; an empty model means voyage-4.
 func NewVoyage(key, model string) (*Voyage, error) {
 	if key == "" {
 		return nil, errors.New("agent: VOYAGE_API_KEY is required for embeddings " +
@@ -85,7 +87,10 @@ func NewVoyage(key, model string) (*Voyage, error) {
 	}, nil
 }
 
-func (v *Voyage) Model() string   { return v.model }
+// Model names the embedding model, which keys every stored vector.
+func (v *Voyage) Model() string { return v.model }
+
+// Dimensions is the vector width, the one the schema declares.
 func (v *Voyage) Dimensions() int { return voyageDimensions }
 
 type voyageRequest struct {
@@ -113,6 +118,8 @@ type voyageResponse struct {
 	} `json:"usage"`
 }
 
+// Embed returns one unit-length vector per text, in order, splitting the input
+// into requests the API accepts.
 func (v *Voyage) Embed(ctx context.Context, texts []string, kind EmbedKind) ([][]float32, error) {
 	out := make([][]float32, 0, len(texts))
 

@@ -8,22 +8,6 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 )
 
-// The verifier is a second model call with one job: decide whether a draft is
-// supported by the record.
-//
-// It is separate from the generator on purpose. A model that has just written
-// something is the worst available judge of it, because the draft sits in its
-// context as a premise rather than as a claim to be tested - ask it to check
-// its own work and it will explain why the work is right. A fresh call, handed
-// only the record and the text, is doing a comparison instead of a defence.
-//
-// Two things enforce that separation structurally rather than by instruction.
-// Check takes facts and a draft and nothing else, so there is no parameter
-// through which the generator's reasoning could arrive. And the facts are read
-// from the store by internal/agent/facts.go, not lifted from the generator's
-// transcript, so a hallucinated fact cannot become the standard it is measured
-// against.
-
 // VerdictTool is the only tool the verifier is given, and it fetches nothing.
 //
 // This is not a hole in the "no tools" rule - it is what the rule is about. The
@@ -47,6 +31,7 @@ const (
 	CheckWrongReasonCode  = "wrong_reason_code"
 )
 
+// Finding is one rule a draft broke, with the words it broke it in.
 type Finding struct {
 	Check string `json:"check" jsonschema:"Which rule was broken: unsupported_claim, wrong_figure, missing_evidence, promise, or wrong_reason_code"`
 	// A finding has to point at text. One that cannot quote the draft is
@@ -113,6 +98,20 @@ The PRECEDENT block, where present, describes other disputes. Their amounts, dat
 
 Record your answer with the ` + VerdictTool + ` tool. Any finding at all means pass is false.`
 
+// Verifier is a second model call with one job: decide whether a draft is
+// supported by the record.
+//
+// It is separate from the generator on purpose. A model that has just written
+// something is the worst available judge of it, because the draft sits in its
+// context as a premise rather than as a claim to be tested - ask it to check
+// its own work and it will explain why the work is right. A fresh call, handed
+// only the record and the text, is doing a comparison instead of a defence.
+//
+// Two things enforce that separation structurally rather than by instruction.
+// Check takes facts and a draft and nothing else, so there is no parameter
+// through which the generator's reasoning could arrive. And the facts are read
+// from the store by facts.go, not lifted from the generator's transcript, so a
+// hallucinated fact cannot become the standard it is measured against.
 type Verifier struct {
 	completer Completer
 	model     string
@@ -120,6 +119,7 @@ type Verifier struct {
 	maxTokens int
 }
 
+// NewVerifier binds a verifier to a model; maxTokens at or below zero means 2048.
 func NewVerifier(completer Completer, model string, pricing Pricing, maxTokens int) *Verifier {
 	if maxTokens <= 0 {
 		maxTokens = 2048

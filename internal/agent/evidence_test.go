@@ -248,7 +248,7 @@ func TestTheTraceCountsWhatWasShown(t *testing.T) {
 		{Name: "b.png", Status: EvidenceNotRead},
 		{Name: "c.txt", Status: EvidenceCut, Text: "cut"},
 	}}
-	if got := evidenceShown(facts); got != (evidenceTrace{Files: 3, Read: 2, Runes: 15}) {
+	if got := evidenceShown(facts); got != (EvidenceTrace{Files: 3, Read: 2, Runes: 15}) {
 		t.Errorf("evidenceShown = %+v", got)
 	}
 }

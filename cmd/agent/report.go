@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/agent"
 )
 
 // startTrace records the runtime's execution trace for this invocation: every
@@ -29,53 +31,25 @@ func startTrace(path string) (func(), error) {
 	return func() { trace.Stop(); f.Close() }, nil
 }
 
-// The report reads agent_runs and says what the assistant has done and what
-// it cost, with the numbers a person comparing two days of runs needs:
-// outcomes, cost and latency distributions, how much input the cache served,
-// which retrieval ran, and which rules drafts broke. It spends nothing.
-
+// runRow is one agent_runs row as the report reads it: the columns it
+// aggregates, plus the stored trace and findings decoded into the types that
+// wrote them.
 type runRow struct {
 	Outcome        string
 	Recommendation string
 	Attempt        int
-	Escalated      bool
 	InputTokens    int
 	OutputTokens   int
 	CostMicros     int64
-	WallNs         int64
-	Findings       []struct {
-		Check string `json:"check"`
-	}
-	Trace struct {
-		Generator struct {
-			Usage struct {
-				CacheRead  int `json:"cache_read_input_tokens"`
-				CacheWrite int `json:"cache_creation_input_tokens"`
-				Input      int `json:"input_tokens"`
-			} `json:"usage"`
-			Latency int64 `json:"latency_ns"`
-		} `json:"generator"`
-		Verifier *struct {
-			Usage struct {
-				CacheRead  int `json:"cache_read_input_tokens"`
-				CacheWrite int `json:"cache_creation_input_tokens"`
-				Input      int `json:"input_tokens"`
-			} `json:"usage"`
-			Latency int64 `json:"latency_ns"`
-		} `json:"verifier"`
-		Retrieval struct {
-			Method string `json:"method"`
-		} `json:"retrieval"`
-		Precedents int   `json:"precedents"`
-		Assembly   int64 `json:"assembly_ns"`
-		Escalated  bool  `json:"escalated"`
-		Evidence   struct {
-			Files int `json:"files"`
-			Read  int `json:"read"`
-		} `json:"evidence"`
-	}
+	Wall           time.Duration
+	Findings       []agent.Finding
+	Trace          agent.Trace
 }
 
+// printReport reads agent_runs and says what the assistant has done and what
+// it cost, with the numbers a person comparing two days of runs needs:
+// outcomes, cost and latency distributions, how much input the cache served,
+// which retrieval ran, and which rules drafts broke. It spends nothing.
 func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 	rows, err := pool.Query(ctx, `
 		SELECT outcome, coalesce(recommendation, ''), attempt,
@@ -97,10 +71,9 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 			&r.CostMicros, &wall, &findings, &tr); err != nil {
 			return fmt.Errorf("scan run: %w", err)
 		}
-		r.WallNs = int64(wall)
+		r.Wall = time.Duration(wall)
 		_ = json.Unmarshal([]byte(findings), &r.Findings)
 		_ = json.Unmarshal([]byte(tr), &r.Trace)
-		r.Escalated = r.Trace.Escalated
 		runs = append(runs, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -119,22 +92,22 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 	checks := map[string]int{}
 	var cost, tokensIn, tokensOut, cacheRead, cacheWrite, escalated, retries, withPrecedent int
 	var withFiles, withFilesRead int
-	var walls, gens, vers, assemblies []int64
+	var walls, gens, vers, assemblies []time.Duration
 	for _, r := range runs {
 		outcomes[r.Outcome]++
 		cost += int(r.CostMicros)
 		tokensIn += r.InputTokens
 		tokensOut += r.OutputTokens
 		g := r.Trace.Generator.Usage
-		cacheRead += g.CacheRead
-		cacheWrite += g.CacheWrite
+		cacheRead += g.CacheReadInputTokens
+		cacheWrite += g.CacheCreationInputTokens
 		if v := r.Trace.Verifier; v != nil {
-			cacheRead += v.Usage.CacheRead
-			cacheWrite += v.Usage.CacheWrite
+			cacheRead += v.Usage.CacheReadInputTokens
+			cacheWrite += v.Usage.CacheCreationInputTokens
 			vers = append(vers, v.Latency)
 		}
 		gens = append(gens, r.Trace.Generator.Latency)
-		walls = append(walls, r.WallNs)
+		walls = append(walls, r.Wall)
 		assemblies = append(assemblies, r.Trace.Assembly)
 		method := r.Trace.Retrieval.Method
 		if method == "" {
@@ -150,7 +123,7 @@ func printReport(ctx context.Context, pool *pgxpool.Pool, w io.Writer) error {
 		if r.Trace.Evidence.Read > 0 {
 			withFilesRead++
 		}
-		if r.Escalated {
+		if r.Trace.Escalated {
 			escalated++
 		}
 		if r.Attempt > 1 {
@@ -214,17 +187,17 @@ func sortedKeys(m map[string]int) []string {
 	return keys
 }
 
-func percentile(values []int64, p int) int64 {
+func percentile(values []time.Duration, p int) time.Duration {
 	if len(values) == 0 {
 		return 0
 	}
-	sorted := append([]int64(nil), values...)
+	sorted := append([]time.Duration(nil), values...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
 	idx := (len(sorted) - 1) * p / 100
 	return sorted[idx]
 }
 
-func dur(ns int64) string { return time.Duration(ns).Round(time.Millisecond).String() }
+func dur(d time.Duration) string { return d.Round(time.Millisecond).String() }
 
 func pct(n, total int) string {
 	if total == 0 {

@@ -33,16 +33,18 @@ type Assistant struct {
 	model       string
 	toolSurface []string
 
-	// MaxCostMicros bounds one dispute across both calls. An automation that
+	// maxCostMicros bounds one dispute across both calls. An automation that
 	// costs more than the chargeback it is working on has inverted the business
 	// case it exists to serve.
 	maxCostMicros int64
 
-	// MaxAttempts is when a dispute stops being redrafted and starts being
+	// maxAttempts is when a dispute stops being redrafted and starts being
 	// somebody's problem.
 	maxAttempts int
 }
 
+// AssistantOptions configures NewAssistant; zero MaxAttempts means 2, a nil
+// Logger means slog.Default, and zero MaxCostMicros means no ceiling.
 type AssistantOptions struct {
 	Model         string
 	MaxCostMicros int64
@@ -50,6 +52,8 @@ type AssistantOptions struct {
 	Logger        *slog.Logger
 }
 
+// NewAssistant wires the record source, the two model calls and the store into
+// one flow.
 func NewAssistant(facts *FactSource, generator *Generator, verifier *Verifier, runs *Runs, opts AssistantOptions) *Assistant {
 	if opts.MaxAttempts <= 0 {
 		opts.MaxAttempts = 2
@@ -100,10 +104,11 @@ func mustSchema[T any]() *jsonschema.Schema {
 	return schema
 }
 
-// Trace is what the run did, as stored.
+// Trace is what the run did, as stored in agent_runs.trace and read back by
+// cmd/agent -report.
 type Trace struct {
-	Generator   phase  `json:"generator"`
-	Verifier    *phase `json:"verifier,omitempty"`
+	Generator   Phase  `json:"generator"`
+	Verifier    *Phase `json:"verifier,omitempty"`
 	CitationsOK bool   `json:"citations_ok"`
 	Escalated   bool   `json:"escalated,omitempty"`
 	Note        string `json:"note,omitempty"`
@@ -120,18 +125,19 @@ type Trace struct {
 	// a file" and "insufficient evidence" are the outcomes the file decides,
 	// and a run that could not read the file is a different run from one that
 	// read it.
-	Evidence evidenceTrace `json:"evidence"`
+	Evidence EvidenceTrace `json:"evidence"`
 }
 
-type evidenceTrace struct {
+// EvidenceTrace is how much of the dispute's files reached the record.
+type EvidenceTrace struct {
 	Files int `json:"files"`
 	Read  int `json:"read"`
 	Runes int `json:"runes"`
 }
 
 // evidenceShown counts what reached the record.
-func evidenceShown(facts Facts) evidenceTrace {
-	t := evidenceTrace{Files: len(facts.Evidence)}
+func evidenceShown(facts Facts) EvidenceTrace {
+	t := EvidenceTrace{Files: len(facts.Evidence)}
 	for _, file := range facts.Evidence {
 		if file.Status == EvidenceNotRead {
 			continue
@@ -142,7 +148,8 @@ func evidenceShown(facts Facts) evidenceTrace {
 	return t
 }
 
-type phase struct {
+// Phase is what one model call in a run cost and how long it took.
+type Phase struct {
 	Usage      Usage         `json:"usage"`
 	CostMicros int64         `json:"cost_micros"`
 	Latency    time.Duration `json:"latency_ns"`
@@ -226,7 +233,7 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	// budget silently stops meaning anything.
 	run.Usage.Add(draft.Usage)
 	run.CostMicros += draft.CostMicros
-	trace := Trace{Generator: phase{
+	trace := Trace{Generator: Phase{
 		Usage: draft.Usage, CostMicros: draft.CostMicros, Latency: time.Since(genStarted),
 	}, Retrieval: facts.Retrieval, Precedents: len(facts.Precedents), Assembly: assembly, Evidence: evidenceShown(facts)}
 	if len(facts.PriorFindings) > 0 {
@@ -277,7 +284,7 @@ func (a *Assistant) attempt(ctx context.Context, claim Claim) (string, Run, erro
 	verdict, err := a.verifier.Check(ctx, facts, draft.Letter)
 	run.Usage.Add(verdict.Usage)
 	run.CostMicros += verdict.CostMicros
-	trace.Verifier = &phase{
+	trace.Verifier = &Phase{
 		Usage: verdict.Usage, CostMicros: verdict.CostMicros, Latency: time.Since(verStarted),
 	}
 	if err != nil {

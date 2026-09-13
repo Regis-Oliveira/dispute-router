@@ -20,6 +20,7 @@ var ErrClaimLost = errors.New("agent: dispute changed under the claim")
 // wrote down afterwards.
 type Runs struct{ pool *pgxpool.Pool }
 
+// NewRuns binds the agent's persistence to a pool.
 func NewRuns(pool *pgxpool.Pool) *Runs { return &Runs{pool: pool} }
 
 // Claim is one dispute, held.
@@ -131,7 +132,9 @@ func (r *Runs) Release(ctx context.Context, claim Claim) error {
 	return nil
 }
 
-// Outcome mirrors the CHECK on agent_runs.outcome.
+// Outcome mirrors the CHECK on agent_runs.outcome, in full: OutcomeFailed is
+// never written by this package (a fault is not recorded as a run) but the
+// constraint names it, and a mirror that omits a value stops being one.
 const (
 	OutcomeDrafted      = "drafted"
 	OutcomeRejected     = "rejected"
@@ -152,7 +155,7 @@ type Run struct {
 	Findings          []Finding
 	Usage             Usage
 	CostMicros        int64
-	Trace             any
+	Trace             *Trace
 	StartedAt         time.Time
 
 	// Escalated routes a run to a person without changing what it says. A

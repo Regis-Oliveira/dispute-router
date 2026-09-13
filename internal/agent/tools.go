@@ -1,25 +1,3 @@
-// Package agent runs a model in a loop over the dispute read model.
-//
-// This file is one half of that: the tool boundary. It puts the tools from
-// internal/disputetools into the shape the Messages API expects, dispatches a
-// tool_use block to the right handler, and turns whatever comes back into a
-// tool_result block.
-//
-// Two rules shape the whole file.
-//
-// The first is that a tool failure is usually a message, not a crash. A model
-// that asks for a dispute that does not exist needs to be told so, in a form it
-// can read and act on; killing the run instead throws away every token spent
-// getting there. But a database that is down is not something a model can
-// reason its way past, and handing it back as text just invites a retry loop
-// that bills for nothing. So errors are sorted: the ones the model can act on
-// become tool_result blocks, and the ones it cannot abort the run.
-//
-// The second is that everything crossing this boundary costs context. A tool
-// that answers with 200 KB of JSON has not been helpful - it has spent the
-// budget the reasoning needed. Hence the byte ceiling below, and hence the fact
-// that it refuses out loud rather than truncating into JSON that no longer
-// parses.
 package agent
 
 import (
@@ -34,22 +12,21 @@ import (
 
 // maxResultBytes caps one tool result, roughly eight thousand tokens.
 //
-// A full 50-row list lands around 12 KB, so this is headroom rather than a
-// limit anyone should meet. Meeting it means something is wrong with the
-// question, which is why the answer says so instead of quietly cutting the
-// JSON in half.
+// Everything crossing the tool boundary costs context: a tool that answers
+// with 200 KB of JSON has spent the budget the reasoning needed. A full 50-row
+// list lands around 12 KB, so this is headroom rather than a limit anyone
+// should meet. Meeting it means something is wrong with the question, which is
+// why the answer says so instead of quietly cutting the JSON in half.
 const maxResultBytes = 32 * 1024
 
 // ---------------------------------------------------------------------------
 // wire types
 // ---------------------------------------------------------------------------
 
-// These are the Messages API tool-use blocks, written out rather than imported.
-//
-// The model is reached through Bedrock's InvokeModel, whose body is this JSON
-// verbatim, and the AWS SDK is already a dependency - so a second vendor SDK
-// would buy nothing here. It also keeps this package testable without a network
-// call or an API key, which is what makes the eval set in step 7 possible.
+// These are the Messages API tool-use blocks, written out rather than
+// imported: the wire types are kept SDK-free so another completer can share
+// them, and so this package is testable without a network call or an API key,
+// which is what makes the eval set possible.
 
 // Tool is one entry in the request's "tools" array.
 type Tool struct {
@@ -65,21 +42,21 @@ type ToolUse struct {
 	Input json.RawMessage `json:"input"`
 }
 
-// ToolResult is the tool_result content block sent back on the next turn.
+// ToolResult is what one tool call produced; block turns it into the
+// tool_result content block sent back on the next turn.
 //
 // Content is a string rather than a nested block array: every one of these
 // tools answers with JSON, and a string is what the API accepts for that.
 type ToolResult struct {
-	Type      string `json:"type"`
-	ToolUseID string `json:"tool_use_id"`
-	Content   string `json:"content"`
-	IsError   bool   `json:"is_error,omitempty"`
+	ToolUseID string
+	Content   string
+	IsError   bool
 
 	// Rule names why a call was refused, for the trace and never for the
 	// wire. A refusal the model reads is prose; a refusal an operator counts
 	// is a rule id, and "refusals by rule" cannot be totalled from prose. The
 	// same reason every verifier finding carries a check name.
-	Rule string `json:"-"`
+	Rule string
 }
 
 // The rules a tool call can be refused under. A closed set, so a report can
@@ -107,6 +84,7 @@ type Registry struct {
 	specs  []Tool
 }
 
+// NewRegistry exposes the catalog in internal/disputetools as tools.
 func NewRegistry(store *api.Store) *Registry {
 	catalog := disputetools.New(store).Catalog()
 
@@ -142,9 +120,14 @@ func (r *Registry) Names() []string {
 
 // Run executes one tool_use block.
 //
-// The returned error is fatal to the run. Anything the model can do something
-// about comes back in the ToolResult with IsError set, so the loop can hand it
-// straight to the next turn.
+// A tool failure is usually a message, not a crash. A model that asks for a
+// dispute that does not exist needs to be told so, in a form it can read and
+// act on; killing the run instead throws away every token spent getting there.
+// But a database that is down is not something a model can reason its way
+// past, and handing it back as text just invites a retry loop that bills for
+// nothing. So errors are sorted: the ones the model can act on come back in
+// the ToolResult with IsError set, for the loop to hand to the next turn, and
+// the returned error is fatal to the run.
 func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
 	def, known := r.byName[use.Name]
 	if !known {
@@ -184,7 +167,7 @@ func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
 			len(encoded), maxResultBytes)), nil
 	}
 
-	return ToolResult{Type: "tool_result", ToolUseID: use.ID, Content: string(encoded)}, nil
+	return ToolResult{ToolUseID: use.ID, Content: string(encoded)}, nil
 }
 
 // ruleFor says whether an error describes something about the request rather
@@ -206,7 +189,6 @@ func ruleFor(err error) (rule string, actionable bool) {
 
 func refuse(use ToolUse, rule, reason string) ToolResult {
 	return ToolResult{
-		Type:      "tool_result",
 		ToolUseID: use.ID,
 		Content:   reason,
 		IsError:   true,
