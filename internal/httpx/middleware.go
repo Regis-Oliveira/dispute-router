@@ -3,7 +3,6 @@
 package httpx
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -11,10 +10,6 @@ import (
 	"net/http"
 	"time"
 )
-
-type ctxKey int
-
-const requestIDKey ctxKey = iota
 
 func newRequestID() string {
 	var buf [8]byte
@@ -59,9 +54,12 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return n, err
 }
 
-// Middleware tags each request with an id, logs the outcome, and stops a panic
-// in one handler from taking the process down.
-func Middleware(logger *slog.Logger) func(http.Handler) http.Handler {
+// Observe tags each request with an id, logs the outcome, and stops a panic in
+// one handler from taking the process down.
+//
+// The id is echoed in the X-Request-Id response header and in both log lines;
+// it is not put on the context, because no handler reads it from there.
+func Observe(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			id := r.Header.Get("X-Request-Id")
@@ -70,7 +68,7 @@ func Middleware(logger *slog.Logger) func(http.Handler) http.Handler {
 			}
 			w.Header().Set("X-Request-Id", id)
 
-			ctx := context.WithValue(r.Context(), requestIDKey, id)
+			ctx := r.Context()
 			recorder := &statusRecorder{ResponseWriter: w}
 			started := time.Now()
 
@@ -103,7 +101,7 @@ func Middleware(logger *slog.Logger) func(http.Handler) http.Handler {
 					"duration_ms", time.Since(started).Milliseconds())
 			}()
 
-			next.ServeHTTP(recorder, r.WithContext(ctx))
+			next.ServeHTTP(recorder, r)
 		})
 	}
 }

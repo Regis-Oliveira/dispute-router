@@ -134,7 +134,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           httpx.Middleware(logger)(mux),
+		Handler:           httpx.Observe(logger)(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      15 * time.Second,

@@ -83,7 +83,7 @@ func run(logger *slog.Logger) error {
 	var root http.Handler = handler.Routes()
 	root = api.Timeout(cfg.RequestTimeout)(root)
 	root = api.CORS(cfg.CORSOrigins)(root)
-	root = httpx.Middleware(logger)(root)
+	root = httpx.Observe(logger)(root)
 
 	server := &http.Server{
 		Addr:              cfg.APIAddr,
