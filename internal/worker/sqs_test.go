@@ -1,3 +1,5 @@
+//go:build integration
+
 package worker
 
 import (
@@ -22,6 +24,11 @@ import (
 // Runs against LocalStack, which speaks the real SQS API - so these exercise
 // visibility timeouts, receipt handles and the redrive policy for real, not a
 // fake that agrees with whatever the code does.
+//
+// Tagged with the rest of the file because every test here takes a deadline
+// index from testRedis, and testRedis flushes database 15. The queues
+// themselves are throwaways this file creates and deletes, which on its own
+// would not need a tag.
 func testSQS(t *testing.T) *sqs.Client {
 	t.Helper()
 

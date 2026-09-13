@@ -1,3 +1,5 @@
+//go:build integration
+
 package worker
 
 import (
@@ -10,6 +12,13 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// testRedis is why this file carries the integration tag.
+//
+// FLUSHDB wipes whatever database 15 holds, not only the keys these tests
+// wrote, and an env-var gate is not enough for that: REDIS_URL is set in every
+// developer's .env, so `make go-test` would flush on every run. A live test
+// that only reads costs nothing and stays gated; one that destroys state it did
+// not create is asked for by name, through `make go-test-integration`.
 func testRedis(t *testing.T) *redis.Client {
 	t.Helper()
 

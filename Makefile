@@ -2,7 +2,8 @@ SIM := services/simulator
 DASH := apps/dashboard
 
 .PHONY: help up down reset migrate seed verify emit psql redis logs \
-        ingest api go-test go-lint tidy dash dash-test dash-build stack
+        ingest api go-test go-test-integration go-lint tidy dash dash-test \
+        dash-build stack
 
 help:
 	@echo "up      start postgres (:5433) and redis (:6379)"
@@ -21,6 +22,8 @@ help:
 	@echo "stack        what to run, in which order"
 	@echo ""
 	@echo "go-test      go test ./... -race"
+	@echo "go-test-integration"
+	@echo "             the same, plus the tests that flush or drop a database"
 	@echo "go-lint      go vet and staticcheck"
 	@echo "dash-test    unit tests for the dashboard"
 	@echo "tidy         resolve Go module dependencies"
@@ -141,6 +144,16 @@ demo-reset:
 
 go-test:
 	go test ./... -race
+
+# The tests behind //go:build integration, plus everything go-test already runs.
+#
+# They are separated by what they destroy, not by what they touch. A live test
+# that only reads is gated by its env var and skips for free, so it belongs in
+# the default run. One that flushes a Redis database or creates and drops a
+# Postgres one wipes state it did not write, and that has to be asked for by
+# name rather than happen to anyone whose .env is populated.
+go-test-integration:
+	go test ./... -race -tags integration
 
 go-lint:
 	go vet ./...

@@ -18,6 +18,10 @@ import (
 // Runs against LocalStack, which speaks the real SQS API. The bookkeeping
 // under test is about visibility timeouts and receipt handles, which a fake
 // would only reproduce as faithfully as the code it agrees with.
+//
+// Live but not destructive, so it keeps the env-var gate rather than the
+// integration tag: the two queues are named after this run and deleted again,
+// and nothing here touches state it did not create.
 func testRedriver(t *testing.T) *Redriver {
 	t.Helper()
 

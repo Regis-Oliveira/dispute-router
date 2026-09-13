@@ -12,6 +12,11 @@ import (
 	"github.com/regisoliveira/dispute-router/internal/awsx"
 )
 
+// testManager puts one throwaway document in LocalStack's Secrets Manager.
+//
+// Live but not destructive, so it keeps the env-var gate rather than the
+// integration tag: the secret is named after this run and force-deleted again,
+// and nothing here touches a secret it did not create.
 func testManager(t *testing.T, document string, ttl time.Duration) *FromManager {
 	t.Helper()
 
