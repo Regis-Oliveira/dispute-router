@@ -48,8 +48,13 @@ func openCandidate(t *testing.T, ctx context.Context, tx pgx.Tx, kind string) lo
 		       m.auto_refund_ceiling_minor
 		  FROM disputes d
 		  JOIN merchants m ON m.id = d.merchant_id
+		  JOIN transactions t ON t.id = d.transaction_id
 		 WHERE d.state = 'received' AND d.kind = $1
 		   AND m.auto_refund_ceiling_minor IS NOT NULL
+		   -- A second alert on a transaction an earlier dispute already
+		   -- refunded in full has nothing left to refund, and the constraint
+		   -- says so. That is a question for the worker, not for this test.
+		   AND t.refunded_minor + d.amount_minor <= t.amount_minor
 		 LIMIT 1`, kind,
 	).Scan(&l.ID, &l.MerchantID, &l.Kind, &l.State, &l.ReasonCode,
 		&l.AmountMinor, &l.Currency, &l.DeadlineAt, &l.Resolved, &l.Version,
