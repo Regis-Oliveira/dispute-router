@@ -1,9 +1,7 @@
 # Go review: fixes, visibility, structure, observability
 
-Status: **Phases 0, 1 and 2 done (2026-09-13); 5.2 built early. Phase 3: 3.1,
-3.2, 3.3 (dispute states), 3.4, 3.5, 3.7 done, and most of 3.9.** Left in
-Phase 3: 3.3 (the agent's own vocabularies), 3.6, 3.8, and the api items of
-3.9.
+Status: **Phases 0, 1 and 2 done (2026-09-13); 5.2 built early. Phase 3: all
+of it done except 3.8, which is in flight.** Next: Phase 4.
 
 **A bug the refactor found, now fixed.** Migration 000003 added the
 `draft_ready` state on 2026-09-08 and it reached none of the five places that
@@ -250,7 +248,7 @@ path returns nil from the body and carries `ErrUnknownTransaction` out in a
 captured variable. Extract `insertDelivery` from the duplicated block in
 `Record`/`RecordRuling`. Verify: `go test ./internal/ingest/ ./internal/worker/`.
 
-**3.3 Typed vocabularies.** **Dispute states DONE**; the agent's own vocabularies are in flight. New `internal/dispute` with `type State string`
+**3.3 Typed vocabularies.** **DONE**, in three commits: the dispute states and kinds, the agent's seven vocabularies, and the review decision. The agent's values were checked against the live CHECK constraints, and the derived tool schemas were dumped before and after to prove the prompt fingerprint did not move. New `internal/dispute` with `type State string`
 and the constants the SQL and Go both use (~60 literals today), following the
 `worker.Action` shape. In `internal/agent`: `type Outcome string`,
 `type Check string`, `type Recommendation string`, `type RetrievalMethod
@@ -270,7 +268,7 @@ requirement moves to the binaries that use them (`ask`, `embed`, `retrieval`,
 `mcp` currently need AWS variables they never read). `loadDotEnv` stops
 calling `os.Setenv`. **DECIDE**: this touches every main; it can wait.
 
-**3.6 Ledger entries as a struct.** `internal/ledger/postings.go`. Three
+**3.6 Ledger entries as a struct.** **DONE**, and it unified the worker's three timestamps on the transaction's own clock; one trailing string per function stayed positional, because a parameter with no same-typed neighbour has nothing to swap with. `internal/ledger/postings.go`. Three
 adjacent `int64` parameters (`disputeID, merchantID, amountMinor`) swap
 silently; `Entry{DisputeID, MerchantID, AmountMinor, Currency, At}` and
 `type direction string`. Verify: `go test ./internal/worker/` (the ledger's
@@ -304,8 +302,10 @@ so it lands on settled code.
 - DONE `cmd/eval`'s `print` is `printReport`; `cmd/ask` takes an `io.Writer`.
 - DONE the loop returns only completed tool calls; `normalise` always returns
   a fresh slice.
-- `api.Timeout` wraps per route instead of matching `/api/stream` by string;
-  `Routes()` returns `http.Handler`.
+- DONE `api.Timeout` wraps per route; `Routes()` returns `http.Handler`. Two
+  paging bugs went with it (a limit above 200 returned fewer rows than 200; a
+  non-numeric limit was discarded on two endpoints and rejected on a third),
+  and evidence listing now paginates S3 rather than reading one page.
 - DONE `api/decisions.go` reuses `builder` and copies `args` before appending.
 - DONE `Budget.MaxCostMicros == 0` means "no ceiling" everywhere.
 - DONE one `apiError` with `Retryable()`, `Retry-After` honoured and capped at
@@ -324,6 +324,15 @@ so it lands on settled code.
 `REDIS_URL` gate, covering the documented order (IP limit → body cap →
 signature → merchant limit → idempotency), "unknown merchant and bad signature
 both 401", 413 vs 400 from 1.7.
+
+**4.1b The comment that names a test nobody wrote.** `internal/api/reviews.go`
+says `ReviewFinding` and `agent.Finding` "are pinned together by a test", and
+no such test exists anywhere in the module. Write it: the two structs are
+redeclared rather than shared because `agent` imports `api` and the reverse
+would be a cycle, so nothing but a test can catch a field drifting. The same
+test is the place to pin `api`'s `outcomeRejected` against
+`agent.OutcomeRejected`, which the review-decision commit left as a string for
+the same cycle reason.
 
 **4.2 Assertions that name the contract.** `api/store_test.go`
 `TestDisputeNotFound` asserts `errors.Is(err, ErrNotFound)`. `decideReview`'s
