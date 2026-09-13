@@ -9,9 +9,12 @@ func TestMaskEmail(t *testing.T) {
 		"zeca.zanetti17283@inbox.test": "z***@inbox.test",
 		"a@b.com":                      "a@b.com",
 		"ab@example.com":               "a***@example.com",
-		"":                             "***",
-		"no-at-sign":                   "***",
-		"@leading.com":                 "***",
+		// A multibyte first rune: the old byte slice produced "\xc3***".
+		"é@example.com":      "é@example.com",
+		"élodie@example.com": "é***@example.com",
+		"":                   "***",
+		"no-at-sign":         "***",
+		"@leading.com":       "***",
 	}
 	for input, want := range tests {
 		if got := maskEmail(input); got != want {

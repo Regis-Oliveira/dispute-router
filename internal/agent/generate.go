@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -58,6 +59,7 @@ type Draft struct {
 	written bool
 }
 
+// Written reports whether the model produced this draft.
 func (d Draft) Written() bool { return d.written }
 
 // Recommended reports whether there is something here to send on for review.
@@ -89,6 +91,7 @@ Where a PRECEDENT block is present it lists settled disputes at this merchant wi
 
 Answer with the ` + RepresentmentTool + ` tool.`
 
+// Generator writes representment drafts from an assembled record.
 type Generator struct {
 	completer Completer
 	model     string
@@ -96,6 +99,7 @@ type Generator struct {
 	maxTokens int
 }
 
+// NewGenerator binds a generator to a model; maxTokens at or below zero means 4096.
 func NewGenerator(completer Completer, model string, pricing Pricing, maxTokens int) *Generator {
 	if maxTokens <= 0 {
 		maxTokens = 4096
@@ -249,7 +253,7 @@ func CheckCitations(facts Facts, draft Draft) []Finding {
 	// A letter that names a file it did not declare is citing evidence outside
 	// the list the checks above can verify.
 	for _, file := range facts.Evidence {
-		if strings.Contains(draft.Letter, file.Name) && !contains(draft.CitedEvidence, file.Name) {
+		if strings.Contains(draft.Letter, file.Name) && !slices.Contains(draft.CitedEvidence, file.Name) {
 			findings = append(findings, Finding{
 				Check: CheckMissingEvidence,
 				Quote: file.Name,
@@ -258,13 +262,4 @@ func CheckCitations(facts Facts, draft Draft) []Finding {
 		}
 	}
 	return findings
-}
-
-func contains(haystack []string, needle string) bool {
-	for _, item := range haystack {
-		if item == needle {
-			return true
-		}
-	}
-	return false
 }

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/money"
@@ -41,6 +42,7 @@ type Set struct {
 	store *api.Store
 }
 
+// New binds the tools to a read model.
 func New(store *api.Store) *Set {
 	return &Set{store: store}
 }
@@ -57,8 +59,11 @@ func maskEmail(address string) string {
 		return "***"
 	}
 	local := address[:at]
-	if len(local) > 1 {
-		local = local[:1] + strings.Repeat("*", 3)
+	// The first rune, not the first byte: slicing "é" at [:1] leaves half a
+	// character, which is invalid UTF-8 in a JSON tool result.
+	first, width := utf8.DecodeRuneInString(local)
+	if width < len(local) {
+		local = string(first) + strings.Repeat("*", 3)
 	}
 	return local + address[at:]
 }
@@ -111,6 +116,7 @@ const descAmounts = "Amounts appear twice: `amount` is the figure to quote, alre
 	"as an integer in the currency's smallest unit, for arithmetic only. Never state " +
 	"amount_minor as an amount."
 
+// ListDisputesInput is the list_disputes arguments.
 type ListDisputesInput struct {
 	State     string `json:"state,omitempty" jsonschema:"Comma-separated states: received, resolving, represented, refunded, won, lost, expired"`
 	Kind      string `json:"kind,omitempty" jsonschema:"alert or chargeback. Alerts are pre-dispute warnings with hours to act; chargebacks are already filed"`
@@ -120,6 +126,7 @@ type ListDisputesInput struct {
 	Limit     int    `json:"limit,omitempty" jsonschema:"How many to return, 1 to 50. Defaults to 20"`
 }
 
+// DisputeSummary is one list_disputes row.
 type DisputeSummary struct {
 	ID        int64  `json:"id"`
 	Reference string `json:"reference"`
@@ -143,12 +150,14 @@ type DisputeSummary struct {
 	OpenedAt string `json:"opened_at"`
 }
 
+// ListDisputesOutput is the list_disputes answer.
 type ListDisputesOutput struct {
 	Disputes []DisputeSummary `json:"disputes"`
 	Total    int64            `json:"total_matching"`
 	Note     string           `json:"note,omitempty"`
 }
 
+// ListDisputes is the list_disputes tool.
 func (s *Set) ListDisputes(ctx context.Context, in ListDisputesInput) (ListDisputesOutput, error) {
 	filters := api.Filters{
 		States:    splitCSV(in.State),
@@ -207,15 +216,18 @@ func (s *Set) ListDisputes(ctx context.Context, in ListDisputesInput) (ListDispu
 // get_dispute
 // ---------------------------------------------------------------------------
 
+// DescGetDispute is the get_dispute prompt.
 const DescGetDispute = "Everything known about one dispute: the amounts, the original charge, " +
 	"the full state history with who caused each transition, and the ledger entries it " +
 	"produced. Use this before reasoning about a specific dispute - the list view " +
 	"deliberately omits most of it. " + descAmounts
 
+// GetDisputeInput is the get_dispute arguments.
 type GetDisputeInput struct {
 	ID int64 `json:"id" jsonschema:"The dispute's numeric id, from list_disputes"`
 }
 
+// LedgerLine is one ledger posting as get_dispute reports it.
 type LedgerLine struct {
 	Entry       string `json:"entry"`
 	Account     string `json:"account"`
@@ -224,6 +236,7 @@ type LedgerLine struct {
 	AmountMinor int64  `json:"amount_minor"`
 }
 
+// HistoryLine is one state transition as get_dispute reports it.
 type HistoryLine struct {
 	At    string `json:"at"`
 	From  string `json:"from,omitempty"`
@@ -231,6 +244,7 @@ type HistoryLine struct {
 	Actor string `json:"actor"`
 }
 
+// GetDisputeOutput is the get_dispute answer.
 type GetDisputeOutput struct {
 	ID           int64  `json:"id"`
 	Reference    string `json:"reference"`
@@ -326,6 +340,7 @@ func (s *Set) DisputeWithClaim(ctx context.Context, in GetDisputeInput) (GetDisp
 // get_customer_history
 // ---------------------------------------------------------------------------
 
+// DescCustomerHistory is the get_customer_history prompt.
 const DescCustomerHistory = "Every dispute filed by the same customer at the same merchant, the one " +
 	"being asked about included. The single most useful signal when judging whether a " +
 	"dispute is worth fighting: a first-time claim reads very differently from a fifth. " +
@@ -347,17 +362,20 @@ type CustomerHistoryEntry struct {
 	OpenedAt    string `json:"opened_at"`
 }
 
+// CustomerHistoryInput is the get_customer_history arguments.
 type CustomerHistoryInput struct {
 	Merchant    string `json:"merchant" jsonschema:"Merchant external id, for example mrc_northwind"`
 	CustomerRef string `json:"customer_ref" jsonschema:"Customer reference from get_dispute"`
 	Limit       int    `json:"limit,omitempty" jsonschema:"How many prior disputes, 1 to 50. Defaults to 20"`
 }
 
+// CustomerHistoryOutput is the get_customer_history answer.
 type CustomerHistoryOutput struct {
 	Disputes []CustomerHistoryEntry `json:"disputes"`
 	Count    int                    `json:"count"`
 }
 
+// CustomerHistory is the get_customer_history tool.
 func (s *Set) CustomerHistory(ctx context.Context, in CustomerHistoryInput) (CustomerHistoryOutput, error) {
 	rows, err := s.store.CustomerHistory(ctx, in.Merchant, in.CustomerRef, clampLimit(in.Limit))
 	if err != nil {
@@ -381,20 +399,24 @@ func (s *Set) CustomerHistory(ctx context.Context, in CustomerHistoryInput) (Cus
 // queue_summary
 // ---------------------------------------------------------------------------
 
+// DescQueueSummary is the queue_summary prompt.
 const DescQueueSummary = "Counts by state and kind, money currently at risk per currency, and how " +
 	"the open deadlines are distributed. Use this for questions about the queue as a " +
 	"whole rather than about any one dispute."
 
+// QueueSummaryInput is the queue_summary arguments.
 type QueueSummaryInput struct {
 	Merchant string `json:"merchant,omitempty" jsonschema:"Optional merchant external id to narrow the summary"`
 }
 
+// QueueSummaryOutput is the queue_summary answer.
 type QueueSummaryOutput struct {
 	ByState   []api.StateCount     `json:"by_state"`
 	AtRisk    []api.Exposure       `json:"money_at_risk"`
 	Deadlines []api.DeadlineBucket `json:"deadline_buckets"`
 }
 
+// QueueSummary is the queue_summary tool.
 func (s *Set) QueueSummary(ctx context.Context, in QueueSummaryInput) (QueueSummaryOutput, error) {
 	summary, err := s.store.Summary(ctx, api.Filters{Merchants: splitCSV(in.Merchant)})
 	if err != nil {
