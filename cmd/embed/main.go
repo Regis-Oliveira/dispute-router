@@ -13,17 +13,16 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/regisoliveira/dispute-router/cmd/internal/boot"
+	"github.com/regisoliveira/dispute-router/internal/agent"
+	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/llm"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/regisoliveira/dispute-router/cmd/internal/boot"
-	"github.com/regisoliveira/dispute-router/internal/agent"
-	"github.com/regisoliveira/dispute-router/internal/config"
 )
 
 func main() {
@@ -76,7 +75,7 @@ func run(logger *slog.Logger) error {
 		return nil
 	}
 
-	embedder, err := agent.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
+	embedder, err := llm.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
 	if err != nil {
 		return err
 	}

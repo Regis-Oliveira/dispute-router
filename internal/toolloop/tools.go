@@ -1,4 +1,4 @@
-package agent
+package toolloop
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/disputetools"
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // maxResultBytes caps one tool result, roughly eight thousand tokens.
@@ -19,34 +20,13 @@ import (
 // why the answer says so instead of quietly cutting the JSON in half.
 const maxResultBytes = 32 * 1024
 
-// ---------------------------------------------------------------------------
-// wire types
-// ---------------------------------------------------------------------------
-
-// These are the Messages API tool-use blocks, written out rather than
-// imported: the wire types are kept SDK-free so another completer can share
-// them, and so this package is testable without a network call or an API key,
-// which is what makes the eval set possible.
-
-// Tool is one entry in the request's "tools" array.
-type Tool struct {
-	Name        string          `json:"name"`
-	Description string          `json:"description"`
-	InputSchema json.RawMessage `json:"input_schema"`
-}
-
-// ToolUse is a tool_use content block from the model.
-type ToolUse struct {
-	ID    string          `json:"id"`
-	Name  string          `json:"name"`
-	Input json.RawMessage `json:"input"`
-}
-
 // ToolResult is what one tool call produced; block turns it into the
-// tool_result content block sent back on the next turn.
+// llm.ContentBlock sent back on the next turn.
 //
-// Content is a string rather than a nested block array: every one of these
-// tools answers with JSON, and a string is what the API accepts for that.
+// It is this package's own type rather than one of llm's, because Rule is:
+// nothing about the refusal vocabulary goes on the wire. Content is a string
+// rather than a nested block array: every one of these tools answers with
+// JSON, and a string is what the API accepts for that.
 type ToolResult struct {
 	ToolUseID string
 	Content   string
@@ -97,20 +77,23 @@ const (
 // part by text other people wrote.
 type Registry struct {
 	byName map[string]disputetools.Definition
-	specs  []Tool
+	specs  []llm.Tool
 }
 
 // NewRegistry exposes the catalog in internal/disputetools as tools.
+//
+// This is the one place the loop knows what it is looking at. Everything above
+// it works over names and JSON.
 func NewRegistry(store *api.Store) *Registry {
 	catalog := disputetools.New(store).Catalog()
 
 	r := &Registry{
 		byName: make(map[string]disputetools.Definition, len(catalog)),
-		specs:  make([]Tool, 0, len(catalog)),
+		specs:  make([]llm.Tool, 0, len(catalog)),
 	}
 	for _, def := range catalog {
 		r.byName[def.Name] = def
-		r.specs = append(r.specs, Tool{
+		r.specs = append(r.specs, llm.Tool{
 			Name:        def.Name,
 			Description: def.Description,
 			InputSchema: def.InputSchema,
@@ -120,7 +103,7 @@ func NewRegistry(store *api.Store) *Registry {
 }
 
 // Tools is the "tools" array for the request, in catalog order.
-func (r *Registry) Tools() []Tool { return r.specs }
+func (r *Registry) Tools() []llm.Tool { return r.specs }
 
 // Names is for the audit trail: the exact tool surface a run was given.
 //
@@ -144,7 +127,7 @@ func (r *Registry) Names() []string {
 // nothing. So errors are sorted: the ones the model can act on come back in
 // the ToolResult with IsError set, for the loop to hand to the next turn, and
 // the returned error is fatal to the run.
-func (r *Registry) Run(ctx context.Context, use ToolUse) (ToolResult, error) {
+func (r *Registry) Run(ctx context.Context, use llm.ToolUse) (ToolResult, error) {
 	def, known := r.byName[use.Name]
 	if !known {
 		// Worth answering rather than aborting: a model that guessed a tool
@@ -203,7 +186,7 @@ func ruleFor(err error) (rule Rule, actionable bool) {
 	return "", false
 }
 
-func refuse(use ToolUse, rule Rule, reason string) ToolResult {
+func refuse(use llm.ToolUse, rule Rule, reason string) ToolResult {
 	return ToolResult{
 		ToolUseID: use.ID,
 		Content:   reason,

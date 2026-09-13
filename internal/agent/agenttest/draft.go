@@ -1,3 +1,11 @@
+// Package agenttest is the one door past internal/agent's fail-closed flags.
+//
+// The completer double is internal/llm/llmtest, because a scripted transport
+// serves every caller of llm.Completer. What is specific to the representment
+// flow is this: a Draft carries an unexported written flag that only the code
+// that parsed a model's answer can set, so a test that needs a draft without
+// paying for one cannot build it from outside. Production code must never call
+// anything here.
 package agenttest
 
 import "github.com/regisoliveira/dispute-router/internal/agent"

@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/regisoliveira/dispute-router/internal/agent"
 	"io"
 	"os"
 	"runtime/trace"
 	"sort"
 	"text/tabwriter"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/regisoliveira/dispute-router/internal/agent"
 )
 
 // startTrace records the runtime's execution trace for this invocation: every

@@ -5,9 +5,11 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
-func draftResponseFor(t *testing.T, recommendation Recommendation, letter string) Response {
+func draftResponseFor(t *testing.T, recommendation Recommendation, letter string) llm.Response {
 	t.Helper()
 	input, err := json.Marshal(map[string]any{
 		"recommendation": recommendation,
@@ -17,23 +19,23 @@ func draftResponseFor(t *testing.T, recommendation Recommendation, letter string
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	return Response{
+	return llm.Response{
 		StopReason: "tool_use",
-		Content: []ContentBlock{{
+		Content: []llm.ContentBlock{{
 			Type: "tool_use", ID: "toolu_p", Name: RepresentmentTool, Input: input,
 		}},
 	}
 }
 
-func verdictPass(t *testing.T) Response {
+func verdictPass(t *testing.T) llm.Response {
 	t.Helper()
 	input, err := json.Marshal(map[string]any{"pass": true})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	return Response{
+	return llm.Response{
 		StopReason: "tool_use",
-		Content: []ContentBlock{{
+		Content: []llm.ContentBlock{{
 			Type: "tool_use", ID: "toolu_v", Name: VerdictTool, Input: input,
 		}},
 	}

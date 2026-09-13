@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // VerdictTool is the only tool the verifier is given, and it fetches nothing.
@@ -70,7 +72,7 @@ type verdictInput struct {
 type Verdict struct {
 	Pass       bool      `json:"pass"`
 	Findings   []Finding `json:"findings,omitempty"`
-	Usage      Usage     `json:"usage"`
+	Usage      llm.Usage `json:"usage"`
 	CostMicros int64     `json:"cost_micros"`
 
 	// checked is set only by a verdict that was actually parsed from a model
@@ -130,14 +132,14 @@ Record your answer with the ` + VerdictTool + ` tool. Any finding at all means p
 // from the store by facts.go, not lifted from the generator's transcript, so a
 // hallucinated fact cannot become the standard it is measured against.
 type Verifier struct {
-	completer Completer
+	completer llm.Completer
 	model     string
-	pricing   Pricing
+	pricing   llm.Pricing
 	maxTokens int
 }
 
 // NewVerifier binds a verifier to a model; maxTokens at or below zero means 2048.
-func NewVerifier(completer Completer, model string, pricing Pricing, maxTokens int) *Verifier {
+func NewVerifier(completer llm.Completer, model string, pricing llm.Pricing, maxTokens int) *Verifier {
 	if maxTokens <= 0 {
 		maxTokens = 2048
 	}

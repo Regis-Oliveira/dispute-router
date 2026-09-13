@@ -1,4 +1,4 @@
-package agent
+package llm
 
 import (
 	"bytes"
@@ -10,7 +10,6 @@ import (
 	"math"
 	"net/http"
 	"slices"
-	"strings"
 	"time"
 )
 
@@ -51,9 +50,12 @@ const (
 	// returning 512 would be silently rejected by the column, and the error
 	// would name the column rather than the mistake.
 	voyageDimensions = 1024
-	// Voyage caps a request; beyond it the batch has to be split.
-	voyageMaxBatch = 128
 )
+
+// VoyageMaxBatch is the most inputs one request may carry; beyond it the batch
+// has to be split. Exported because a caller sizing its own batches - the
+// embedding backfill does - has no reason to discover the cap by being refused.
+const VoyageMaxBatch = 128
 
 // Voyage is the Embedder over Voyage AI's embeddings endpoint.
 type Voyage struct {
@@ -69,7 +71,7 @@ type Voyage struct {
 // NewVoyage builds the client; an empty model means voyage-4.
 func NewVoyage(key, model string) (*Voyage, error) {
 	if key == "" {
-		return nil, errors.New("agent: VOYAGE_API_KEY is required for embeddings " +
+		return nil, errors.New("llm: VOYAGE_API_KEY is required for embeddings " +
 			"(Anthropic does not serve embeddings; without a key the retriever falls back to full-text search)")
 	}
 	if model == "" {
@@ -124,8 +126,8 @@ type voyageResponse struct {
 func (v *Voyage) Embed(ctx context.Context, texts []string, kind EmbedKind) ([][]float32, error) {
 	out := make([][]float32, 0, len(texts))
 
-	for start := 0; start < len(texts); start += voyageMaxBatch {
-		end := min(start+voyageMaxBatch, len(texts))
+	for start := 0; start < len(texts); start += VoyageMaxBatch {
+		end := min(start+VoyageMaxBatch, len(texts))
 
 		vectors, err := v.withRetry(ctx, texts[start:end], kind)
 		if err != nil {
@@ -250,19 +252,4 @@ func normalise(vec []float32) []float32 {
 		out[i] = v / norm
 	}
 	return out
-}
-
-// pgvector renders a slice in the literal form the extension parses. pgx has no
-// native codec for it without a registration, and a string is unambiguous.
-func pgvector(vec []float32) string {
-	var b strings.Builder
-	b.WriteByte('[')
-	for i, v := range vec {
-		if i > 0 {
-			b.WriteByte(',')
-		}
-		fmt.Fprintf(&b, "%g", v)
-	}
-	b.WriteByte(']')
-	return b.String()
 }

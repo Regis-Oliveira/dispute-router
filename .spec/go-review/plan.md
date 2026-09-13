@@ -281,14 +281,29 @@ derived once (`sync.OnceValue`) instead of on every call, and one helper
 replaces `mustSchema`/`schemaFor`/inline. Verify: `go test ./internal/agent/`
 scripted tests are unchanged.
 
-**3.8 Split `internal/agent`.** **DECIDE.** `internal/llm` takes the wire types
-and the two clients (`Completer`, `Request`, `Response`, `ContentBlock`,
-`Usage`, `Pricing`, `Anthropic`, `Embedder`, `Voyage`). `cmd/ask` then
-imports `llm` and the loop; `cmd/embed` imports `llm` and the backfill.
-`disputetools.Set` takes a four-method interface instead of `*api.Store`, and
-`agent.NewRegistry` takes `[]disputetools.Definition`, so both packages'
-tests can run without a database. Largest item in the plan; last in the phase
-so it lands on settled code.
+**3.8 Split `internal/agent`.** **DONE**, in three packages rather than two.
+`internal/llm` is the transport: the wire types, `Pricing`, `Anthropic`,
+`Embedder`, `Voyage` and the shared `apiError`. It imports nothing from this
+module. The tool loop went to its own `internal/toolloop` rather than into
+`llm` or staying in `agent`, and the reason is what each end would have cost:
+in `llm` the transport would have had to import `internal/api` for the
+registry, and in `agent` `cmd/ask` would have had to import the representment
+flow to run a loop that has nothing to do with it. `Budget`, `Halt`, `Turn`,
+`Result` and `ToolCall` followed the loop; `ToolUse` stayed in `llm` because it
+is the decoded form of a wire block. `Pricing.cost` became `Pricing.Cost`, and
+money is still `int64` micros end to end. The completer double split off to
+`internal/llm/llmtest`, which lets `package agent`'s tests import it and
+retires the in-package copy in `scripted_test.go`; `agenttest` keeps only
+`Draft`, the door past the fail-closed `written` flag. Nothing that sets
+`Draft.written` or `Verdict.checked` crossed a package boundary, so neither
+had to be exported. The prompt fingerprint is byte-identical
+(`sha256:9b5fafe76d7a618f` before and after): it hashes the two system prompts,
+the two derived schemas and the rendered record template, all of which stayed
+in `agent`, and `jsonschema.For` writes no type or package name into a schema.
+`cmd/ask` now imports `llm` and `toolloop` and not `agent`; `cmd/embed` imports
+`llm` and `agent`. Not done, and not needed for the split: `disputetools.Set`
+still takes `*api.Store` rather than a four-method interface, so
+`toolloop.NewRegistry` still needs `internal/api`.
 
 **3.9 Smaller shapes.** One commit each, any order:
 - DONE `facts.go` `WithPrecedent`/`WithBaseRates` became fields on a

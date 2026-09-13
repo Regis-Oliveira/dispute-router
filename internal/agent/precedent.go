@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // Precedent is a settled dispute that resembles the one being drafted.
@@ -78,13 +80,13 @@ type Retrieval struct {
 // is a genuinely open question.
 type Retriever struct {
 	pool     *pgxpool.Pool
-	embedder Embedder
+	embedder llm.Embedder
 	limit    int
 }
 
 // NewRetriever binds a retriever to a pool; a nil embedder means lexical only,
 // and limit at or below zero means 3.
-func NewRetriever(pool *pgxpool.Pool, embedder Embedder, limit int) *Retriever {
+func NewRetriever(pool *pgxpool.Pool, embedder llm.Embedder, limit int) *Retriever {
 	if limit <= 0 {
 		limit = 3
 	}
@@ -145,7 +147,7 @@ const precedentColumns = `
 // quietly: the results stay plausible and get worse, which is the hardest kind
 // of regression to see.
 func (r *Retriever) byVector(ctx context.Context, disputeID int64, merchant, claim string) ([]Precedent, error) {
-	vectors, err := r.embedder.Embed(ctx, []string{claim}, EmbedQuery)
+	vectors, err := r.embedder.Embed(ctx, []string{claim}, llm.EmbedQuery)
 	if err != nil {
 		return nil, fmt.Errorf("embedding the claim: %w", err)
 	}
@@ -238,4 +240,23 @@ func scanPrecedents(rows scannable, method RetrievalMethod) ([]Precedent, error)
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// pgvector renders a slice in the literal form the extension parses. pgx has no
+// native codec for it without a registration, and a string is unambiguous.
+//
+// It lives here rather than with the client that produces the vectors: what a
+// vector looks like on the wire to Voyage and what it looks like in a query are
+// different questions, and only this side of the boundary has a database in it.
+func pgvector(vec []float32) string {
+	var b strings.Builder
+	b.WriteByte('[')
+	for i, v := range vec {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		fmt.Fprintf(&b, "%g", v)
+	}
+	b.WriteByte(']')
+	return b.String()
 }

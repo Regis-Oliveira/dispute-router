@@ -1,4 +1,4 @@
-package agent
+package toolloop
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/disputetools"
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // Most of what matters at this boundary is decided before a query runs, so
@@ -85,7 +86,7 @@ func TestRequiredFieldsComeFromTheStruct(t *testing.T) {
 // A guessed tool name is a message, not a crash - and the message has to carry
 // the real names, or the model has no way to correct itself.
 func TestUnknownToolIsAnswered(t *testing.T) {
-	result, err := offlineRegistry().Run(context.Background(), ToolUse{
+	result, err := offlineRegistry().Run(context.Background(), llm.ToolUse{
 		ID: "toolu_1", Name: "refund_dispute", Input: json.RawMessage(`{}`),
 	})
 	if err != nil {
@@ -108,7 +109,7 @@ func TestUnknownToolIsAnswered(t *testing.T) {
 // alternative - accepting the call and ignoring the field - answers with every
 // merchant's disputes while the model believes its filter applied.
 func TestUnknownArgumentIsRefusedNotIgnored(t *testing.T) {
-	result, err := offlineRegistry().Run(context.Background(), ToolUse{
+	result, err := offlineRegistry().Run(context.Background(), llm.ToolUse{
 		ID: "toolu_2", Name: "list_disputes", Input: json.RawMessage(`{"merchant_id":"mrc_northwind"}`),
 	})
 	if err != nil {
@@ -124,7 +125,7 @@ func TestUnknownArgumentIsRefusedNotIgnored(t *testing.T) {
 
 // Same rule for a value of the wrong type: answerable, so it is answered.
 func TestWrongArgumentTypeIsAnswered(t *testing.T) {
-	result, err := offlineRegistry().Run(context.Background(), ToolUse{
+	result, err := offlineRegistry().Run(context.Background(), llm.ToolUse{
 		ID: "toolu_3", Name: "list_disputes", Input: json.RawMessage(`{"limit":"fifty"}`),
 	})
 	if err != nil {
@@ -165,7 +166,7 @@ func TestAFullPageFitsUnderTheCeiling(t *testing.T) {
 	}
 	defer pool.Close()
 
-	result, err := NewRegistry(api.NewStore(pool)).Run(ctx, ToolUse{
+	result, err := NewRegistry(api.NewStore(pool)).Run(ctx, llm.ToolUse{
 		ID: "toolu_4", Name: "list_disputes", Input: json.RawMessage(`{"limit":50}`),
 	})
 	if err != nil {
@@ -187,12 +188,12 @@ func TestEveryRefusalNamesItsRule(t *testing.T) {
 	registry := offlineRegistry()
 	ctx := context.Background()
 
-	unknown, err := registry.Run(ctx, ToolUse{ID: "t1", Name: "drop_table", Input: json.RawMessage(`{}`)})
+	unknown, err := registry.Run(ctx, llm.ToolUse{ID: "t1", Name: "drop_table", Input: json.RawMessage(`{}`)})
 	if err != nil || unknown.Rule != RuleUnknownTool {
 		t.Errorf("unknown tool: rule %q, err %v; want %q", unknown.Rule, err, RuleUnknownTool)
 	}
 
-	badArg, err := registry.Run(ctx, ToolUse{ID: "t2", Name: "list_disputes", Input: json.RawMessage(`{"merchant_id":"x"}`)})
+	badArg, err := registry.Run(ctx, llm.ToolUse{ID: "t2", Name: "list_disputes", Input: json.RawMessage(`{"merchant_id":"x"}`)})
 	if err != nil || badArg.Rule != RuleInvalidArguments {
 		t.Errorf("unknown argument: rule %q, err %v; want %q", badArg.Rule, err, RuleInvalidArguments)
 	}
@@ -203,7 +204,7 @@ func TestEveryRefusalNamesItsRule(t *testing.T) {
 			return strings.Repeat("x", maxResultBytes+1), nil
 		}},
 	}}
-	big, err := huge.Run(ctx, ToolUse{ID: "t3", Name: "huge", Input: json.RawMessage(`{}`)})
+	big, err := huge.Run(ctx, llm.ToolUse{ID: "t3", Name: "huge", Input: json.RawMessage(`{}`)})
 	if err != nil || big.Rule != RuleResultTooLarge || !big.IsError {
 		t.Errorf("oversized result: rule %q, is_error %v, err %v; want %q", big.Rule, big.IsError, err, RuleResultTooLarge)
 	}

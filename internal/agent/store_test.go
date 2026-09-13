@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 func aRun(outcome Outcome, escalated bool) Run {
@@ -14,7 +16,7 @@ func aRun(outcome Outcome, escalated bool) Run {
 		Outcome:     outcome, Recommendation: RecommendRepresent,
 		Letter:     "a letter",
 		Escalated:  escalated,
-		Usage:      Usage{InputTokens: 3000, OutputTokens: 400},
+		Usage:      llm.Usage{InputTokens: 3000, OutputTokens: 400},
 		CostMicros: 15_000,
 		Trace:      &Trace{Note: "test"},
 		StartedAt:  time.Now(),

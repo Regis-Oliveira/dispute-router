@@ -5,6 +5,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
+	"github.com/regisoliveira/dispute-router/internal/llm/llmtest"
 )
 
 // Ten settled disputes is where a proportion starts meaning anything. Below it
@@ -74,16 +77,16 @@ func TestBaseRatesReachBothCalls(t *testing.T) {
 		{Scope: "merchant+reason", ReasonCode: "13.1", Won: 12, Lost: 18},
 	}}
 
-	gen := &ScriptedCompleter{Responses: []Response{draftResponseFor(t, RecommendRepresent, "x")}}
-	if _, err := NewGenerator(gen, "t", Pricing{}, 4096).Write(context.Background(), facts); err != nil {
+	gen := &llmtest.ScriptedCompleter{Responses: []llm.Response{draftResponseFor(t, RecommendRepresent, "x")}}
+	if _, err := NewGenerator(gen, "t", llm.Pricing{}, 4096).Write(context.Background(), facts); err != nil {
 		t.Fatalf("generator: %v", err)
 	}
-	ver := &ScriptedCompleter{Responses: []Response{verdictPass(t)}}
-	if _, err := NewVerifier(ver, "t", Pricing{}, 2048).Check(context.Background(), facts, "x"); err != nil {
+	ver := &llmtest.ScriptedCompleter{Responses: []llm.Response{verdictPass(t)}}
+	if _, err := NewVerifier(ver, "t", llm.Pricing{}, 2048).Check(context.Background(), facts, "x"); err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
 
-	for name, script := range map[string]*ScriptedCompleter{"generator": gen, "verifier": ver} {
+	for name, script := range map[string]*llmtest.ScriptedCompleter{"generator": gen, "verifier": ver} {
 		if !strings.Contains(script.Requests[0].Messages[0].Content[0].Text, "40% of 30 settled") {
 			t.Errorf("the %s never saw the base rate", name)
 		}

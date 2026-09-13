@@ -21,6 +21,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/regisoliveira/dispute-router/internal/agent"
+	"github.com/regisoliveira/dispute-router/internal/agent/eval"
+	"github.com/regisoliveira/dispute-router/internal/api"
+	"github.com/regisoliveira/dispute-router/internal/awsx"
+	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/llm"
 	"os"
 	"os/signal"
 	"sort"
@@ -28,15 +36,6 @@ import (
 	"syscall"
 	"text/tabwriter"
 	"time"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/regisoliveira/dispute-router/internal/agent"
-	"github.com/regisoliveira/dispute-router/internal/agent/eval"
-	"github.com/regisoliveira/dispute-router/internal/api"
-	"github.com/regisoliveira/dispute-router/internal/awsx"
-	"github.com/regisoliveira/dispute-router/internal/config"
 )
 
 func main() {
@@ -95,7 +94,7 @@ func run() error {
 		return err
 	}
 
-	completer, err := agent.NewAnthropic(cfg.Agent.AnthropicAPIKey, cfg.Agent.AnthropicModel)
+	completer, err := llm.NewAnthropic(cfg.Agent.AnthropicAPIKey, cfg.Agent.AnthropicModel)
 	if err != nil {
 		return err
 	}
@@ -103,16 +102,16 @@ func run() error {
 	fmt.Fprintf(os.Stderr, "running %d case(s) x %d sample(s) against %s, stopping at $%.2f\n",
 		len(cases), *samples, model, *maxCost)
 
-	pricing := agent.Pricing{
+	pricing := llm.Pricing{
 		InputMicrosPerMTok:  cfg.Agent.InputPerMTok,
 		OutputMicrosPerMTok: cfg.Agent.OutputPerMTok,
 	}
 
 	// Precedent retrieval. The embedder is optional: without a key the
 	// retriever uses full-text search, which is the baseline anyway.
-	var embedder agent.Embedder
+	var embedder llm.Embedder
 	if cfg.Agent.VoyageAPIKey != "" {
-		voyage, err := agent.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
+		voyage, err := llm.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
 		if err != nil {
 			return err
 		}

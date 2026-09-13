@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	"github.com/google/jsonschema-go/jsonschema"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // toolCall is one forced single-turn call: a system prompt, exactly one tool,
@@ -17,9 +19,9 @@ import (
 // differs between them is the prompt, the tool, and what a parsed answer means
 // - so those are fields here, and the meaning stays with the caller.
 type toolCall struct {
-	completer Completer
+	completer llm.Completer
 	model     string
-	pricing   Pricing
+	pricing   llm.Pricing
 	maxTokens int
 
 	// label prefixes every error this call produces, and noun names what was
@@ -39,7 +41,7 @@ type toolCall struct {
 // whether or not an answer came back, and a run that reports zero spend for a
 // failed call is how a budget quietly stops meaning anything.
 type billed struct {
-	usage      Usage
+	usage      llm.Usage
 	costMicros int64
 }
 
@@ -52,15 +54,15 @@ type billed struct {
 func callTool[T any](ctx context.Context, call toolCall, prompt string) (T, billed, error) {
 	var zero T
 
-	response, err := call.completer.Complete(ctx, Request{
+	response, err := call.completer.Complete(ctx, llm.Request{
 		Model:     call.model,
 		System:    call.system,
 		MaxTokens: call.maxTokens,
-		Messages: []Message{{
+		Messages: []llm.Message{{
 			Role:    "user",
-			Content: []ContentBlock{{Type: "text", Text: prompt}},
+			Content: []llm.ContentBlock{{Type: "text", Text: prompt}},
 		}},
-		Tools: []Tool{{
+		Tools: []llm.Tool{{
 			Name:        call.tool,
 			Description: call.description,
 			InputSchema: call.schema(),
@@ -68,7 +70,7 @@ func callTool[T any](ctx context.Context, call toolCall, prompt string) (T, bill
 		// Forced, so the answer arrives as a structure rather than as prose
 		// that has to be interpreted - and interpreting prose is where a
 		// "no problems found" becomes a pass by accident.
-		ToolChoice: &ToolChoice{Type: "tool", Name: call.tool},
+		ToolChoice: &llm.ToolChoice{Type: "tool", Name: call.tool},
 		// The system prompt and the tool schema are identical on every call;
 		// only the record below them changes.
 		CacheSystem: true,
@@ -77,7 +79,7 @@ func callTool[T any](ctx context.Context, call toolCall, prompt string) (T, bill
 		return zero, billed{}, fmt.Errorf("%s: %w", call.label, err)
 	}
 
-	paid := billed{usage: response.Usage, costMicros: call.pricing.cost(response.Usage)}
+	paid := billed{usage: response.Usage, costMicros: call.pricing.Cost(response.Usage)}
 
 	if response.StopReason == "max_tokens" {
 		// An answer cut off partway is not a short answer. A letter stops

@@ -12,6 +12,7 @@ import (
 
 	"github.com/regisoliveira/dispute-router/internal/dispute"
 	"github.com/regisoliveira/dispute-router/internal/events"
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // ErrClaimLost means another process moved the dispute between the read and
@@ -181,7 +182,7 @@ type Run struct {
 	Letter            string
 	CitedEvidence     []string
 	Findings          []Finding
-	Usage             Usage
+	Usage             llm.Usage
 	CostMicros        int64
 	Trace             *Trace
 	StartedAt         time.Time

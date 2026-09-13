@@ -29,16 +29,15 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/regisoliveira/dispute-router/internal/agent"
+	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/llm"
 	"os"
 	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/regisoliveira/dispute-router/internal/agent"
-	"github.com/regisoliveira/dispute-router/internal/config"
 )
 
 func main() {
@@ -95,7 +94,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	embedder, err := agent.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
+	embedder, err := llm.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
 	if err != nil {
 		return err
 	}
@@ -132,7 +131,7 @@ func run() error {
 	for i, t := range targets {
 		claims[i] = t.claim
 	}
-	queries, err := embedder.Embed(ctx, claims, agent.EmbedQuery)
+	queries, err := embedder.Embed(ctx, claims, llm.EmbedQuery)
 	if err != nil {
 		return fmt.Errorf("embedding %d queries: %w", len(claims), err)
 	}

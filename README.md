@@ -500,7 +500,7 @@ make mcp-check
 
 ### `cmd/ask/` — one question over the same tools
 
-The operator-facing surface the loop in `internal/agent/loop.go` was written
+The operator-facing surface the loop in `internal/toolloop` was written
 for: a model in a loop over the four read-only tools, asked something in plain
 words, allowed to look things up, and stopped by a turn ceiling and a cost
 ceiling.

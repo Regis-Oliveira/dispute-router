@@ -6,25 +6,28 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
+	"github.com/regisoliveira/dispute-router/internal/llm/llmtest"
 )
 
-func verdictResponse(t *testing.T, in verdictInput, usage Usage) Response {
+func verdictResponse(t *testing.T, in verdictInput, usage llm.Usage) llm.Response {
 	t.Helper()
 	encoded, err := json.Marshal(in)
 	if err != nil {
 		t.Fatalf("marshal verdict: %v", err)
 	}
-	return Response{
+	return llm.Response{
 		StopReason: "tool_use",
 		Usage:      usage,
-		Content: []ContentBlock{{
+		Content: []llm.ContentBlock{{
 			Type: "tool_use", ID: "toolu_v", Name: VerdictTool, Input: encoded,
 		}},
 	}
 }
 
-func testVerifier(script *ScriptedCompleter) *Verifier {
-	return NewVerifier(script, "test-model", Pricing{
+func testVerifier(script *llmtest.ScriptedCompleter) *Verifier {
+	return NewVerifier(script, "test-model", llm.Pricing{
 		InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000,
 	}, 2048)
 }
@@ -42,8 +45,8 @@ func TestAZeroVerdictIsNotApproved(t *testing.T) {
 }
 
 func TestACleanDraftPasses(t *testing.T) {
-	script := &ScriptedCompleter{Responses: []Response{
-		verdictResponse(t, verdictInput{Pass: true}, Usage{InputTokens: 2000, OutputTokens: 60}),
+	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
+		verdictResponse(t, verdictInput{Pass: true}, llm.Usage{InputTokens: 2000, OutputTokens: 60}),
 	}}
 
 	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "a supported draft")
@@ -59,12 +62,12 @@ func TestACleanDraftPasses(t *testing.T) {
 }
 
 func TestAFindingBlocksTheDraft(t *testing.T) {
-	script := &ScriptedCompleter{Responses: []Response{
+	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		verdictResponse(t, verdictInput{Pass: false, Findings: []Finding{{
 			Check: CheckUnsupportedClaim,
 			Quote: "tracking number 1Z999AA10123456784",
 			Why:   "no such number appears in the record",
-		}}}, Usage{}),
+		}}}, llm.Usage{}),
 	}}
 
 	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
@@ -82,11 +85,11 @@ func TestAFindingBlocksTheDraft(t *testing.T) {
 // The rule "any finding means no pass" is stated in the prompt. A rule that
 // lives only in a prompt is a request, so the host enforces it too.
 func TestPassIsOverriddenWhenFindingsExist(t *testing.T) {
-	script := &ScriptedCompleter{Responses: []Response{
+	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		verdictResponse(t, verdictInput{
 			Pass:     true,
 			Findings: []Finding{{Check: CheckWrongFigure, Quote: "$41.00", Why: "the record says $14.00"}},
-		}, Usage{}),
+		}, llm.Usage{}),
 	}}
 
 	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
@@ -102,22 +105,22 @@ func TestPassIsOverriddenWhenFindingsExist(t *testing.T) {
 // "approved by default". A verifier that fails open is worse than none: it
 // costs money to grant the approval it was supposed to withhold.
 func TestEveryFailureFailsClosed(t *testing.T) {
-	cases := map[string]Response{
-		"truncated": {StopReason: "max_tokens", Content: []ContentBlock{{Type: "text", Text: "{\"pass\":tr"}}},
-		"no verdict call": {StopReason: "end_turn", Content: []ContentBlock{
+	cases := map[string]llm.Response{
+		"truncated": {StopReason: "max_tokens", Content: []llm.ContentBlock{{Type: "text", Text: "{\"pass\":tr"}}},
+		"no verdict call": {StopReason: "end_turn", Content: []llm.ContentBlock{
 			{Type: "text", Text: "Looks fine to me."},
 		}},
-		"unreadable verdict": {StopReason: "tool_use", Content: []ContentBlock{
+		"unreadable verdict": {StopReason: "tool_use", Content: []llm.ContentBlock{
 			{Type: "tool_use", ID: "toolu_v", Name: VerdictTool, Input: json.RawMessage(`{"pass":`)},
 		}},
-		"a different tool": {StopReason: "tool_use", Content: []ContentBlock{
+		"a different tool": {StopReason: "tool_use", Content: []llm.ContentBlock{
 			{Type: "tool_use", ID: "toolu_v", Name: "something_else", Input: json.RawMessage(`{"pass":true}`)},
 		}},
 	}
 
 	for name, response := range cases {
 		t.Run(name, func(t *testing.T) {
-			script := &ScriptedCompleter{Responses: []Response{response}}
+			script := &llmtest.ScriptedCompleter{Responses: []llm.Response{response}}
 			verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
 			if err == nil {
 				t.Fatal("no error reported")
@@ -131,7 +134,7 @@ func TestEveryFailureFailsClosed(t *testing.T) {
 }
 
 func TestACompleterErrorIsNotAnApproval(t *testing.T) {
-	script := &ScriptedCompleter{} // empty script: the first call errors
+	script := &llmtest.ScriptedCompleter{} // empty script: the first call errors
 	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
 	if err == nil {
 		t.Fatal("no error reported")
@@ -144,8 +147,8 @@ func TestACompleterErrorIsNotAnApproval(t *testing.T) {
 // The verifier is given a shape to answer in and no way to go and look
 // anything up. Both halves matter, so both are pinned.
 func TestTheVerifierHasNoFetchingToolsAndIsForced(t *testing.T) {
-	script := &ScriptedCompleter{Responses: []Response{
-		verdictResponse(t, verdictInput{Pass: true}, Usage{}),
+	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
+		verdictResponse(t, verdictInput{Pass: true}, llm.Usage{}),
 	}}
 	if _, err := testVerifier(script).Check(context.Background(), Facts{}, "draft"); err != nil {
 		t.Fatalf("Check: %v", err)
@@ -164,8 +167,8 @@ func TestTheVerifierHasNoFetchingToolsAndIsForced(t *testing.T) {
 // and the request has to show that: one message, carrying the record and the
 // draft and nothing else.
 func TestTheVerifierNeverSeesTheGeneratorsTranscript(t *testing.T) {
-	script := &ScriptedCompleter{Responses: []Response{
-		verdictResponse(t, verdictInput{Pass: true}, Usage{}),
+	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
+		verdictResponse(t, verdictInput{Pass: true}, llm.Usage{}),
 	}}
 	facts := Facts{CardholderClaim: "the item never arrived"}
 	if _, err := testVerifier(script).Check(context.Background(), facts, "THE DRAFT TEXT"); err != nil {

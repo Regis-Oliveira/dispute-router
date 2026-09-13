@@ -3,7 +3,7 @@
 //
 // They are used through two different envelopes: the Model Context Protocol
 // (internal/mcpserver) and the Messages API tool-use format
-// (internal/agent). Neither of those is the tool - they are transports. What a
+// (internal/toolloop). Neither of those is the tool - they are transports. What a
 // tool actually is lives here: an input struct, an output struct, a
 // description written to be read by a model, and a function between them.
 //

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // Assistant is the whole flow for one dispute: hold it, read the record, draft,
@@ -137,7 +139,7 @@ func evidenceShown(facts Facts) EvidenceTrace {
 
 // Phase is what one model call in a run cost and how long it took.
 type Phase struct {
-	Usage      Usage         `json:"usage"`
+	Usage      llm.Usage     `json:"usage"`
 	CostMicros int64         `json:"cost_micros"`
 	Latency    time.Duration `json:"latency_ns"`
 }

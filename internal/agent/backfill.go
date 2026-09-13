@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // Backfill embeds the claims that are not embedded yet.
@@ -19,12 +21,12 @@ import (
 // nobody dares run.
 type Backfill struct {
 	pool     *pgxpool.Pool
-	embedder Embedder
+	embedder llm.Embedder
 	log      *slog.Logger
 }
 
 // NewBackfill binds a backfill to a pool and an embedder; a nil log means the default.
-func NewBackfill(pool *pgxpool.Pool, embedder Embedder, log *slog.Logger) *Backfill {
+func NewBackfill(pool *pgxpool.Pool, embedder llm.Embedder, log *slog.Logger) *Backfill {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -93,8 +95,8 @@ func (b *Backfill) Run(ctx context.Context, batchSize, limit int) (stats Backfil
 			stats.Remaining = remaining
 		}
 	}()
-	if batchSize <= 0 || batchSize > voyageMaxBatch {
-		batchSize = voyageMaxBatch
+	if batchSize <= 0 || batchSize > llm.VoyageMaxBatch {
+		batchSize = llm.VoyageMaxBatch
 	}
 
 	for {
@@ -114,7 +116,7 @@ func (b *Backfill) Run(ctx context.Context, batchSize, limit int) (stats Backfil
 			break
 		}
 
-		vectors, err := b.embedder.Embed(ctx, claims, EmbedDocument)
+		vectors, err := b.embedder.Embed(ctx, claims, llm.EmbedDocument)
 		if err != nil {
 			// The batches already written stay written. That is the point of
 			// keying on what is missing rather than tracking a cursor.

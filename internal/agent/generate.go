@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
 // RepresentmentTool and VerdictTool are exported because they are recorded on
@@ -43,7 +45,7 @@ type Draft struct {
 	Recommendation Recommendation `json:"recommendation"`
 	Letter         string         `json:"letter"`
 	CitedEvidence  []string       `json:"cited_evidence,omitempty"`
-	Usage          Usage          `json:"usage"`
+	Usage          llm.Usage      `json:"usage"`
 	CostMicros     int64          `json:"cost_micros"`
 
 	// written, like Verdict.checked, is set only by a parsed answer, so a zero
@@ -104,19 +106,20 @@ Answer with the ` + RepresentmentTool + ` tool.`
 // deterministic and single-turn, which is what lets the eval set compare
 // changes to the prompt rather than changes in what the model chose to fetch.
 //
-// The loop in loop.go is not wasted by this: it is the general harness, and
-// cmd/ask runs it as the operator-facing surface that answers questions about
-// the queue over the read-only tools. But this flow does not need it, and
-// running it here to justify having built it would be the wrong reason.
+// The loop in internal/toolloop is not wasted by this: it is the general
+// harness, and cmd/ask runs it as the operator-facing surface that answers
+// questions about the queue over the read-only tools. But this flow does not
+// need it, and running it here to justify having built it would be the wrong
+// reason.
 type Generator struct {
-	completer Completer
+	completer llm.Completer
 	model     string
-	pricing   Pricing
+	pricing   llm.Pricing
 	maxTokens int
 }
 
 // NewGenerator binds a generator to a model; maxTokens at or below zero means 4096.
-func NewGenerator(completer Completer, model string, pricing Pricing, maxTokens int) *Generator {
+func NewGenerator(completer llm.Completer, model string, pricing llm.Pricing, maxTokens int) *Generator {
 	if maxTokens <= 0 {
 		maxTokens = 4096
 	}

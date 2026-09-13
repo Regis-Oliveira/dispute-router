@@ -2,9 +2,9 @@
 //
 // It is the operator-facing surface over the read-only tools: a model in a
 // loop, asked something in plain words, allowed to look things up and told
-// when to stop. It is what internal/agent/loop.go exists for. The drafting
-// flow deliberately does not use the loop - two judges need one record - so
-// without this command the loop was a harness nothing ran.
+// when to stop. It is what internal/toolloop exists for. The drafting flow in
+// internal/agent deliberately does not use the loop - two judges need one
+// record - so without this command the loop was a harness nothing ran.
 //
 //	ask "what is due in the next 24 hours?"
 //	ask -dry-run                 the tools and the budget, spending nothing
@@ -17,6 +17,11 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/regisoliveira/dispute-router/internal/api"
+	"github.com/regisoliveira/dispute-router/internal/config"
+	"github.com/regisoliveira/dispute-router/internal/llm"
+	"github.com/regisoliveira/dispute-router/internal/toolloop"
 	"io"
 	"os"
 	"os/signal"
@@ -24,12 +29,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
-
-	"github.com/regisoliveira/dispute-router/internal/agent"
-	"github.com/regisoliveira/dispute-router/internal/api"
-	"github.com/regisoliveira/dispute-router/internal/config"
 )
 
 // The operator's assistant reads; it never decides. Everything it says has to
@@ -74,8 +73,8 @@ func run() error {
 	}
 	defer pool.Close()
 
-	registry := agent.NewRegistry(api.NewStore(pool))
-	budget := agent.Budget{
+	registry := toolloop.NewRegistry(api.NewStore(pool))
+	budget := toolloop.Budget{
 		MaxTurns:      *turns,
 		MaxCostMicros: int64(*maxCost * 1_000_000),
 		MaxTokens:     4096, // thinking counts against this; 1,024 cut the first real answer off mid-sentence
@@ -91,16 +90,16 @@ func run() error {
 		return nil
 	}
 
-	completer, err := agent.NewAnthropic(cfg.Agent.AnthropicAPIKey, cfg.Agent.AnthropicModel)
+	completer, err := llm.NewAnthropic(cfg.Agent.AnthropicAPIKey, cfg.Agent.AnthropicModel)
 	if err != nil {
 		return err
 	}
-	pricing := agent.Pricing{
+	pricing := llm.Pricing{
 		InputMicrosPerMTok:  cfg.Agent.InputPerMTok,
 		OutputMicrosPerMTok: cfg.Agent.OutputPerMTok,
 	}
 
-	result, err := agent.NewLoop(completer, registry, cfg.Agent.AnthropicModel, pricing, budget).
+	result, err := toolloop.NewLoop(completer, registry, cfg.Agent.AnthropicModel, pricing, budget).
 		Run(ctx, system, question)
 	if err != nil {
 		return err
@@ -132,20 +131,20 @@ func run() error {
 // reason - the trace already holds every fact below, and a fact nobody
 // summarises is a fact nobody checks.
 type session struct {
-	At          time.Time        `json:"at"`
-	Question    string           `json:"question"`
-	Model       string           `json:"model"`
-	Halt        agent.Halt       `json:"halt"`
-	Turns       int              `json:"turns"`
-	ToolCalls   int              `json:"tool_calls"`
-	CallsByTool map[string]int   `json:"calls_by_tool"`
-	Refusals    map[string]int   `json:"refusals_by_rule"`
-	Usage       agent.Usage      `json:"usage"`
-	CostMicros  int64            `json:"cost_micros"`
-	Tools       []agent.ToolCall `json:"tools"`
+	At          time.Time           `json:"at"`
+	Question    string              `json:"question"`
+	Model       string              `json:"model"`
+	Halt        toolloop.Halt       `json:"halt"`
+	Turns       int                 `json:"turns"`
+	ToolCalls   int                 `json:"tool_calls"`
+	CallsByTool map[string]int      `json:"calls_by_tool"`
+	Refusals    map[string]int      `json:"refusals_by_rule"`
+	Usage       llm.Usage           `json:"usage"`
+	CostMicros  int64               `json:"cost_micros"`
+	Tools       []toolloop.ToolCall `json:"tools"`
 }
 
-func summarise(question, model string, result agent.Result) session {
+func summarise(question, model string, result toolloop.Result) session {
 	s := session{
 		At: time.Now().UTC(), Question: question, Model: model, Halt: result.Halt,
 		Turns: len(result.Turns), CallsByTool: map[string]int{}, Refusals: map[string]int{},

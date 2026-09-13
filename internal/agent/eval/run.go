@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"time"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/regisoliveira/dispute-router/internal/agent"
+	"github.com/regisoliveira/dispute-router/internal/llm"
+	"strings"
+	"time"
 )
 
 // Runner drafts for each case and grades what comes back.
@@ -78,7 +77,7 @@ type Sample struct {
 	// case asked for a control.
 	ControlRecommendation agent.Recommendation `json:"control_recommendation,omitempty"`
 
-	Usage      agent.Usage   `json:"usage"`
+	Usage      llm.Usage     `json:"usage"`
 	CostMicros int64         `json:"cost_micros"`
 	Latency    time.Duration `json:"latency_ns"`
 
@@ -102,8 +101,8 @@ type Result struct {
 	Retrieval  agent.RetrievalMethod `json:"retrieval,omitempty"`
 	Precedents int                   `json:"precedents"`
 
-	Usage      agent.Usage `json:"usage"`
-	CostMicros int64       `json:"cost_micros"`
+	Usage      llm.Usage `json:"usage"`
+	CostMicros int64     `json:"cost_micros"`
 
 	// Skipped means the dataset has no dispute matching this case. Reported
 	// rather than passed over: a case that silently disappears is a rule
@@ -167,7 +166,7 @@ type Report struct {
 	FailuresByRule  map[Rule]int `json:"failures_by_rule"`
 	TotalCostMicros int64        `json:"total_cost_micros"`
 
-	Usage agent.Usage `json:"usage"`
+	Usage llm.Usage `json:"usage"`
 
 	// Stopped explains a run that did not reach the end of the case set. A
 	// pass rate over half the cases is not the pass rate, and a report that

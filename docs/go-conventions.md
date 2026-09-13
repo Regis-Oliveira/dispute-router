@@ -85,13 +85,16 @@ unexported `written` flag, so a test of the graders does not have to drive a
 whole generator call to obtain something to grade. Fail-closed stays
 fail-closed and the door says in its name what it is for.
 
-The in-package tests keep a thin copy of the double anyway, in
-`internal/agent/scripted_test.go`, and the reason is structural rather than
-lazy. Go test files come in two flavours: `package agent` sees the package's
-unexported names, `package agent_test` sees only its API. All seventeen test
-files in that package reach for unexported names, so they are the first kind,
-and the first kind cannot import `agenttest` because `agenttest` imports
-`agent` — an import cycle.
+The in-package tests kept a thin copy of the double for a while, and the reason
+was structural rather than lazy. Go test files come in two flavours: `package
+agent` sees the package's unexported names, `package agent_test` sees only its
+API. All seventeen test files in that package reach for unexported names, so
+they are the first kind, and the first kind could not import `agenttest`,
+because `agenttest` imports `agent` — an import cycle. Splitting the transport
+out to `internal/llm` dissolved that: the completer double went with it, to
+`internal/llm/llmtest`, which imports `llm` and not `agent`, so the in-package
+tests can import it and the copy is gone. The cycle was never about test
+doubles; it was about which package the double's types belonged to.
 
 One last echo of the same rule. The script that scans for over-exported names
 originally excluded every path under a package's directory, so a name used only

@@ -13,13 +13,12 @@ package eval
 
 import (
 	"fmt"
+	"github.com/regisoliveira/dispute-router/internal/agent"
+	"github.com/regisoliveira/dispute-router/internal/money"
 	"math"
 	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/regisoliveira/dispute-router/internal/agent"
-	"github.com/regisoliveira/dispute-router/internal/money"
 )
 
 // Grade is one grader's verdict on one draft.
@@ -33,9 +32,9 @@ type Grade struct {
 // across runs: free-text reasons cannot be aggregated, and an eval that cannot
 // aggregate cannot show a regression.
 //
-// Distinct from agent.Check and from agent.Rule, which look alike and are not.
-// A Check is what a model verifier found in a draft; an agent.Rule is why a
-// tool call was refused; these are what a deterministic grader decided about a
+// Distinct from agent.Check and from toolloop.Rule, which look alike and are
+// not. A Check is what a model verifier found in a draft; a toolloop.Rule is
+// why a tool call was refused; these are what a deterministic grader decided about a
 // draft with no model in the loop. The three sets are counted separately and
 // mean different things about a run.
 type Rule string

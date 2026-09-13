@@ -6,6 +6,9 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/regisoliveira/dispute-router/internal/llm"
+	"github.com/regisoliveira/dispute-router/internal/llm/llmtest"
 )
 
 // wordVector is a deterministic embedder: a bag of hashed words, normalised.
@@ -18,13 +21,13 @@ import (
 // that spends money.
 type wordVector struct {
 	dims  int
-	kinds []EmbedKind
+	kinds []llm.EmbedKind
 }
 
 func (w *wordVector) Model() string   { return "test-wordvector" }
 func (w *wordVector) Dimensions() int { return w.dims }
 
-func (w *wordVector) Embed(_ context.Context, texts []string, kind EmbedKind) ([][]float32, error) {
+func (w *wordVector) Embed(_ context.Context, texts []string, kind llm.EmbedKind) ([][]float32, error) {
 	w.kinds = append(w.kinds, kind)
 
 	out := make([][]float32, len(texts))
@@ -35,27 +38,28 @@ func (w *wordVector) Embed(_ context.Context, texts []string, kind EmbedKind) ([
 			_, _ = h.Write([]byte(strings.Trim(word, ".,!?;:'\"")))
 			vec[h.Sum32()%uint32(w.dims)] += 1
 		}
-		out[i] = normalise(vec)
+		out[i] = unit(vec)
 	}
 	return out, nil
 }
 
-func TestNormaliseMakesUnitVectors(t *testing.T) {
-	vec := normalise([]float32{3, 4, 0})
+// unit is the fixture's own normalisation, kept here rather than reached for
+// in internal/llm: what that package guarantees about the vectors Voyage
+// returns is tested there, and this only needs its own vectors comparable.
+func unit(vec []float32) []float32 {
 	var sum float64
 	for _, v := range vec {
 		sum += float64(v) * float64(v)
 	}
-	if math.Abs(sum-1) > 1e-6 {
-		t.Errorf("length squared = %v, want 1", sum)
+	if sum == 0 {
+		return vec
 	}
-
-	// A zero vector has no direction to preserve, and dividing by its length
-	// would produce NaNs that pgvector accepts and the index then sorts
-	// nonsensically.
-	if got := normalise([]float32{0, 0, 0}); got[0] != 0 {
-		t.Errorf("a zero vector came back as %v", got)
+	norm := float32(math.Sqrt(sum))
+	out := make([]float32, len(vec))
+	for i, v := range vec {
+		out[i] = v / norm
 	}
+	return out
 }
 
 // pgvector's literal form is the contract with the extension, and getting it
@@ -76,8 +80,8 @@ func TestAQueryIsEmbeddedAsAQuery(t *testing.T) {
 	if _, _, err := retriever.For(context.Background(), 1, "mrc_nothing", "the parcel never arrived"); err != nil {
 		t.Fatalf("For: %v", err)
 	}
-	if len(embedder.kinds) == 0 || embedder.kinds[0] != EmbedQuery {
-		t.Errorf("the claim was embedded as %v, want %q", embedder.kinds, EmbedQuery)
+	if len(embedder.kinds) == 0 || embedder.kinds[0] != llm.EmbedQuery {
+		t.Errorf("the claim was embedded as %v, want %q", embedder.kinds, llm.EmbedQuery)
 	}
 }
 
@@ -169,21 +173,21 @@ func TestPrecedentReachesBothCalls(t *testing.T) {
 		}},
 	}
 
-	genScript := &ScriptedCompleter{Responses: []Response{
+	genScript := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		draftResponseFor(t, RecommendRepresent, "letter"),
 	}}
-	if _, err := NewGenerator(genScript, "test", Pricing{}, 4096).
+	if _, err := NewGenerator(genScript, "test", llm.Pricing{}, 4096).
 		Write(context.Background(), facts); err != nil {
 		t.Fatalf("generator: %v", err)
 	}
 
-	verScript := &ScriptedCompleter{Responses: []Response{verdictPass(t)}}
-	if _, err := NewVerifier(verScript, "test", Pricing{}, 2048).
+	verScript := &llmtest.ScriptedCompleter{Responses: []llm.Response{verdictPass(t)}}
+	if _, err := NewVerifier(verScript, "test", llm.Pricing{}, 2048).
 		Check(context.Background(), facts, "letter"); err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
 
-	for name, script := range map[string]*ScriptedCompleter{"generator": genScript, "verifier": verScript} {
+	for name, script := range map[string]*llmtest.ScriptedCompleter{"generator": genScript, "verifier": verScript} {
 		prompt := script.Requests[0].Messages[0].Content[0].Text
 		if !strings.Contains(prompt, "dsp_precedent_x") {
 			t.Errorf("the %s never saw the precedent; the two judges are working from different records", name)

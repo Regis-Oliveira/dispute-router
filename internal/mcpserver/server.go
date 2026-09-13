@@ -3,8 +3,8 @@
 //
 // There is almost nothing here, and that is the point. The tools themselves -
 // what they return, what they mask, what their descriptions say - live in
-// internal/disputetools, because they are also served over the Messages API to
-// the agent in internal/agent. This file is the MCP envelope and nothing else:
+// internal/disputetools, because they are also served over the Messages API by
+// internal/toolloop. This file is the MCP envelope and nothing else:
 // it maps a Definition onto mcp.AddTool and marks every one of them read-only.
 //
 // The whole design question for an MCP server is not "what can I expose" but
@@ -14,7 +14,7 @@
 // # What is deliberately NOT here, and why
 //
 // This list is the design. Every entry was easy to add and is missing on
-// purpose. It applies to the Messages API envelope in internal/agent too -
+// purpose. It applies to the Messages API envelope in internal/toolloop too -
 // there is one tool set, so there is one boundary.
 //
 //   - Any tool that writes. No refund, no state change, no evidence upload.

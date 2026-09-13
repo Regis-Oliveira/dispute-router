@@ -414,7 +414,7 @@ project, so it was eighty lines that could only be trusted by reading them.
 Untested code that looks like a feature is a claim, and the honest state is a
 `Completer` interface with one real implementation and the design note above.
 
-**The loop got the surface it was built for.** `internal/agent/loop.go` - turn
+**The loop got the surface it was built for.** The loop (now `internal/toolloop`) - turn
 ceiling, cost ceiling, tool dispatch, `Halt` - was the general harness, and the
 drafting flow deliberately does not use it: two judges need one record. For a
 month it was a harness nothing ran. `cmd/ask` is the operator-facing surface it
