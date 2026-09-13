@@ -15,7 +15,7 @@ for dir in $(find internal -type d); do
   sigs=$(grep -hE '^func (\([^)]*\) )?[A-Z]' $gofiles; awk '/^type [A-Z].*struct \{/{inb=1;next} inb&&/^\}/{inb=0} inb&&/^\t[A-Z]/{print}' $gofiles)
   for d in $decls; do
     kind=${d%%:*}; n=${d##*:}
-    ext=$(grep -rlE "\b$pkg\.$n\b" --include='*.go' . | grep -v "^./$dir/" | wc -l | tr -d ' ')
+    ext=$(grep -rlE "\b$pkg\.$n\b" --include='*.go' . | grep -v "^./$dir/[^/]*$" | wc -l | tr -d ' ')
     [ "$ext" != "0" ] && continue
     exttest=$(grep -lE "\b$pkg\.$n\b" $dir/*_test.go 2>/dev/null | wc -l | tr -d ' ')
     if [ "$kind" = "type" ]; then

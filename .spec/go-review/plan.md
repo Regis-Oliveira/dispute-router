@@ -1,6 +1,6 @@
 # Go review: fixes, visibility, structure, observability
 
-Status: **Phases 0 and 1 done (2026-09-13); 5.2 built early.** Next: Phase 2. Source: a full
+Status: **Phases 0, 1 and 2 done (2026-09-13); 5.2 built early.** Next: Phase 3. Source: a full
 idiomatic-Go review of the module on 2026-09-13 (gofmt, vet, build clean;
 staticcheck one test nit; 120 findings across three package slices).
 
@@ -144,7 +144,7 @@ holds a concrete SQS client)
 
 ---
 
-## Phase 2 — names and comments
+## Phase 2 — names and comments — DONE
 
 No behaviour change. One commit per package so each is reviewable.
 
@@ -155,33 +155,43 @@ constants of exported types and `Err` sentinels, which stay):
 - `ingest`: `Decode`, `DecodeRuling`, `PeekType`, `MaxClaimBytes`,
   `RecordResult`; rename `Decode` → `decodeDispute` for symmetry.
 - `api`: `ParseFilters` (if the handler is its only caller).
-- `worker`: `Decide` stays exported (it is the documented policy function and
-  `rules_test` reads better against a public name) — **DECIDE**; `DeadlineKey`
-  goes lowercase.
-- `agent`: `BaseRates`, `CheckCitations`, `Lexical` (rename `byText` to
-  `lexical` and delete the wrapper), `OutcomeFailed` (never used: delete).
-- `eval`: `GradeDraft`, `Graders`, `Instructed`, `Passed` (keep whichever
-  `cmd/eval` calls; the scan says none).
-- Verify: `go build ./... && go vet ./...` — the compiler is the test.
+- `worker`: `Decide` stays exported (decided: it is the documented policy
+  function); `DeadlineKey` went lowercase.
+- `agent`: `BaseRates` lowercased. `CheckCitations` stays exported (`eval`
+  calls it; the scan missed that because it treated subpackages as the same
+  package, fixed in `exported-scan.sh`). `Lexical` stays exported
+  (`cmd/retrieval` calls it); the `byText` indirection is gone. `OutcomeFailed`
+  stays: the `agent_runs.outcome` CHECK constraint lists `'failed'` and the
+  Go mirror is kept complete on purpose.
+- `eval`: `GradeDraft`, `Graders`, `Instructed`, `Passed`, `Draftlike` all
+  lowercased; nothing outside `eval` used them.
+- `signing`: `Sign`, `Verify`, `Compute`, `ParseHeader` stay exported as the
+  package's natural API even though only `VerifyAny` has an external caller;
+  `DefaultTolerance` lowercased. `ledger.ChargebackFeeMinor` lowercased.
+- `ingest`: `Store.Record`/`RecordRuling` went lowercase with `recordResult`
+  so no exported method returns an unexported type (only the handler calls
+  them).
+- The scan still lists enum constants, `Err` sentinels and the deliberate
+  keeps above; that is the expected steady state.
 
 **2.2 Exported edges that leak unexported types.** `internal/worker/store.go`,
 `internal/agent/assist.go`, `internal/agent/store.go`
-- `Store.Load` returns `loaded` and `Apply` accepts it; only `Pool` calls them.
-  Unexport both (`load`, `apply`) — **DECIDE** between that and exporting
-  `Loaded`.
+- `Store.Load` returned `loaded` and `Apply` accepted it; only `Pool` calls
+  them. Decided: both unexported (`load`, `apply`).
 - `agent.Trace` has fields of types `phase` and `evidenceTrace`. Export them
   as `Phase` and `EvidenceTrace`; `Run.Trace any` becomes `*Trace`.
 - Verify: `cmd/agent/report.go` can then decode a trace without its private
   `runRow` copy; do that in the same commit.
 
-**2.3 Test doubles out of the production package.** New
+**2.3 Test doubles out of the production package.** Built:
 `internal/agent/agenttest` with `ScriptedCompleter`, `Says`, `Calls`,
-`Truncated`, and a `Draft(...)` constructor so `eval` tests no longer drive the
-real generator to obtain a written draft. **DECIDE**: `Draft.written` is
-unexported on purpose (fail-closed); the constructor would live in
-`internal/agent` behind an `agenttest`-only door, e.g. an exported
-`NewWrittenDraftForTest` that `agenttest` wraps. Verify: `go test
-./internal/agent/...`.
+`Truncated` and `Draft(...)`, which wraps `agent.NewWrittenDraftForTest`, the
+one documented test-only door past the fail-closed `Draft.written`. The
+in-package `agent` tests keep a thin copy of the double in
+`scripted_test.go` because `package agent` cannot import `agenttest` (cycle)
+and all seventeen test files reach unexported names; converting them to
+`package agent_test` was the larger change. `agenttest.Says/Calls/Truncated`
+have no caller until Phase 4 adds tests in other packages.
 
 **2.4 Doc comments and comment cleanup, per package.** Add the one-line
 `// Name ...` to every exported name (116 missing across `internal/`). Apply
@@ -193,11 +203,16 @@ paragraph at the end of `worker/rules.go` into `Decide`'s comment, move the
 `api` package doc from `filters.go` to `doc.go` and fix "every path is a GET".
 Verify: `go vet ./...`; `go doc ./internal/<pkg>` reads as a table of contents.
 
-**2.5 Names that mislead.** `httpx.Middleware` → `httpx.Observe`;
-`cmd/eval` `print` → `printReport` (shadows a builtin); `api` `TookMs` →
-`TookMS`; `disputetools` `OriginalChargeText`/`OriginalCharge` →
-`OriginalCharge`/`OriginalChargeMinor` (JSON names unchanged — the dashboard
-reads them).
+**2.5 Names that mislead.** Done: `httpx.Middleware` → `httpx.Observe` (and
+the request id is no longer stored on the context, since nothing read it;
+the header and the log lines carry it); `api` `TookMs` → `TookMS`;
+`disputetools` `OriginalChargeText`/`OriginalCharge` →
+`OriginalCharge`/`OriginalChargeMinor` with the four readers in `agent` and
+`eval` updated (JSON names unchanged). Still open: `cmd/eval` `print` →
+`printReport` (shadows a builtin), folded into 3.9.
+
+Noted for Phase 3.9: `worker.ErrUnhandled` is decorative, `Consumer.handle`
+treats a poison message like a transient failure.
 
 ---
 
