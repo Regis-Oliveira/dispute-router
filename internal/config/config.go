@@ -3,13 +3,17 @@ package config
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// Config is every setting the binaries read, with the environment as the only
+// source.
 type Config struct {
 	Addr        string
 	DatabaseURL string
@@ -117,32 +121,33 @@ func Load(dotenvPath string) (Config, error) {
 		return Config{}, err
 	}
 
+	var vars env
 	cfg := Config{
 		Addr:                 str("INGEST_ADDR", ":8080"),
 		DatabaseURL:          str("DATABASE_URL", ""),
 		RedisURL:             str("REDIS_URL", "redis://localhost:6379"),
-		IdempotencyTTL:       dur("INGEST_IDEMPOTENCY_TTL", 24*time.Hour),
-		SignatureTolerance:   dur("INGEST_SIGNATURE_TOLERANCE", 5*time.Minute),
-		RateLimitPerMinute:   integer("INGEST_RATE_PER_MINUTE", 600),
-		RateLimitBurst:       integer("INGEST_RATE_BURST", 120),
-		IPRateLimitPerMinute: integer("INGEST_IP_RATE_PER_MINUTE", 1200),
-		IPRateLimitBurst:     integer("INGEST_IP_RATE_BURST", 240),
-		MaxBodyBytes:         int64(integer("INGEST_MAX_BODY_BYTES", 64*1024)),
-		OutboxPollInterval:   dur("INGEST_OUTBOX_POLL", time.Second),
-		OutboxBatchSize:      integer("INGEST_OUTBOX_BATCH", 100),
-		WorkerConcurrency:    integer("WORKER_CONCURRENCY", 8),
-		WorkerPollInterval:   dur("WORKER_POLL_INTERVAL", 2*time.Second),
-		WorkerBatchSize:      integer("WORKER_BATCH_SIZE", 100),
+		IdempotencyTTL:       vars.dur("INGEST_IDEMPOTENCY_TTL", 24*time.Hour),
+		SignatureTolerance:   vars.dur("INGEST_SIGNATURE_TOLERANCE", 5*time.Minute),
+		RateLimitPerMinute:   vars.integer("INGEST_RATE_PER_MINUTE", 600),
+		RateLimitBurst:       vars.integer("INGEST_RATE_BURST", 120),
+		IPRateLimitPerMinute: vars.integer("INGEST_IP_RATE_PER_MINUTE", 1200),
+		IPRateLimitBurst:     vars.integer("INGEST_IP_RATE_BURST", 240),
+		MaxBodyBytes:         int64(vars.integer("INGEST_MAX_BODY_BYTES", 64*1024)),
+		OutboxPollInterval:   vars.dur("INGEST_OUTBOX_POLL", time.Second),
+		OutboxBatchSize:      vars.integer("INGEST_OUTBOX_BATCH", 100),
+		WorkerConcurrency:    vars.integer("WORKER_CONCURRENCY", 8),
+		WorkerPollInterval:   vars.dur("WORKER_POLL_INTERVAL", 2*time.Second),
+		WorkerBatchSize:      vars.integer("WORKER_BATCH_SIZE", 100),
 		// Claim work slightly before it is due, so a decision lands inside the
 		// window instead of exactly on its edge.
-		WorkerLookahead: dur("WORKER_LOOKAHEAD", 30*time.Second),
+		WorkerLookahead: vars.dur("WORKER_LOOKAHEAD", 30*time.Second),
 		// Long enough that it is not constant load, short enough that a gap
 		// left by an unreachable Redis is closed well before any deadline.
-		WorkerReconcileInterval: dur("WORKER_RECONCILE_INTERVAL", 60*time.Second),
+		WorkerReconcileInterval: vars.dur("WORKER_RECONCILE_INTERVAL", 60*time.Second),
 		// Comfortably longer than one decision takes. A lock that expires
 		// mid-decision is survivable - the version check catches it - but it
 		// wastes the work.
-		WorkerLockTTL:       dur("WORKER_LOCK_TTL", 30*time.Second),
+		WorkerLockTTL:       vars.dur("WORKER_LOCK_TTL", 30*time.Second),
 		AWSRegion:           str("AWS_REGION", "us-east-1"),
 		AWSEndpoint:         str("AWS_ENDPOINT_URL", "http://localhost:4566"),
 		AWSAccessKey:        str("AWS_ACCESS_KEY_ID", "test"),
@@ -154,45 +159,48 @@ func Load(dotenvPath string) (Config, error) {
 		WebhookSecretID:     str("WEBHOOK_SECRET_ID", "dispute-router/webhook-secrets"),
 		// The cache TTL is the real rotation latency: a key published now takes
 		// effect within this window. Minutes, not hours.
-		WebhookSecretTTL: dur("WEBHOOK_SECRET_TTL", 5*time.Minute),
-		SQSMaxMessages:   integer("SQS_MAX_MESSAGES", 10),
-		SQSWaitSeconds:   integer("SQS_WAIT_SECONDS", 20),
+		WebhookSecretTTL: vars.dur("WEBHOOK_SECRET_TTL", 5*time.Minute),
+		SQSMaxMessages:   vars.integer("SQS_MAX_MESSAGES", 10),
+		SQSWaitSeconds:   vars.integer("SQS_WAIT_SECONDS", 20),
 
 		AnthropicAPIKey:    str("ANTHROPIC_API_KEY", ""),
 		AnthropicModel:     str("ANTHROPIC_MODEL", "claude-sonnet-5"),
 		VoyageAPIKey:       str("VOYAGE_API_KEY", ""),
 		VoyageModel:        str("VOYAGE_MODEL", "voyage-4"),
-		PrecedentLimit:     integer("PRECEDENT_LIMIT", 3),
-		AgentMaxCostMicros: int64(integer("AGENT_MAX_COST_MICROS", 250_000)),
-		AgentMaxAttempts:   integer("AGENT_MAX_ATTEMPTS", 2),
-		AgentBatchSize:     integer("AGENT_BATCH_SIZE", 5),
-		AgentInputPerMTok:  int64(integer("AGENT_INPUT_MICROS_PER_MTOK", 3_000_000)),
-		AgentOutputPerMTok: int64(integer("AGENT_OUTPUT_MICROS_PER_MTOK", 15_000_000)),
+		PrecedentLimit:     vars.integer("PRECEDENT_LIMIT", 3),
+		AgentMaxCostMicros: int64(vars.integer("AGENT_MAX_COST_MICROS", 250_000)),
+		AgentMaxAttempts:   vars.integer("AGENT_MAX_ATTEMPTS", 2),
+		AgentBatchSize:     vars.integer("AGENT_BATCH_SIZE", 5),
+		AgentInputPerMTok:  int64(vars.integer("AGENT_INPUT_MICROS_PER_MTOK", 3_000_000)),
+		AgentOutputPerMTok: int64(vars.integer("AGENT_OUTPUT_MICROS_PER_MTOK", 15_000_000)),
 
 		PprofAddr: str("PPROF_ADDR", ""),
 		APIAddr:   str("API_ADDR", ":8081"),
 		// Named origins only. A reflected Origin or a bare "*" would let any
 		// page on the internet read this data out of an operator's browser.
 		CORSOrigins:    list("API_CORS_ORIGINS", []string{"http://localhost:4200"}),
-		RequestTimeout: dur("API_REQUEST_TIMEOUT", 20*time.Second),
+		RequestTimeout: vars.dur("API_REQUEST_TIMEOUT", 20*time.Second),
 
-		ShutdownTimeout: dur("INGEST_SHUTDOWN_TIMEOUT", 15*time.Second),
+		ShutdownTimeout: vars.dur("INGEST_SHUTDOWN_TIMEOUT", 15*time.Second),
+	}
+	if err := errors.Join(vars.errs...); err != nil {
+		return Config{}, err
 	}
 
 	if cfg.DatabaseURL == "" {
-		return Config{}, fmt.Errorf("DATABASE_URL is required")
+		return Config{}, errors.New("DATABASE_URL is required")
 	}
 	if cfg.RateLimitBurst <= 0 || cfg.RateLimitPerMinute <= 0 {
-		return Config{}, fmt.Errorf("rate limit settings must be positive")
+		return Config{}, errors.New("rate limit settings must be positive")
 	}
 	// A missing queue URL surfaced as an EC2 metadata timeout three layers
 	// away, because an empty endpoint sends the SDK looking for a real AWS and
 	// an instance role. Settings that cannot work are refused here instead.
 	if cfg.SQSQueueURL == "" {
-		return Config{}, fmt.Errorf("SQS_QUEUE_URL is required")
+		return Config{}, errors.New("SQS_QUEUE_URL is required")
 	}
 	if cfg.S3EvidenceBucket == "" {
-		return Config{}, fmt.Errorf("S3_EVIDENCE_BUCKET is required")
+		return Config{}, errors.New("S3_EVIDENCE_BUCKET is required")
 	}
 	switch cfg.WebhookSecretSource {
 	case "secretsmanager", "database":
@@ -224,25 +232,37 @@ func list(key string, fallback []string) []string {
 	return out
 }
 
-func integer(key string, fallback int) int {
+// env collects parse failures so Load can report every bad variable at once
+// instead of the first one per restart.
+//
+// A value that is present but unparseable is an error, not the fallback:
+// WORKER_LOCK_TTL=30 used to become the 30 s default by accident, which is the
+// one case where silently agreeing with the operator hides the mistake.
+type env struct {
+	errs []error
+}
+
+func (e *env) integer(key string, fallback int) int {
 	v, ok := os.LookupEnv(key)
 	if !ok || v == "" {
 		return fallback
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
+		e.errs = append(e.errs, fmt.Errorf("%s: %w", key, err))
 		return fallback
 	}
 	return n
 }
 
-func dur(key string, fallback time.Duration) time.Duration {
+func (e *env) dur(key string, fallback time.Duration) time.Duration {
 	v, ok := os.LookupEnv(key)
 	if !ok || v == "" {
 		return fallback
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
+		e.errs = append(e.errs, fmt.Errorf("%s: %w", key, err))
 		return fallback
 	}
 	return d
@@ -254,7 +274,7 @@ func dur(key string, fallback time.Duration) time.Duration {
 func loadDotEnv(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
 		return err
