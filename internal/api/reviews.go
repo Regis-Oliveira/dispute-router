@@ -13,15 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The review queue: what the agent drafted, and the one place a person can act
-// on it.
-//
-// Everything else in this package reads. These two writes are the only ones,
-// and Submit is the only code path in the whole system that moves a dispute to
-// 'represented'. The agent deliberately cannot reach it - draft_ready is as far
-// as it goes - and the worker's rule engine never represents, so this is where
-// the decision to send something to a card network actually happens.
-
 // ErrNotReviewable means the run is not in a state a decision can be made
 // about: it was already decided, or the dispute moved on underneath it.
 var ErrNotReviewable = errors.New("run is not awaiting review")
@@ -136,6 +127,7 @@ type ReviewDetail struct {
 	Dispute DisputeDetail `json:"dispute"`
 }
 
+// Review loads one run for the review page, with the dispute as it stands now.
 func (s *Store) Review(ctx context.Context, runID int64) (ReviewDetail, error) {
 	var d ReviewDetail
 	var findings []byte
@@ -205,6 +197,12 @@ func validReviewer(reviewer string) error {
 }
 
 // Decide records a human decision.
+//
+// Everything else in this package reads. This is the one write, and the only
+// code path in the whole system that moves a dispute to 'represented'. The
+// agent deliberately cannot reach it - draft_ready is as far as it goes - and
+// the worker's rule engine never represents, so this is where the decision to
+// send something to a card network actually happens.
 //
 // Submitted means the letter goes to the card network and the dispute becomes
 // 'represented'. Discarded means the draft was not good enough and the dispute

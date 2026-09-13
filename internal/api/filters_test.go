@@ -6,7 +6,7 @@ import (
 )
 
 // A Filters literal with nothing set has to render SQL Postgres accepts. It
-// used to render "ORDER BY  DESC" and "LIMIT 0", which only ParseFilters
+// used to render "ORDER BY  DESC" and "LIMIT 0", which only parseFilters
 // callers were spared.
 func TestZeroFiltersRenderUsableSQL(t *testing.T) {
 	t.Parallel()

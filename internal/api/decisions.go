@@ -7,19 +7,6 @@ import (
 	"time"
 )
 
-// The decision history: every run a person has acted on.
-//
-// This is a different question from the review queue, which is why it is a
-// different endpoint rather than a filter on the disputes list. "What did this
-// person approve" is a timeline of actions, not a slice of cases - and the
-// things that make it worth asking (was the draft rejected, how many findings,
-// what did it cost) live on agent_runs, which the disputes list cannot reach.
-//
-// The column that earns the screen is the pair: the agent's verdict against the
-// human's decision. A run the verifier rejected and a person submitted anyway
-// is an override, and a list of overrides is the most actionable thing this
-// system can produce about itself.
-
 // DecisionRow is one decision.
 type DecisionRow struct {
 	RunID     int64  `json:"run_id"`
@@ -66,6 +53,7 @@ type DecisionFilters struct {
 	Offset        int
 }
 
+// DecisionList is one page of the decision history.
 type DecisionList struct {
 	Rows []DecisionRow `json:"rows"`
 	Page Page          `json:"page"`
@@ -73,9 +61,21 @@ type DecisionList struct {
 	// history rather than the page - a filter built from one page of results
 	// hides the people whose decisions are older than fifty rows.
 	Reviewers []string `json:"reviewers"`
-	TookMs    int64    `json:"took_ms"`
+	TookMS    int64    `json:"took_ms"`
 }
 
+// Decisions lists every run a person has acted on.
+//
+// A different question from the review queue, which is why it is a different
+// endpoint rather than a filter on the disputes list. "What did this person
+// approve" is a timeline of actions, not a slice of cases - and the things
+// that make it worth asking (was the draft rejected, how many findings, what
+// did it cost) live on agent_runs, which the disputes list cannot reach.
+//
+// The column that earns the screen is the pair: the agent's verdict against
+// the human's decision. A run the verifier rejected and a person submitted
+// anyway is an override, and a list of overrides is the most actionable thing
+// this system can produce about itself.
 func (s *Store) Decisions(ctx context.Context, f DecisionFilters) (DecisionList, error) {
 	started := time.Now()
 
@@ -164,6 +164,6 @@ func (s *Store) Decisions(ctx context.Context, f DecisionFilters) (DecisionList,
 	}
 
 	out.Page = Page{Offset: f.Offset, Limit: f.Limit, Total: total}
-	out.TookMs = time.Since(started).Milliseconds()
+	out.TookMS = time.Since(started).Milliseconds()
 	return out, reviewers.Err()
 }

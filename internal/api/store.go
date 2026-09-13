@@ -14,15 +14,19 @@ import (
 )
 
 var (
+	// ErrNotFound means the dispute or run does not exist, and always answers 404.
 	ErrNotFound = errors.New("not found")
 	// ErrInvalidInput is anything the caller could fix, and always answers 400.
 	ErrInvalidInput = errors.New("invalid input")
 )
 
+// Store is the dashboard's read model, plus the review decision.
 type Store struct{ pool *pgxpool.Pool }
 
+// NewStore wraps a connection pool.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
+// Ping is the readiness probe's database half.
 func (s *Store) Ping(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
@@ -37,6 +41,7 @@ type Money struct {
 	Currency    string `json:"currency"`
 }
 
+// DisputeRow is one dispute as the list and the CSV export show it.
 type DisputeRow struct {
 	ID           int64      `json:"id"`
 	ExternalID   string     `json:"external_id"`
@@ -61,12 +66,14 @@ type DisputeRow struct {
 	SecondsToDeadline int64 `json:"seconds_to_deadline"`
 }
 
+// Page is where a list sits in its total.
 type Page struct {
 	Offset int   `json:"offset"`
 	Limit  int   `json:"limit"`
 	Total  int64 `json:"total"`
 }
 
+// DisputeList is one page of disputes.
 type DisputeList struct {
 	Rows   []DisputeRow `json:"rows"`
 	Page   Page         `json:"page"`
@@ -278,6 +285,7 @@ func (s *Store) StreamCSV(ctx context.Context, f Filters, w *csv.Writer) (int, e
 // detail
 // ---------------------------------------------------------------------------
 
+// DisputeEvent is one state transition from the audit trail.
 type DisputeEvent struct {
 	FromState  *string        `json:"from_state"`
 	ToState    string         `json:"to_state"`
@@ -286,6 +294,7 @@ type DisputeEvent struct {
 	OccurredAt time.Time      `json:"occurred_at"`
 }
 
+// LedgerPosting is one ledger entry this dispute produced.
 type LedgerPosting struct {
 	ExternalRef string    `json:"external_ref"`
 	Kind        string    `json:"kind"`
@@ -295,6 +304,7 @@ type LedgerPosting struct {
 	OccurredAt  time.Time `json:"occurred_at"`
 }
 
+// DisputeDetail is everything the dispute page shows.
 type DisputeDetail struct {
 	DisputeRow
 	CustomerEmail  string          `json:"customer_email"`
@@ -313,6 +323,7 @@ type DisputeDetail struct {
 	CardholderClaim string `json:"cardholder_claim"`
 }
 
+// Dispute loads one dispute with its audit trail and ledger postings.
 func (s *Store) Dispute(ctx context.Context, id int64) (DisputeDetail, error) {
 	var d DisputeDetail
 

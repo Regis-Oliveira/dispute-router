@@ -25,6 +25,8 @@ type Evidence struct {
 	ttl       time.Duration
 }
 
+// NewEvidence binds an S3 client to a bucket; ttl bounds every presigned URL
+// it mints.
 func NewEvidence(client *s3.Client, bucket string, ttl time.Duration) *Evidence {
 	return &Evidence{
 		client:    client,
@@ -47,7 +49,7 @@ var allowedTypes = map[string]string{
 
 // prefix keys every object under its dispute, which is what makes listing one
 // dispute's evidence a prefix scan rather than a database table.
-func (e *Evidence) prefix(disputeID int64) string {
+func prefix(disputeID int64) string {
 	return fmt.Sprintf("disputes/%d/", disputeID)
 }
 
@@ -86,6 +88,7 @@ func safeName(name string) string {
 // browser.
 const MaxUploadBytes int64 = 25 * 1024 * 1024
 
+// UploadTarget is the signed form the browser posts a file with.
 type UploadTarget struct {
 	Key       string    `json:"key"`
 	URL       string    `json:"url"`
@@ -122,7 +125,7 @@ func (e *Evidence) PresignUpload(ctx context.Context, disputeID int64, filename,
 
 	// The timestamp keeps a re-upload of the same filename from silently
 	// replacing the original. Evidence is not something to overwrite.
-	key := fmt.Sprintf("%s%d-%s", e.prefix(disputeID), time.Now().UTC().Unix(), name)
+	key := fmt.Sprintf("%s%d-%s", prefix(disputeID), time.Now().UTC().Unix(), name)
 
 	signed, err := e.presigner.PresignPostObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(e.bucket),
@@ -165,6 +168,7 @@ func (e *Evidence) PresignUpload(ctx context.Context, disputeID int64, filename,
 	}, nil
 }
 
+// EvidenceFile is one object filed against a dispute.
 type EvidenceFile struct {
 	Key        string    `json:"key"`
 	Name       string    `json:"name"`
@@ -179,7 +183,7 @@ type EvidenceFile struct {
 func (e *Evidence) List(ctx context.Context, disputeID int64) ([]EvidenceFile, error) {
 	out, err := e.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
 		Bucket: aws.String(e.bucket),
-		Prefix: aws.String(e.prefix(disputeID)),
+		Prefix: aws.String(prefix(disputeID)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list evidence: %w", err)
@@ -228,7 +232,7 @@ type EvidenceObject struct {
 // a record for dispute A can never be assembled from a file on dispute B,
 // whatever produced the key.
 func (e *Evidence) Open(ctx context.Context, disputeID int64, key string) (EvidenceObject, error) {
-	if !strings.HasPrefix(key, e.prefix(disputeID)) {
+	if !strings.HasPrefix(key, prefix(disputeID)) {
 		return EvidenceObject{}, fmt.Errorf("%w: key %q is not on dispute %d", ErrInvalidInput, key, disputeID)
 	}
 	out, err := e.client.GetObject(ctx, &s3.GetObjectInput{

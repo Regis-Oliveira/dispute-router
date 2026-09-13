@@ -1,4 +1,3 @@
-// Package api serves the read model behind the operations dashboard.
 package api
 
 import (
@@ -87,11 +86,11 @@ const (
 	maxOffset = 10_000
 )
 
-// ParseFilters reads a request's query string. Anything unparseable falls back
+// parseFilters reads a request's query string. Anything unparseable falls back
 // to the default rather than 400-ing, except values that would change which
 // rows are returned - those are refused, because silently ignoring a filter
 // shows the operator more data than they asked to see.
-func ParseFilters(r *http.Request) (Filters, error) {
+func parseFilters(r *http.Request) (Filters, error) {
 	q := r.URL.Query()
 
 	f := Filters{
@@ -190,7 +189,7 @@ var (
 )
 
 // normalize fills in what a caller left at zero so that the value renders
-// usable SQL. ParseFilters sets every default itself; this exists for the
+// usable SQL. parseFilters sets every default itself; this exists for the
 // callers that build a Filters literal (disputetools, tests), where a missing
 // Sort used to render "ORDER BY  DESC" and a missing Limit "LIMIT 0".
 func (f Filters) normalize() Filters {

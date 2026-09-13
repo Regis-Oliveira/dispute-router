@@ -15,6 +15,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// Handler serves the dashboard's HTTP routes.
 type Handler struct {
 	store    *Store
 	rdb      *redis.Client
@@ -22,12 +23,14 @@ type Handler struct {
 	logger   *slog.Logger
 }
 
+// NewHandler binds the routes to their stores.
 func NewHandler(store *Store, rdb *redis.Client, evidence *Evidence, logger *slog.Logger) *Handler {
 	return &Handler{store: store, rdb: rdb, evidence: evidence, logger: logger}
 }
 
-// Routes returns the read model. Every path is a GET: this service never
-// writes, which is why it can be scaled and cached independently of ingest.
+// Routes returns the dashboard's routes. All but two are GETs over the read
+// model, which is what lets this service be scaled and cached independently
+// of ingest; the two POSTs are explained where they are registered.
 func (h *Handler) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/disputes", h.listDisputes)
@@ -55,7 +58,7 @@ func (h *Handler) Routes() *http.ServeMux {
 }
 
 func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {
-	filters, err := ParseFilters(r)
+	filters, err := parseFilters(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -149,7 +152,7 @@ func (h *Handler) presignEvidence(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
-	filters, err := ParseFilters(r)
+	filters, err := parseFilters(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -181,7 +184,7 @@ func (h *Handler) merchants(w http.ResponseWriter, r *http.Request) {
 // sent, a mid-stream database error cannot become a 500 - the file just ends.
 // The row count in the trailer is how the client can tell it got everything.
 func (h *Handler) exportDisputes(w http.ResponseWriter, r *http.Request) {
-	filters, err := ParseFilters(r)
+	filters, err := parseFilters(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

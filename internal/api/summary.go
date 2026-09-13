@@ -8,12 +8,14 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// StateCount is how many disputes sit in one state and kind.
 type StateCount struct {
 	State string `json:"state"`
 	Kind  string `json:"kind"`
 	Count int64  `json:"count"`
 }
 
+// Exposure is the open money in one currency.
 type Exposure struct {
 	Currency    string `json:"currency"`
 	AmountMinor int64  `json:"amount_minor"`
@@ -27,12 +29,14 @@ type DeadlineBucket struct {
 	Count  int64  `json:"count"`
 }
 
+// DailyPoint is one day's arrivals, split by kind.
 type DailyPoint struct {
 	Day         string `json:"day"`
 	Alerts      int64  `json:"alerts"`
 	Chargebacks int64  `json:"chargebacks"`
 }
 
+// Summary is what the overview page shows.
 type Summary struct {
 	States    []StateCount     `json:"states"`
 	OpenValue []Exposure       `json:"open_value"`
@@ -206,6 +210,7 @@ func openClause(where string) string {
 	return " AND d.state IN ('received','resolving')"
 }
 
+// MerchantOption is one entry in the merchant filter control.
 type MerchantOption struct {
 	ExternalID string `json:"external_id"`
 	Name       string `json:"name"`
