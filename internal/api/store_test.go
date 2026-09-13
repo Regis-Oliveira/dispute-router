@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -100,11 +101,17 @@ func TestDispute(t *testing.T) {
 	}
 }
 
+// The sentinel, not merely an error: getDispute answers 404 on
+// errors.Is(err, ErrNotFound) and 500 on anything else. A store that
+// translated pgx.ErrNoRows into some other error would still fail this test
+// "non-nil", and would turn every missing dispute into an internal error the
+// dashboard shows as a broken page.
 func TestDisputeNotFound(t *testing.T) {
 	store := testStore(t)
 
-	if _, err := store.Dispute(context.Background(), -1); err == nil {
-		t.Fatal("Dispute(-1) returned no error, want ErrNotFound")
+	_, err := store.Dispute(t.Context(), -1)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Dispute(-1) err = %v, want ErrNotFound", err)
 	}
 }
 
