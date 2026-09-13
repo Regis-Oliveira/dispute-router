@@ -15,6 +15,7 @@ import (
 
 const signatureHeader = "X-Processor-Signature"
 
+// Handler is the webhook endpoint: one delivery in, one status out.
 type Handler struct {
 	store           *Store
 	secrets         secrets.Resolver
@@ -27,6 +28,7 @@ type Handler struct {
 	now             func() time.Time
 }
 
+// HandlerOptions is everything a Handler needs; the clock is the only optional part.
 type HandlerOptions struct {
 	Store           *Store
 	Secrets         secrets.Resolver
@@ -36,9 +38,18 @@ type HandlerOptions struct {
 	Tolerance       time.Duration
 	MaxBodyBytes    int64
 	Logger          *slog.Logger
+
+	// Now is the clock the timestamp checks read. Nil means time.Now; a test
+	// sets it to pin what "too old" and "in the future" mean.
+	Now func() time.Time
 }
 
+// NewHandler builds a Handler from its options.
 func NewHandler(opts HandlerOptions) *Handler {
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Handler{
 		store:           opts.Store,
 		secrets:         opts.Secrets,
@@ -48,7 +59,7 @@ func NewHandler(opts HandlerOptions) *Handler {
 		tolerance:       opts.Tolerance,
 		maxBodyBytes:    opts.MaxBodyBytes,
 		logger:          opts.Logger,
-		now:             time.Now,
+		now:             now,
 	}
 }
 
@@ -81,7 +92,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, h.maxBodyBytes))
 	if err != nil {
-		writeError(w, http.StatusRequestEntityTooLarge, "body too large")
+		// Only the cap is 413. A client that hangs up mid-body used to be told
+		// its body was too large, which is a lie about a limit it never hit.
+		if errors.As(err, new(*http.MaxBytesError)) {
+			writeError(w, http.StatusRequestEntityTooLarge, "body too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "could not read body")
 		return
 	}
 
