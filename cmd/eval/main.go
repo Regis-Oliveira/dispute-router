@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -170,7 +171,7 @@ func list(ctx context.Context, pool *pgxpool.Pool, cases []eval.Case) error {
 		var id int64
 		err := pool.QueryRow(ctx, c.Query).Scan(&id)
 		switch {
-		case err == pgx.ErrNoRows:
+		case errors.Is(err, pgx.ErrNoRows):
 			fmt.Fprintf(w, "%s\t-\t%s\n", c.Name, "NO MATCHING DISPUTE: "+c.Why)
 		case err != nil:
 			fmt.Fprintf(w, "%s\tERROR\t%v\n", c.Name, err)

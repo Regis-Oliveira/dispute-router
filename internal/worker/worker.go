@@ -1,7 +1,6 @@
 package worker
 
 import (
-	"github.com/jackc/pgx/v5"
 	"context"
 	"errors"
 	"log/slog"
@@ -231,7 +230,7 @@ func (p *Pool) handle(ctx context.Context, disputeID int64) {
 
 	current, err := p.opts.Store.Load(ctx, disputeID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, ErrNotFound) {
 			// Deleted between scheduling and claiming. Nothing to reschedule.
 			p.skipped.Add(1)
 			return

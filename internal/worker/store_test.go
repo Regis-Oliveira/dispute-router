@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -278,5 +279,17 @@ func TestApplyRefusesAStaleVersion(t *testing.T) {
 
 	if err != ErrStaleCandidate {
 		t.Fatalf("second applyTx = %v, want ErrStaleCandidate", err)
+	}
+}
+
+// A dispute deleted between being scheduled and being claimed comes back as
+// the package's own sentinel, not the driver's, so the pool can skip it without
+// knowing what database it is talking to.
+func TestLoadTranslatesAMissingDisputeToErrNotFound(t *testing.T) {
+	store := NewStore(testPool(t))
+
+	_, err := store.Load(t.Context(), -1)
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Load(-1) = %v, want ErrNotFound", err)
 	}
 }

@@ -17,8 +17,14 @@ import (
 // written. Not a failure: the version check did its job.
 var ErrStaleCandidate = errors.New("dispute changed underneath this worker")
 
+// ErrNotFound means the dispute no longer exists: deleted between being
+// scheduled and being claimed. Nothing to reschedule.
+var ErrNotFound = errors.New("dispute not found")
+
+// Store is the worker's read and write path into Postgres.
 type Store struct{ pool *pgxpool.Pool }
 
+// NewStore wraps a connection pool.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // loaded is a Candidate plus the bookkeeping the write path needs.
@@ -53,7 +59,7 @@ func (s *Store) Load(ctx context.Context, disputeID int64) (loaded, error) {
 		&l.RefundableRemainingMinor,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return loaded{}, pgx.ErrNoRows
+		return loaded{}, fmt.Errorf("load dispute %d: %w", disputeID, ErrNotFound)
 	}
 	if err != nil {
 		return loaded{}, fmt.Errorf("load dispute %d: %w", disputeID, err)
