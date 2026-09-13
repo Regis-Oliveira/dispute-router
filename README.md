@@ -535,10 +535,6 @@ nothing ran.
   independent verifier, the guardrails, the evals, and the order it was built in.
 - **[`.spec/review-fixes/plan.md`](.spec/review-fixes/plan.md)** — what an
   adversarial review found on 2026-09-10 and the order to fix it in.
-- **[`.spec/observability/plan.md`](.spec/observability/plan.md)** — the one
-  part of the 2026-09-13 Go review that is not built: how exceptions get
-  captured, what Sentry and Datadog actually give away for free, and the
-  questions that have to be answered before any of it is wired.
 
 `docs/` describes what is; `.spec/` describes what isn't yet. When something in
 `.spec/` ships, the decision worth keeping moves to `docs/` and the plan is

@@ -603,6 +603,69 @@ everywhere, so a half-tagged state was worse than either alternative.
 
 ---
 
+## Observability
+
+**Sentry, for both halves, because Datadog's free tier cannot answer the
+question.** Datadog gives away host metrics for five hosts with one day of
+retention and no error tracking at all; the question was how exceptions get
+captured. Sentry's Developer plan is 5,000 errors a month and covers Go and the
+browser. OpenTelemetry remains the vendor-neutral answer and the better one to
+learn, but the library that does this specific job in an afternoon is the
+easier one to walk back, so it went first.
+
+**An unset DSN is not a quieter path, it is no path.** `sentry.Init` is never
+called, the client stays nil, and that nil is the switch every other piece
+reads. Same logs, same status codes, same shutdown. That is how this runs on a
+laptop and the property is asserted, not assumed: with no DSN, a captured
+exception and a flush leave a local HTTP server's request log empty.
+
+**The official `slog` bridge was not used.** It emits Sentry Logs rather than
+events, so `logger.Error` would never become an issue, and it replaces the
+handler rather than wrapping one, which would have cost a fan-out dependency to
+keep the stdout JSON logs. A handler in `boot` does the job with no extra
+module.
+
+**Flush cannot be a deferred closure.** Every main ends with a fatal log line
+and `os.Exit`, which skips defers, so the event that matters most would be
+captured and discarded. `boot.FlushSentry` is a named function, deferred for the
+clean path and called explicitly after the fatal line.
+
+**`DisableTelemetryBuffer` is on, because the default lost events.** v0.49 queues
+into a buffer drained on a tick and `Flush` returns success before the scheduler
+has taken the event, so the envelope leaves after the process was meant to be
+gone. Measured: zero events on the default path, one on the other.
+
+**The Sentry middleware wraps `Observe` from outside, with `Repanic`.** Inside
+would put two recoverers in the chain — Sentry reporting before a request id
+exists, then `Observe` logging the repanic and the bridge reporting it again.
+Outside, `Observe`'s recover is still the only one that fires, and Sentry's
+contribution is the per-request hub that gives the event its request id.
+
+**Headers are not sent at all, rather than filtered.** The SDK keeps every
+header and scrubs a denylist that does not contain `X-Processor-Signature`. A
+denylist that must stay right about every header this platform ever adds is the
+wrong shape for "no secret may be sent".
+
+**Nothing below error is captured, not even breadcrumbs.** A breadcrumb hangs off
+a scope, and with eight concurrent dispute handlers on a process-wide scope one
+dispute's event would carry another's trail — history that reads as causal and
+is not.
+
+**The dashboard sends no URLs, no replay and no input.** Filters are mirrored
+into the query string on every keystroke, so the page URL carries the operator's
+free-text search and the merchant names they typed. Query and fragment are
+stripped from events and breadcrumbs, console and `ui.input` breadcrumbs are
+dropped, and session replay is never added.
+
+**No route timing in the dashboard, deliberately.** Sentry's browser tracing
+propagates `sentry-trace` and `baggage` to anything matching localhost, which is
+every call to the read API on another port — and that API answers preflight with
+`Access-Control-Allow-Headers: Content-Type`. Setting a DSN would have stopped
+the dashboard loading any data. When tracing is actually wanted, the integration
+and the CORS allow-list change in the same commit.
+
+---
+
 ## Environment facts that cost time to rediscover
 
 - Postgres is on **5433** (5432 was taken); Redis 6379; LocalStack 4566.
