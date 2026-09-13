@@ -24,8 +24,16 @@ import (
 
 func main() {
 	logger := boot.Logger(true)
+	// Sentry batches, so an event only leaves on a flush. This one covers the
+	// ordinary exit and a panic unwinding out of run.
+	defer boot.FlushSentry()
+
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "error", err)
+		// And this one covers the exit that matters, because os.Exit skips the
+		// deferred call above and the line just logged is the one that says
+		// why the process is stopping.
+		boot.FlushSentry()
 		os.Exit(1)
 	}
 }
@@ -39,6 +47,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
+	if err := boot.Sentry(cfg.Sentry.DSN, cfg.Sentry.Environment, cfg.Sentry.Release); err != nil {
 		return err
 	}
 

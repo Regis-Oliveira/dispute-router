@@ -26,12 +26,24 @@ import (
 // command run by a person logs text on stderr, so that its output stays its
 // own - and for cmd/mcp stdout is the protocol, where a stray line corrupts
 // the stream.
+//
+// Either way the handler is wrapped so that an error record also becomes a
+// Sentry event carrying the fields that were logged with it. The wrapper is
+// here rather than at each call site because main builds its logger before it
+// has read any configuration, and because the fatal line main writes when run
+// returns an error is the single line most worth reporting. It writes nothing
+// of its own and does nothing at all until Sentry has been given a DSN, so the
+// output with the local default is byte for byte what the handler underneath
+// produces.
 func Logger(json bool) *slog.Logger {
 	options := &slog.HandlerOptions{Level: slog.LevelInfo}
+	var handler slog.Handler
 	if json {
-		return slog.New(slog.NewJSONHandler(os.Stdout, options))
+		handler = slog.NewJSONHandler(os.Stdout, options)
+	} else {
+		handler = slog.NewTextHandler(os.Stderr, options)
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, options))
+	return slog.New(sentryHandler{next: handler})
 }
 
 // Postgres opens the pool and proves it works before returning it.

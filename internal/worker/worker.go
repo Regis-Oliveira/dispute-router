@@ -196,6 +196,12 @@ func (p *Pool) drainOnce(ctx context.Context) (int, error) {
 
 // handle decides one dispute.
 func (p *Pool) handle(ctx context.Context, disputeID int64) {
+	// First, so that it unwinds last: a panic anywhere below reaches Sentry
+	// with this dispute's id on it before it takes the process down, and the
+	// lock release deferred further down still runs first.
+	ctx, reportPanic := observeDispute(ctx, disputeID)
+	defer reportPanic()
+
 	logger := p.opts.Logger.With("dispute_id", disputeID)
 
 	lock, err := p.opts.Locks.Acquire(ctx, disputeID)

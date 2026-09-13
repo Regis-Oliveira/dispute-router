@@ -39,6 +39,7 @@ type Config struct {
 	Agent  Agent
 	API    API
 	AWS    AWS
+	Sentry Sentry
 }
 
 // Ingest is what cmd/ingest reads: the webhook endpoint, its defences, and the
@@ -167,6 +168,37 @@ type AWS struct {
 	WaitSeconds int
 }
 
+// Sentry is where a crash gets reported, for every binary that has a logger.
+//
+// The DSN is the switch. Empty - the default, and what every laptop runs with
+// - means the SDK is never initialised and nothing leaves the process. There
+// is no second "enabled" flag, because two ways to say off is one way to get
+// it wrong.
+type Sentry struct {
+	// DSN is the endpoint out of the Sentry project's own settings. It is a
+	// credential only in the weak sense, in that it permits writing events and
+	// nothing else, but it is still not something to commit - which is why
+	// .env.example carries the name and no value.
+	//
+	// A DSN that is set but malformed is a startup error rather than a silent
+	// disabling, in line with the rule the rest of this package follows. The
+	// check is in boot.Sentry: the string's grammar belongs to the SDK, and
+	// this package does not import it.
+	DSN string
+
+	// Environment separates the events one deployment produces from another's.
+	// "local" is the honest answer for a laptop, and it is the answer that
+	// makes a laptop's events obvious the day there is a second source.
+	Environment string
+
+	// Release names the build an event came from, which is what makes "this
+	// started on Tuesday" a question with an answer. Empty lets the SDK read
+	// the VCS revision the Go toolchain stamps into a built binary; `go run`
+	// leaves no stamp, so this is worth setting by hand as soon as there are
+	// two builds to tell apart.
+	Release string
+}
+
 // RequireDatabase reports whether DATABASE_URL is set, for the nine binaries
 // that open a pool to say so themselves.
 //
@@ -257,6 +289,12 @@ func Load() (Config, error) {
 			EvidenceBucket: vars.str("S3_EVIDENCE_BUCKET", "dispute-evidence"),
 			MaxMessages:    vars.integer("SQS_MAX_MESSAGES", 10),
 			WaitSeconds:    vars.integer("SQS_WAIT_SECONDS", 20),
+		},
+
+		Sentry: Sentry{
+			DSN:         vars.str("SENTRY_DSN", ""),
+			Environment: vars.str("SENTRY_ENVIRONMENT", "local"),
+			Release:     vars.str("SENTRY_RELEASE", ""),
 		},
 	}
 	if err := errors.Join(vars.errs...); err != nil {

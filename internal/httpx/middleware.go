@@ -11,6 +11,10 @@ import (
 	"time"
 )
 
+// requestIDHeader carries the id both ways: a caller that already has one says
+// so with it, and every response echoes the one that was used.
+const requestIDHeader = "X-Request-Id"
+
 func newRequestID() string {
 	var buf [8]byte
 	if _, err := rand.Read(buf[:]); err != nil {
@@ -62,11 +66,18 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 func Observe(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			id := r.Header.Get("X-Request-Id")
+			id := r.Header.Get(requestIDHeader)
 			if id == "" {
 				id = newRequestID()
 			}
-			w.Header().Set("X-Request-Id", id)
+			w.Header().Set(requestIDHeader, id)
+
+			// Sentry, when it is on, is the middleware outside this one, and
+			// the hub it made for this request is on the context. This is the
+			// only place the id exists, so it is the only place that can put
+			// it there - and it has to be before the handler runs, because the
+			// panic below is what will need it.
+			tagRequestID(r, id)
 
 			ctx := r.Context()
 			recorder := &statusRecorder{ResponseWriter: w}

@@ -26,8 +26,16 @@ import (
 
 func main() {
 	logger := boot.Logger(true)
+	// Sentry batches, so an event only leaves on a flush. This one covers the
+	// ordinary exit and a panic unwinding out of run.
+	defer boot.FlushSentry()
+
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "error", err)
+		// And this one covers the exit that matters, because os.Exit skips the
+		// deferred call above and the line just logged is the one that says
+		// why the process is stopping.
+		boot.FlushSentry()
 		os.Exit(1)
 	}
 }
@@ -41,6 +49,9 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
+	if err := boot.Sentry(cfg.Sentry.DSN, cfg.Sentry.Environment, cfg.Sentry.Release); err != nil {
 		return err
 	}
 
@@ -72,13 +83,19 @@ func run(logger *slog.Logger) error {
 
 	handler := api.NewHandler(api.NewStore(pool), rdb, evidence, logger)
 
-	// Applied outermost-first: request id and logging wrap everything, then
-	// CORS answers preflights before anything is routed. The request deadline
-	// is not here: Routes applies it per route, so that the SSE stream can be
-	// registered unbounded without a middleware having to recognise its path.
+	// Applied outermost-first: Sentry's per-request hub, then request id and
+	// logging, then CORS answers preflights before anything is routed. The
+	// request deadline is not here: Routes applies it per route, so that the
+	// SSE stream can be registered unbounded without a middleware having to
+	// recognise its path.
+	//
+	// Sentry is outside Observe and not inside; httpx.Sentry says why at
+	// length, and the short version is that Observe's recover must stay the
+	// only one.
 	var root http.Handler = handler.Routes(cfg.API.RequestTimeout)
 	root = api.CORS(cfg.API.CORSOrigins)(root)
 	root = httpx.Observe(logger)(root)
+	root = httpx.Sentry()(root)
 
 	server := &http.Server{
 		Addr:              cfg.API.Addr,

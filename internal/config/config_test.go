@@ -148,3 +148,42 @@ func TestTheDatabaseRequirementBelongsToTheBinary(t *testing.T) {
 		t.Errorf("RequireDatabase with a database set: %v", err)
 	}
 }
+
+// Reporting is off unless a DSN says otherwise, which is what keeps a laptop's
+// errors on the laptop.
+func TestSentryIsOffByDefault(t *testing.T) {
+	t.Setenv("SENTRY_DSN", "")
+
+	cfg, err := loadWithout(t)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Sentry.DSN != "" {
+		t.Errorf("Sentry.DSN = %q, want empty", cfg.Sentry.DSN)
+	}
+	if cfg.Sentry.Environment != "local" {
+		t.Errorf("Sentry.Environment = %q, want local", cfg.Sentry.Environment)
+	}
+	if cfg.Sentry.Release != "" {
+		t.Errorf("Sentry.Release = %q, want empty so the SDK reads the VCS stamp", cfg.Sentry.Release)
+	}
+}
+
+func TestSentryReadsItsEnvironment(t *testing.T) {
+	t.Setenv("SENTRY_DSN", "https://publickey@o0.ingest.example/1")
+	t.Setenv("SENTRY_ENVIRONMENT", "staging")
+	t.Setenv("SENTRY_RELEASE", "abc1234")
+
+	cfg, err := loadWithout(t)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	want := Sentry{
+		DSN:         "https://publickey@o0.ingest.example/1",
+		Environment: "staging",
+		Release:     "abc1234",
+	}
+	if cfg.Sentry != want {
+		t.Errorf("Sentry = %+v, want %+v", cfg.Sentry, want)
+	}
+}
