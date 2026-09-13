@@ -59,6 +59,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -81,23 +84,23 @@ func run() error {
 	if *dryRun || question == "" {
 		fmt.Printf("tools: %s\n", strings.Join(registry.Names(), ", "))
 		fmt.Printf("budget: %d turn(s), $%.4f, %d output tokens per turn, model %s\n",
-			budget.MaxTurns, *maxCost, budget.MaxTokens, cfg.AnthropicModel)
+			budget.MaxTurns, *maxCost, budget.MaxTokens, cfg.Agent.AnthropicModel)
 		if question == "" && !*dryRun {
 			return fmt.Errorf("nothing asked: pass the question as the argument")
 		}
 		return nil
 	}
 
-	completer, err := agent.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel)
+	completer, err := agent.NewAnthropic(cfg.Agent.AnthropicAPIKey, cfg.Agent.AnthropicModel)
 	if err != nil {
 		return err
 	}
 	pricing := agent.Pricing{
-		InputMicrosPerMTok:  cfg.AgentInputPerMTok,
-		OutputMicrosPerMTok: cfg.AgentOutputPerMTok,
+		InputMicrosPerMTok:  cfg.Agent.InputPerMTok,
+		OutputMicrosPerMTok: cfg.Agent.OutputPerMTok,
 	}
 
-	result, err := agent.NewLoop(completer, registry, cfg.AnthropicModel, pricing, budget).
+	result, err := agent.NewLoop(completer, registry, cfg.Agent.AnthropicModel, pricing, budget).
 		Run(ctx, system, question)
 	if err != nil {
 		return err
@@ -114,7 +117,7 @@ func run() error {
 		fmt.Printf("\n[stopped: %s - the answer above is not finished]\n", result.Halt)
 	}
 
-	session := summarise(question, cfg.AnthropicModel, result)
+	session := summarise(question, cfg.Agent.AnthropicModel, result)
 	session.print(os.Stderr)
 	if *logPath != "" {
 		if err := session.appendTo(*logPath); err != nil {

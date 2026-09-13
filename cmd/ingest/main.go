@@ -42,6 +42,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -57,7 +60,7 @@ func run(logger *slog.Logger) error {
 
 	// One AWS config, built before either the secret resolver or the outbox
 	// publisher asks for a client.
-	awsCfg, err := awsx.Load(ctx, cfg.AWS())
+	awsCfg, err := awsx.Load(ctx, cfg.AWS.Config)
 	if err != nil {
 		return err
 	}
@@ -68,24 +71,24 @@ func run(logger *slog.Logger) error {
 	// secret store you cannot fall back from is a single point of failure
 	// wearing a security badge.
 	var resolver secrets.Resolver = secrets.FromDatabase{Pool: pool}
-	if cfg.WebhookSecretSource == "secretsmanager" {
+	if cfg.Ingest.WebhookSecretSource == "secretsmanager" {
 		resolver = secrets.NewFromManager(
 			awsx.SecretsManager(awsCfg),
-			cfg.WebhookSecretID,
-			cfg.WebhookSecretTTL,
+			cfg.Ingest.WebhookSecretID,
+			cfg.Ingest.WebhookSecretTTL,
 		)
 	}
-	logger.Info("webhook secrets", "source", cfg.WebhookSecretSource,
-		"rotation_latency", cfg.WebhookSecretTTL.String())
+	logger.Info("webhook secrets", "source", cfg.Ingest.WebhookSecretSource,
+		"rotation_latency", cfg.Ingest.WebhookSecretTTL.String())
 
 	handler := ingest.NewHandler(ingest.HandlerOptions{
 		Store:           store,
 		Secrets:         resolver,
-		Guard:           ingest.NewGuard(rdb, cfg.IdempotencyTTL),
-		MerchantLimiter: ingest.NewLimiter(rdb, "ratelimit:merchant", cfg.RateLimitPerMinute, cfg.RateLimitBurst),
-		IPLimiter:       ingest.NewLimiter(rdb, "ratelimit:ip", cfg.IPRateLimitPerMinute, cfg.IPRateLimitBurst),
-		Tolerance:       cfg.SignatureTolerance,
-		MaxBodyBytes:    cfg.MaxBodyBytes,
+		Guard:           ingest.NewGuard(rdb, cfg.Ingest.IdempotencyTTL),
+		MerchantLimiter: ingest.NewLimiter(rdb, "ratelimit:merchant", cfg.Ingest.RateLimitPerMinute, cfg.Ingest.RateLimitBurst),
+		IPLimiter:       ingest.NewLimiter(rdb, "ratelimit:ip", cfg.Ingest.IPRateLimitPerMinute, cfg.Ingest.IPRateLimitBurst),
+		Tolerance:       cfg.Ingest.SignatureTolerance,
+		MaxBodyBytes:    cfg.Ingest.MaxBodyBytes,
 		Logger:          logger,
 	})
 
@@ -120,7 +123,7 @@ func run(logger *slog.Logger) error {
 	})
 
 	server := &http.Server{
-		Addr:              cfg.Addr,
+		Addr:              cfg.Ingest.Addr,
 		Handler:           httpx.Observe(logger)(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -136,17 +139,17 @@ func run(logger *slog.Logger) error {
 	publisher := outbox.Live{
 		Next: outbox.SQSPublisher{
 			Client:   awsx.SQS(awsCfg),
-			QueueURL: cfg.SQSQueueURL,
+			QueueURL: cfg.AWS.QueueURL,
 		},
 		Client:  rdb,
 		Channel: api.LiveChannel,
 		Logger:  logger,
 	}
-	relay := outbox.NewRelay(pool, publisher, cfg.OutboxPollInterval, cfg.OutboxBatchSize, logger)
+	relay := outbox.NewRelay(pool, publisher, cfg.Ingest.OutboxPollInterval, cfg.Ingest.OutboxBatchSize, logger)
 
 	group, groupCtx := errgroup.WithContext(ctx)
 
-	logger.Info("ingest listening", "addr", cfg.Addr)
+	logger.Info("ingest listening", "addr", cfg.Ingest.Addr)
 	boot.ServeHTTP(groupCtx, group, server, cfg.ShutdownTimeout, logger)
 
 	group.Go(func() error {

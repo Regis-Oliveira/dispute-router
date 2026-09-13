@@ -58,16 +58,19 @@ func run(command string, args []string) error {
 	if err != nil {
 		return err
 	}
+	// No cfg.RequireDatabase here, unlike every other command: moving messages
+	// between two SQS queues never opens a pool, and this used to be the one
+	// binary that refused to start without a database it does not touch.
 
-	awsCfg, err := awsx.Load(ctx, cfg.AWS())
+	awsCfg, err := awsx.Load(ctx, cfg.AWS.Config)
 	if err != nil {
 		return err
 	}
 
 	redriver := &dlq.Redriver{
 		Client: awsx.SQS(awsCfg),
-		Source: cfg.SQSDLQURL,
-		Target: cfg.SQSQueueURL,
+		Source: cfg.AWS.DLQURL,
+		Target: cfg.AWS.QueueURL,
 	}
 
 	switch command {

@@ -40,6 +40,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -53,7 +56,7 @@ func run(logger *slog.Logger) error {
 	}
 	defer func() { _ = rdb.Close() }()
 
-	awsCfg, err := awsx.Load(ctx, cfg.AWS())
+	awsCfg, err := awsx.Load(ctx, cfg.AWS.Config)
 	if err != nil {
 		return err
 	}
@@ -63,7 +66,7 @@ func run(logger *slog.Logger) error {
 	// time anyone else opens it.
 	evidence := api.NewEvidence(
 		awsx.S3(awsCfg),
-		cfg.S3EvidenceBucket,
+		cfg.AWS.EvidenceBucket,
 		15*time.Minute,
 	)
 
@@ -72,12 +75,12 @@ func run(logger *slog.Logger) error {
 	// Applied outermost-first: request id and logging wrap everything, then
 	// CORS answers preflights before the timeout clock starts.
 	var root http.Handler = handler.Routes()
-	root = api.Timeout(cfg.RequestTimeout)(root)
-	root = api.CORS(cfg.CORSOrigins)(root)
+	root = api.Timeout(cfg.API.RequestTimeout)(root)
+	root = api.CORS(cfg.API.CORSOrigins)(root)
 	root = httpx.Observe(logger)(root)
 
 	server := &http.Server{
-		Addr:              cfg.APIAddr,
+		Addr:              cfg.API.Addr,
 		Handler:           root,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
@@ -93,7 +96,7 @@ func run(logger *slog.Logger) error {
 	// convention at 127.0.0.1:6060 for this binary.
 	group.Go(func() error { return debugx.Serve(groupCtx, cfg.PprofAddr, logger) })
 
-	logger.Info("api listening", "addr", cfg.APIAddr, "cors", cfg.CORSOrigins)
+	logger.Info("api listening", "addr", cfg.API.Addr, "cors", cfg.API.CORSOrigins)
 	boot.ServeHTTP(groupCtx, group, server, cfg.ShutdownTimeout, logger)
 
 	if err := group.Wait(); err != nil {

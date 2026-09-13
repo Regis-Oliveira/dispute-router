@@ -42,6 +42,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {

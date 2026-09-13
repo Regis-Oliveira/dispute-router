@@ -83,6 +83,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 
@@ -92,7 +95,7 @@ func run() error {
 	}
 	defer pool.Close()
 
-	embedder, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
+	embedder, err := agent.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
 	if err != nil {
 		return err
 	}

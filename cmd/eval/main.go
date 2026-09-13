@@ -63,6 +63,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -87,29 +90,29 @@ func run() error {
 		return list(ctx, pool, cases)
 	}
 
-	awsCfg, err := awsx.Load(ctx, cfg.AWS())
+	awsCfg, err := awsx.Load(ctx, cfg.AWS.Config)
 	if err != nil {
 		return err
 	}
 
-	completer, err := agent.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel)
+	completer, err := agent.NewAnthropic(cfg.Agent.AnthropicAPIKey, cfg.Agent.AnthropicModel)
 	if err != nil {
 		return err
 	}
-	model := cfg.AnthropicModel
+	model := cfg.Agent.AnthropicModel
 	fmt.Fprintf(os.Stderr, "running %d case(s) x %d sample(s) against %s, stopping at $%.2f\n",
 		len(cases), *samples, model, *maxCost)
 
 	pricing := agent.Pricing{
-		InputMicrosPerMTok:  cfg.AgentInputPerMTok,
-		OutputMicrosPerMTok: cfg.AgentOutputPerMTok,
+		InputMicrosPerMTok:  cfg.Agent.InputPerMTok,
+		OutputMicrosPerMTok: cfg.Agent.OutputPerMTok,
 	}
 
 	// Precedent retrieval. The embedder is optional: without a key the
 	// retriever uses full-text search, which is the baseline anyway.
 	var embedder agent.Embedder
-	if cfg.VoyageAPIKey != "" {
-		voyage, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
+	if cfg.Agent.VoyageAPIKey != "" {
+		voyage, err := agent.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
 		if err != nil {
 			return err
 		}
@@ -117,9 +120,9 @@ func run() error {
 	}
 
 	facts, err := agent.NewFactSource(api.NewStore(pool),
-		api.NewEvidence(awsx.S3(awsCfg), cfg.S3EvidenceBucket, time.Minute),
+		api.NewEvidence(awsx.S3(awsCfg), cfg.AWS.EvidenceBucket, time.Minute),
 		agent.FactSourceOptions{
-			Precedent: agent.NewRetriever(pool, embedder, cfg.PrecedentLimit),
+			Precedent: agent.NewRetriever(pool, embedder, cfg.Agent.PrecedentLimit),
 			// Available for every dispute, unlike precedent, which needs a
 			// claim to match on and therefore covers about one in seven.
 			BaseRates: pool,

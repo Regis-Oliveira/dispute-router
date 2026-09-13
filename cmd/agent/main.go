@@ -68,6 +68,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -88,7 +91,7 @@ func run(logger *slog.Logger) error {
 	}
 
 	if *batch <= 0 {
-		*batch = cfg.AgentBatchSize
+		*batch = cfg.Agent.BatchSize
 	}
 
 	// Nothing below this line is built in a dry run, so a dry run works with no
@@ -96,10 +99,10 @@ func run(logger *slog.Logger) error {
 	// question "what would this touch" should be answerable without being in a
 	// position to touch anything.
 	if *dryRun {
-		return dry(ctx, logger, runs, *disputeID, cfg.AgentMaxAttempts, *batch)
+		return dry(ctx, logger, runs, *disputeID, cfg.Agent.MaxAttempts, *batch)
 	}
 
-	awsCfg, err := awsx.Load(ctx, cfg.AWS())
+	awsCfg, err := awsx.Load(ctx, cfg.AWS.Config)
 	if err != nil {
 		return err
 	}
@@ -109,8 +112,8 @@ func run(logger *slog.Logger) error {
 	// Precedent retrieval. The embedder is optional: without a key the
 	// retriever uses full-text search, which is the baseline anyway.
 	var embedder agent.Embedder
-	if cfg.VoyageAPIKey != "" {
-		voyage, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
+	if cfg.Agent.VoyageAPIKey != "" {
+		voyage, err := agent.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
 		if err != nil {
 			return err
 		}
@@ -118,9 +121,9 @@ func run(logger *slog.Logger) error {
 	}
 
 	facts, err := agent.NewFactSource(store,
-		api.NewEvidence(evidence, cfg.S3EvidenceBucket, time.Minute),
+		api.NewEvidence(evidence, cfg.AWS.EvidenceBucket, time.Minute),
 		agent.FactSourceOptions{
-			Precedent: agent.NewRetriever(pool, embedder, cfg.PrecedentLimit),
+			Precedent: agent.NewRetriever(pool, embedder, cfg.Agent.PrecedentLimit),
 			// Available for every dispute, unlike precedent, which needs a
 			// claim to match on and therefore covers about one in seven.
 			BaseRates: pool,
@@ -151,15 +154,15 @@ func run(logger *slog.Logger) error {
 		return nil
 	}
 
-	completer, err := agent.NewAnthropic(cfg.AnthropicAPIKey, cfg.AnthropicModel)
+	completer, err := agent.NewAnthropic(cfg.Agent.AnthropicAPIKey, cfg.Agent.AnthropicModel)
 	if err != nil {
 		return err
 	}
-	model := cfg.AnthropicModel
+	model := cfg.Agent.AnthropicModel
 
 	pricing := agent.Pricing{
-		InputMicrosPerMTok:  cfg.AgentInputPerMTok,
-		OutputMicrosPerMTok: cfg.AgentOutputPerMTok,
+		InputMicrosPerMTok:  cfg.Agent.InputPerMTok,
+		OutputMicrosPerMTok: cfg.Agent.OutputPerMTok,
 	}
 
 	assistant := agent.NewAssistant(
@@ -169,8 +172,8 @@ func run(logger *slog.Logger) error {
 		runs,
 		agent.AssistantOptions{
 			Model:         model,
-			MaxCostMicros: cfg.AgentMaxCostMicros,
-			MaxAttempts:   cfg.AgentMaxAttempts,
+			MaxCostMicros: cfg.Agent.MaxCostMicros,
+			MaxAttempts:   cfg.Agent.MaxAttempts,
 			Logger:        logger,
 		},
 	)
@@ -184,7 +187,7 @@ func run(logger *slog.Logger) error {
 		return nil
 	}
 
-	return drain(ctx, logger, assistant, runs, cfg.AgentMaxAttempts, *batch)
+	return drain(ctx, logger, assistant, runs, cfg.Agent.MaxAttempts, *batch)
 }
 
 func dry(ctx context.Context, logger *slog.Logger, runs *agent.Runs, disputeID int64, maxAttempts, batch int) error {

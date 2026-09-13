@@ -38,6 +38,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -62,37 +65,37 @@ func run(logger *slog.Logger) error {
 	workers := worker.NewPool(worker.Options{
 		Store:             worker.NewStore(pool),
 		Deadlines:         deadlines,
-		Locks:             worker.NewLocks(rdb, cfg.WorkerLockTTL),
+		Locks:             worker.NewLocks(rdb, cfg.Worker.LockTTL),
 		Logger:            logger,
-		Concurrency:       cfg.WorkerConcurrency,
-		PollInterval:      cfg.WorkerPollInterval,
-		BatchSize:         cfg.WorkerBatchSize,
-		Lookahead:         cfg.WorkerLookahead,
-		ReconcileInterval: cfg.WorkerReconcileInterval,
+		Concurrency:       cfg.Worker.Concurrency,
+		PollInterval:      cfg.Worker.PollInterval,
+		BatchSize:         cfg.Worker.BatchSize,
+		Lookahead:         cfg.Worker.Lookahead,
+		ReconcileInterval: cfg.Worker.ReconcileInterval,
 		ID:                id,
 	})
 
 	// The SQS consumer schedules a dispute the moment it arrives; the reconcile
 	// pass inside the pool remains the guarantee that nothing is ever missed.
-	awsCfg, err := awsx.Load(ctx, cfg.AWS())
+	awsCfg, err := awsx.Load(ctx, cfg.AWS.Config)
 	if err != nil {
 		return err
 	}
 
 	consumer := worker.NewConsumer(worker.ConsumerOptions{
 		Client:      awsx.SQS(awsCfg),
-		QueueURL:    cfg.SQSQueueURL,
+		QueueURL:    cfg.AWS.QueueURL,
 		Deadlines:   deadlines,
 		Logger:      logger,
-		MaxMessages: int32(cfg.SQSMaxMessages),
-		WaitTime:    int32(cfg.SQSWaitSeconds),
+		MaxMessages: int32(cfg.AWS.MaxMessages),
+		WaitTime:    int32(cfg.AWS.WaitSeconds),
 	})
 
 	logger.Info("worker starting",
-		"concurrency", cfg.WorkerConcurrency,
-		"poll", cfg.WorkerPollInterval.String(),
-		"lookahead", cfg.WorkerLookahead.String(),
-		"reconcile", cfg.WorkerReconcileInterval.String(),
+		"concurrency", cfg.Worker.Concurrency,
+		"poll", cfg.Worker.PollInterval.String(),
+		"lookahead", cfg.Worker.Lookahead.String(),
+		"reconcile", cfg.Worker.ReconcileInterval.String(),
 		"id", id)
 
 	group, groupCtx := errgroup.WithContext(ctx)

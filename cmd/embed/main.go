@@ -47,6 +47,9 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	if err := cfg.RequireDatabase(); err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -63,17 +66,17 @@ func run(logger *slog.Logger) error {
 	// outstanding is a question about the database, and the answer costs
 	// nothing - charging a credential for it would be charging for the one
 	// question somebody asks precisely to decide whether to spend.
-	pending, err := agent.PendingEmbeddings(ctx, pool, cfg.VoyageModel)
+	pending, err := agent.PendingEmbeddings(ctx, pool, cfg.Agent.VoyageModel)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stderr, "%d claims outstanding for %s\n", pending, cfg.VoyageModel)
+	fmt.Fprintf(os.Stderr, "%d claims outstanding for %s\n", pending, cfg.Agent.VoyageModel)
 
 	if *dryRun || pending == 0 {
 		return nil
 	}
 
-	embedder, err := agent.NewVoyage(cfg.VoyageAPIKey, cfg.VoyageModel)
+	embedder, err := agent.NewVoyage(cfg.Agent.VoyageAPIKey, cfg.Agent.VoyageModel)
 	if err != nil {
 		return err
 	}
