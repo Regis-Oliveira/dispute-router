@@ -530,6 +530,9 @@ nothing ran.
   independent verifier, the guardrails, the evals, and the order it was built in.
 - **[`.spec/review-fixes/plan.md`](.spec/review-fixes/plan.md)** — what an
   adversarial review found on 2026-09-10 and the order to fix it in.
+- **[`.spec/go-review/plan.md`](.spec/go-review/plan.md)** — what an
+  idiomatic-Go review found on 2026-09-13 and the order to fix it in: bugs,
+  visibility and comments, structure, tests, documents, observability.
 
 `docs/` describes what is; `.spec/` describes what isn't yet. When something in
 `.spec/` ships, the decision worth keeping moves to `docs/` and the plan is
