@@ -1,8 +1,20 @@
 # Go review: fixes, visibility, structure, observability
 
-Status: **Phases 0, 1 and 2 done (2026-09-13); 5.2 built early. Phase 3 in
-progress: 3.1, 3.2, 3.4 and 3.7 done, with the agent-side and mains-side 3.9
-items.** Next in Phase 3: 3.3, 3.5, 3.6, 3.8 and the rest of 3.9. Source: a full
+Status: **Phases 0, 1 and 2 done (2026-09-13); 5.2 built early. Phase 3: 3.1,
+3.2, 3.3 (dispute states), 3.4, 3.5, 3.7 done, and most of 3.9.** Left in
+Phase 3: 3.3 (the agent's own vocabularies), 3.6, 3.8, and the api items of
+3.9.
+
+**A bug the refactor found, now fixed.** Migration 000003 added the
+`draft_ready` state on 2026-09-08 and it reached none of the five places that
+enumerate states by hand. The one that mattered was the simulator's money
+invariant, which had been failing: thirteen chargebacks awaiting review held
+1,184.38 USD that "money held equals the chargebacks still open" counted as
+unheld, and the four merchant discrepancies summed to exactly that. The ledger
+was right and the check was stale. `make verify` passes twelve of twelve now.
+The lesson is the one 3.3 is about: a vocabulary written out by hand in five
+places will drift, and the drift shows up as a failing money check five days
+later. Source: a full
 idiomatic-Go review of the module on 2026-09-13 (gofmt, vet, build clean;
 staticcheck one test nit; 120 findings across three package slices).
 
@@ -238,7 +250,7 @@ path returns nil from the body and carries `ErrUnknownTransaction` out in a
 captured variable. Extract `insertDelivery` from the duplicated block in
 `Record`/`RecordRuling`. Verify: `go test ./internal/ingest/ ./internal/worker/`.
 
-**3.3 Typed vocabularies.** New `internal/dispute` with `type State string`
+**3.3 Typed vocabularies.** **Dispute states DONE**; the agent's own vocabularies are in flight. New `internal/dispute` with `type State string`
 and the constants the SQL and Go both use (~60 literals today), following the
 `worker.Action` shape. In `internal/agent`: `type Outcome string`,
 `type Check string`, `type Recommendation string`, `type RetrievalMethod
@@ -252,7 +264,7 @@ stdout-JSON vs stderr-text logger choice becomes explicit per binary.
 `writeJSON`/`writeError`/`Ping` duplicated between `api` and `ingest` move to
 `internal/httpx`. Verify: every binary starts (`make stack` order).
 
-**3.5 Config grouped by consumer.** `config.Config` gains `Ingest`, `Worker`,
+**3.5 Config grouped by consumer.** **DONE**, and the premise was half wrong: the AWS settings all default to LocalStack, so the checks guarding them could never fire. The one live check was `DATABASE_URL`, demanded by `cmd/dlq`, which never opens a pool. It moved to `RequireDatabase`, called by the nine mains that do. `config.Config` gains `Ingest`, `Worker`,
 `Agent`, `AWS` sub-structs; the `SQS_QUEUE_URL`/`S3_EVIDENCE_BUCKET`
 requirement moves to the binaries that use them (`ask`, `embed`, `retrieval`,
 `mcp` currently need AWS variables they never read). `loadDotEnv` stops
@@ -285,25 +297,23 @@ so it lands on settled code.
   `FactSourceOptions` struct with `evidence != nil` validated in the
   constructor.
 - DONE `eval.Runner`: kept the exported fields, dropped the setters.
-- `worker.Locks` returns a `*Lock` with `Release(ctx)`; release and
-  `rescheduleSoon` use `context.WithoutCancel` with a 2 s timeout so shutdown
-  does not leave locks for the TTL.
-- `ingest.Handler.ServeHTTP` (190 lines) splits into `authenticate` and
-  per-type `record` functions.
+- DONE `worker.Locks` returns a `*Lock` with `Release(ctx)`; release and both
+  reschedules use `context.WithoutCancel` with a 2 s timeout.
+- DONE `ingest.Handler.ServeHTTP` is ~80 lines, numbered against the doc
+  comment, with a small `delivery` interface replacing three type switches.
 - DONE `cmd/eval`'s `print` is `printReport`; `cmd/ask` takes an `io.Writer`.
 - DONE the loop returns only completed tool calls; `normalise` always returns
   a fresh slice.
 - `api.Timeout` wraps per route instead of matching `/api/stream` by string;
   `Routes()` returns `http.Handler`.
-- `api/decisions.go` reuses `builder` from `filters.go` and copies `args`
-  before appending (slice aliasing).
+- DONE `api/decisions.go` reuses `builder` and copies `args` before appending.
 - DONE `Budget.MaxCostMicros == 0` means "no ceiling" everywhere.
 - DONE one `apiError` with `Retryable()`, `Retry-After` honoured and capped at
   a minute, the backoff comment corrected to "linear". Consequence to keep in
   mind: the embedding client now retries 5xx, not only 429, under the same
   three-attempt ceiling.
-- `debugx`: `syscall.Getrusage` behind `//go:build unix` with a stub; the
-  150-line HTML page moves to `live.html` with `//go:embed`.
+- DONE `debugx`: `syscall.Getrusage` behind `//go:build unix` with a stub, so
+  the module cross-compiles for Windows; `live.html` with `//go:embed`.
 
 ---
 
