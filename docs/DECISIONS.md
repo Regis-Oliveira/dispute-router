@@ -532,6 +532,77 @@ confidence.
 
 ---
 
+## Go shape
+
+An idiomatic-Go review of the whole module on 2026-09-13 found no build, format
+or `go vet` problem and 120 findings about shape. `CLAUDE.md` carries the rules
+that came out of it and `docs/go-conventions.md` teaches the reasoning. What
+belongs here is the handful of decisions that went the other way from the
+obvious one, and the one bug that justified the whole exercise.
+
+**A hand-written vocabulary drifted until a money check failed.** Migration
+000003 added the `draft_ready` state and the value reached none of the five
+places that enumerate states in prose: the API's filter whitelist, the
+dashboard's union and its filter control, the tool schema the agent reads, and
+the simulator's money invariant. The last one is why `make verify` had been
+failing. Thirteen chargebacks awaiting review held 1,184.38 USD that "money held
+equals the chargebacks still open" counted as unheld, and the four merchant
+discrepancies summed to exactly that. The ledger was right and the check was
+stale. `internal/dispute` now holds the states and kinds as typed constants, and
+`internal/agent` its own seven vocabularies, so the compiler is one of the
+readers. The honest limit is worth recording: two of those five readers are
+TypeScript and one is a struct tag, so the compiler was never going to catch
+this one. The failing invariant is what did.
+
+**A state stays a literal inside a query when a partial index depends on it.**
+Five queries keep their literal rather than binding a constant, because the
+planner cannot prove a bind parameter implies an index predicate, and the
+indexes were created with exactly those literals in their `WHERE`. Each carries
+a comment saying so. The opposite decision was taken for the review vocabulary
+after checking that no index on `agent_runs` names `submitted` or `rejected`.
+
+**One cross-package literal cannot be typed, and says so.** `internal/api`
+matches `a.outcome = 'rejected'`, a value `internal/agent` owns, but `agent`
+imports `api`, so importing back is a cycle. The constant stays a string with a
+comment naming `agent.OutcomeRejected` as the other end, and a test in
+`package api_test` pins the two together — which is also where `ReviewFinding`
+and `agent.Finding` are pinned, a test a comment had claimed existed for weeks
+before anyone wrote it.
+
+**Three packages, not two.** Splitting transport out of `internal/agent` left a
+question about the tool loop. Folding it into `internal/llm` would make the
+transport import the read model, since the registry is built from the dispute
+tools, and `cmd/embed` would drag the read API in just to embed vectors.
+Leaving it in `internal/agent` means `cmd/ask` imports the whole representment
+flow to run a loop that never touches it. So `internal/toolloop` is its own
+package, and `internal/llm` imports nothing else in this module.
+
+**The ledger takes a value, and one trailing string stays positional.** Three
+adjacent `int64` parameters meant a swap compiled and posted money to the wrong
+merchant. `Entry` fixes that. The remaining `reasonCode` stayed a parameter
+because the hazard is adjacency: an argument with no same-typed neighbour has
+nothing to swap with, and folding it in would give three of the four functions
+a field they ignore.
+
+**Exported is a promise, with three exceptions.** Inside `internal/` a
+capitalized name is a promise to the other packages of this module, so about
+seventy names that no other package read went lowercase. Enum constants of an
+exported type stay exported, `Err` sentinels stay exported because a sentinel
+exists to be matched, and `signing.Sign`, `Verify`, `Compute` and `ParseHeader`
+stay exported although only `VerifyAny` has an outside caller: a signing package
+that exposes verification and hides signing is the odder shape.
+
+**The integration tag is drawn at what a test destroys or demands, not what it
+touches.** A test that flushes a shared Redis database, or creates and drops a
+PostgreSQL one, carries `//go:build integration`; `make go-test-integration`
+runs those. Tests that create uniquely named queues or secrets and delete
+exactly those keep their environment-variable gate, because they destroy nothing
+pre-existing. The point of the split is that `make go-test` needs no privilege
+beyond the application's own tables — which is a property only if it is applied
+everywhere, so a half-tagged state was worse than either alternative.
+
+---
+
 ## Environment facts that cost time to rediscover
 
 - Postgres is on **5433** (5432 was taken); Redis 6379; LocalStack 4566.
