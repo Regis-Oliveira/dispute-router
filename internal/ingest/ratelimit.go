@@ -59,6 +59,8 @@ type Limiter struct {
 	burst  int
 }
 
+// NewLimiter builds a bucket family under prefix, refilling perMinute tokens
+// up to burst.
 func NewLimiter(rdb *redis.Client, prefix string, perMinute, burst int) *Limiter {
 	return &Limiter{
 		rdb:    rdb,

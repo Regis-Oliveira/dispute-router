@@ -25,10 +25,12 @@ var (
 	ErrUnknownTransaction = errors.New("unknown transaction")
 )
 
+// Store is the ingest write path into Postgres.
 type Store struct {
 	pool *pgxpool.Pool
 }
 
+// NewStore wraps a connection pool.
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
@@ -45,6 +47,7 @@ type Merchant struct {
 	AutoRefundCeilingMinor *int64
 }
 
+// MerchantByExternalID looks up the merchant a webhook claims to be from.
 func (s *Store) MerchantByExternalID(ctx context.Context, externalID string) (Merchant, error) {
 	var m Merchant
 	err := s.pool.QueryRow(ctx, `
@@ -62,8 +65,8 @@ func (s *Store) MerchantByExternalID(ctx context.Context, externalID string) (Me
 	return m, nil
 }
 
-// RecordResult reports what a Record call actually did.
-type RecordResult struct {
+// recordResult reports what record or recordRuling actually did.
+type recordResult struct {
 	WebhookEventID int64
 	DisputeID      int64
 	// Duplicate is true when Postgres, not Redis, caught the repeat - which
@@ -71,23 +74,23 @@ type RecordResult struct {
 	Duplicate bool
 }
 
-// Record durably stores one delivery.
+// record durably stores one delivery.
 //
 // Everything below happens in a single transaction, which is the whole point:
 // the raw payload, the dispute it produced, its first audit event and the
 // outbox message telling the rest of the system about it either all exist or
 // none of them do. There is no window where a dispute exists but nothing
 // downstream will ever hear about it.
-func (s *Store) Record(
+func (s *Store) record(
 	ctx context.Context,
 	merchant Merchant,
 	raw []byte,
 	signature string,
 	event DisputeWebhook,
-) (RecordResult, error) {
+) (recordResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("begin: %w", err)
+		return recordResult{}, fmt.Errorf("begin: %w", err)
 	}
 	// Rollback after a successful Commit is a no-op, so this is safe to defer
 	// unconditionally and is the only thing that guarantees the transaction is
@@ -109,10 +112,10 @@ func (s *Store) Record(
 	if errors.Is(err, pgx.ErrNoRows) {
 		// ON CONFLICT DO NOTHING returned nothing, so this key already exists.
 		// Not an error: it is the durable idempotency check doing its job.
-		return RecordResult{Duplicate: true}, nil
+		return recordResult{Duplicate: true}, nil
 	}
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("insert webhook_event: %w", err)
+		return recordResult{}, fmt.Errorf("insert webhook_event: %w", err)
 	}
 
 	var transactionID int64
@@ -125,15 +128,15 @@ func (s *Store) Record(
 		// Commit the failure rather than discarding it. Rolling back here would
 		// erase the evidence and let the same bad event arrive again forever.
 		if markErr := markFailed(ctx, tx, webhookEventID, "unknown transaction "+event.Data.TransactionID); markErr != nil {
-			return RecordResult{}, markErr
+			return recordResult{}, markErr
 		}
 		if commitErr := tx.Commit(ctx); commitErr != nil {
-			return RecordResult{}, fmt.Errorf("commit failed webhook_event: %w", commitErr)
+			return recordResult{}, fmt.Errorf("commit failed webhook_event: %w", commitErr)
 		}
-		return RecordResult{WebhookEventID: webhookEventID}, ErrUnknownTransaction
+		return recordResult{WebhookEventID: webhookEventID}, ErrUnknownTransaction
 	}
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("load transaction: %w", err)
+		return recordResult{}, fmt.Errorf("load transaction: %w", err)
 	}
 
 	var disputeID int64
@@ -155,15 +158,15 @@ func (s *Store) Record(
 		// A second distinct event describing a dispute already on file. The
 		// event log keeps the delivery; the dispute is left as it is.
 		if markErr := markProcessed(ctx, tx, webhookEventID); markErr != nil {
-			return RecordResult{}, markErr
+			return recordResult{}, markErr
 		}
 		if commitErr := tx.Commit(ctx); commitErr != nil {
-			return RecordResult{}, fmt.Errorf("commit: %w", commitErr)
+			return recordResult{}, fmt.Errorf("commit: %w", commitErr)
 		}
-		return RecordResult{WebhookEventID: webhookEventID, Duplicate: true}, nil
+		return recordResult{WebhookEventID: webhookEventID, Duplicate: true}, nil
 	}
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("insert dispute: %w", err)
+		return recordResult{}, fmt.Errorf("insert dispute: %w", err)
 	}
 
 	// A chargeback is a clawback that has already happened: the acquirer took
@@ -172,7 +175,7 @@ func (s *Store) Record(
 	if event.Data.Kind == "chargeback" {
 		if err := ledger.Hold(ctx, tx, disputeID, merchant.ID, event.Data.AmountMinor,
 			event.Data.Currency, event.Data.OpenedAt, event.Data.ReasonCode); err != nil {
-			return RecordResult{}, err
+			return recordResult{}, err
 		}
 	}
 
@@ -183,7 +186,7 @@ func (s *Store) Record(
 		"kind":             event.Data.Kind,
 	})
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("marshal dispute event detail: %w", err)
+		return recordResult{}, fmt.Errorf("marshal dispute event detail: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -191,7 +194,7 @@ func (s *Store) Record(
 		VALUES ($1, NULL, 'received', 'system', $2::jsonb, $3)`,
 		disputeID, string(detail), event.Data.OpenedAt,
 	); err != nil {
-		return RecordResult{}, fmt.Errorf("insert dispute_event: %w", err)
+		return recordResult{}, fmt.Errorf("insert dispute_event: %w", err)
 	}
 
 	// The outbox message commits with the dispute. A publish to SQS cannot be
@@ -207,7 +210,7 @@ func (s *Store) Record(
 		"deadline_at":  event.Data.RespondBy,
 	})
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("marshal outbox payload: %w", err)
+		return recordResult{}, fmt.Errorf("marshal outbox payload: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -215,18 +218,18 @@ func (s *Store) Record(
 		VALUES ('dispute', $1, 'dispute.received', $2::jsonb)`,
 		disputeID, string(outboxPayload),
 	); err != nil {
-		return RecordResult{}, fmt.Errorf("insert outbox: %w", err)
+		return recordResult{}, fmt.Errorf("insert outbox: %w", err)
 	}
 
 	if err := markProcessed(ctx, tx, webhookEventID); err != nil {
-		return RecordResult{}, err
+		return recordResult{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return RecordResult{}, fmt.Errorf("commit: %w", err)
+		return recordResult{}, fmt.Errorf("commit: %w", err)
 	}
 
-	return RecordResult{WebhookEventID: webhookEventID, DisputeID: disputeID}, nil
+	return recordResult{WebhookEventID: webhookEventID, DisputeID: disputeID}, nil
 }
 
 func markProcessed(ctx context.Context, tx pgx.Tx, id int64) error {
@@ -262,22 +265,22 @@ func (s *Store) Ping(ctx context.Context) error {
 // argued, or that has already been ruled on.
 var ErrNotRepresented = errors.New("dispute is not awaiting a ruling")
 
-// RecordRuling applies the network's verdict.
+// recordRuling applies the network's verdict.
 //
 // This is what closes the lifecycle. Until it existed, "represented" was
 // terminal: the merchant submitted evidence and the system had no way to learn
 // what came of it, so the ledger could never show the outcome of a fight it had
 // started.
-func (s *Store) RecordRuling(
+func (s *Store) recordRuling(
 	ctx context.Context,
 	merchant Merchant,
 	raw []byte,
 	signature string,
 	event RulingWebhook,
-) (RecordResult, error) {
+) (recordResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("begin: %w", err)
+		return recordResult{}, fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -291,10 +294,10 @@ func (s *Store) RecordRuling(
 	).Scan(&webhookEventID)
 
 	if errors.Is(err, pgx.ErrNoRows) {
-		return RecordResult{Duplicate: true}, nil
+		return recordResult{Duplicate: true}, nil
 	}
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("insert webhook_event: %w", err)
+		return recordResult{}, fmt.Errorf("insert webhook_event: %w", err)
 	}
 
 	// Only a represented dispute can be ruled on, and the state test is part of
@@ -321,15 +324,15 @@ func (s *Store) RecordRuling(
 		// that is not awaiting one is worth being able to look at later.
 		if markErr := markFailed(ctx, tx, webhookEventID,
 			"no represented dispute "+event.Data.DisputeID); markErr != nil {
-			return RecordResult{}, markErr
+			return recordResult{}, markErr
 		}
 		if commitErr := tx.Commit(ctx); commitErr != nil {
-			return RecordResult{}, fmt.Errorf("commit failed webhook_event: %w", commitErr)
+			return recordResult{}, fmt.Errorf("commit failed webhook_event: %w", commitErr)
 		}
-		return RecordResult{WebhookEventID: webhookEventID}, ErrNotRepresented
+		return recordResult{WebhookEventID: webhookEventID}, ErrNotRepresented
 	}
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("apply ruling: %w", err)
+		return recordResult{}, fmt.Errorf("apply ruling: %w", err)
 	}
 
 	detail, err := json.Marshal(map[string]any{
@@ -339,7 +342,7 @@ func (s *Store) RecordRuling(
 		"note":             event.Data.Note,
 	})
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("marshal ruling detail: %w", err)
+		return recordResult{}, fmt.Errorf("marshal ruling detail: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -347,7 +350,7 @@ func (s *Store) RecordRuling(
 		VALUES ($1, 'represented', $2, 'network', $3::jsonb, $4)`,
 		disputeID, event.Data.Outcome, string(detail), event.Data.DecidedAt,
 	); err != nil {
-		return RecordResult{}, fmt.Errorf("insert dispute_event: %w", err)
+		return recordResult{}, fmt.Errorf("insert dispute_event: %w", err)
 	}
 
 	// Both outcomes move money now, because the funds were held when the
@@ -361,7 +364,7 @@ func (s *Store) RecordRuling(
 			event.Data.DecidedAt)
 	}
 	if err != nil {
-		return RecordResult{}, err
+		return recordResult{}, err
 	}
 
 	payload, err := json.Marshal(map[string]any{
@@ -372,7 +375,7 @@ func (s *Store) RecordRuling(
 		"currency":     currency,
 	})
 	if err != nil {
-		return RecordResult{}, fmt.Errorf("marshal outbox payload: %w", err)
+		return recordResult{}, fmt.Errorf("marshal outbox payload: %w", err)
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -380,15 +383,15 @@ func (s *Store) RecordRuling(
 		VALUES ('dispute', $1, $2, $3::jsonb)`,
 		disputeID, "dispute."+event.Data.Outcome, string(payload),
 	); err != nil {
-		return RecordResult{}, fmt.Errorf("insert outbox: %w", err)
+		return recordResult{}, fmt.Errorf("insert outbox: %w", err)
 	}
 
 	if err := markProcessed(ctx, tx, webhookEventID); err != nil {
-		return RecordResult{}, err
+		return recordResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return RecordResult{}, fmt.Errorf("commit: %w", err)
+		return recordResult{}, fmt.Errorf("commit: %w", err)
 	}
 
-	return RecordResult{WebhookEventID: webhookEventID, DisputeID: disputeID}, nil
+	return recordResult{WebhookEventID: webhookEventID, DisputeID: disputeID}, nil
 }

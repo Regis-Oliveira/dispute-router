@@ -62,7 +62,7 @@ func TestValidateRejects(t *testing.T) {
 		"long currency":         func(e *DisputeWebhook) { e.Data.Currency = "USDC" },
 		"deadline before open":  func(e *DisputeWebhook) { e.Data.RespondBy = e.Data.OpenedAt.Add(-time.Hour) },
 		"deadline already past": func(e *DisputeWebhook) { e.Data.RespondBy = reference.Add(-time.Hour) },
-		"claim too long":        func(e *DisputeWebhook) { e.Data.CardholderClaim = strings.Repeat("x", MaxClaimBytes+1) },
+		"claim too long":        func(e *DisputeWebhook) { e.Data.CardholderClaim = strings.Repeat("x", maxClaimBytes+1) },
 		"claim not utf-8":       func(e *DisputeWebhook) { e.Data.CardholderClaim = "not\xffutf8" },
 	}
 
@@ -79,15 +79,15 @@ func TestValidateRejects(t *testing.T) {
 
 func TestDecodeRejectsUnknownFields(t *testing.T) {
 	body := []byte(`{"id":"evt_1","type":"dispute.opened","surprise":true}`)
-	if _, err := Decode(body); !errors.Is(err, ErrInvalidEvent) {
-		t.Fatalf("Decode() = %v, want ErrInvalidEvent", err)
+	if _, err := decodeDispute(body); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("decodeDispute() = %v, want ErrInvalidEvent", err)
 	}
 }
 
 func TestDecodeRejectsTrailingContent(t *testing.T) {
 	body := []byte(`{"id":"evt_1","type":"dispute.opened"} {"id":"evt_2"}`)
-	if _, err := Decode(body); !errors.Is(err, ErrInvalidEvent) {
-		t.Fatalf("Decode() = %v, want ErrInvalidEvent", err)
+	if _, err := decodeDispute(body); !errors.Is(err, ErrInvalidEvent) {
+		t.Fatalf("decodeDispute() = %v, want ErrInvalidEvent", err)
 	}
 }
 
@@ -99,12 +99,12 @@ func TestDecodeRejectsFractionalAmount(t *testing.T) {
 		"card_network":"visa","reason_code":"10.4","amount_minor":49.99,"currency":"USD",
 		"opened_at":"2026-03-01T12:00:00Z","respond_by":"2026-03-03T12:00:00Z"}}`)
 
-	_, err := Decode(body)
+	_, err := decodeDispute(body)
 	if err == nil {
-		t.Fatal("Decode() accepted a fractional amount_minor")
+		t.Fatal("decodeDispute() accepted a fractional amount_minor")
 	}
 	if !strings.Contains(err.Error(), "amount_minor") {
-		t.Fatalf("Decode() = %v, want an error naming amount_minor", err)
+		t.Fatalf("decodeDispute() = %v, want an error naming amount_minor", err)
 	}
 }
 
@@ -167,21 +167,21 @@ func TestPeekTypeRoutesBeforeDecoding(t *testing.T) {
 		`{"id":"evt_3","type":"dispute.updated"}`:                        "dispute.updated",
 	}
 	for body, want := range tests {
-		_, got, err := PeekType([]byte(body))
+		_, got, err := peekType([]byte(body))
 		if err != nil {
-			t.Errorf("PeekType(%s) = %v", body, err)
+			t.Errorf("peekType(%s) = %v", body, err)
 			continue
 		}
 		if got != want {
-			t.Errorf("PeekType(%s) = %q, want %q", body, got, want)
+			t.Errorf("peekType(%s) = %q, want %q", body, got, want)
 		}
 	}
 }
 
 func TestPeekTypeRejectsWhatItCannotRoute(t *testing.T) {
 	for _, body := range []string{`{"id":"evt_1"}`, `not json`, `[]`, ``} {
-		if _, _, err := PeekType([]byte(body)); !errors.Is(err, ErrInvalidEvent) {
-			t.Errorf("PeekType(%q) = %v, want ErrInvalidEvent", body, err)
+		if _, _, err := peekType([]byte(body)); !errors.Is(err, ErrInvalidEvent) {
+			t.Errorf("peekType(%q) = %v, want ErrInvalidEvent", body, err)
 		}
 	}
 }
@@ -193,7 +193,7 @@ func TestTheDecodersDoNotAcceptEachOthersBodies(t *testing.T) {
 		"data":{"dispute_id":"d","merchant_id":"m","outcome":"won",
 		"decided_at":"2026-03-01T12:00:00Z","note":"n"}}`
 
-	if _, err := Decode([]byte(ruling)); err == nil {
+	if _, err := decodeDispute([]byte(ruling)); err == nil {
 		t.Error("the dispute decoder accepted a ruling body")
 	}
 
@@ -202,7 +202,7 @@ func TestTheDecodersDoNotAcceptEachOthersBodies(t *testing.T) {
 		"card_network":"visa","reason_code":"10.4","amount_minor":100,"currency":"USD",
 		"opened_at":"2026-03-01T12:00:00Z","respond_by":"2026-03-03T12:00:00Z"}}`
 
-	if _, err := DecodeRuling([]byte(opened)); err == nil {
+	if _, err := decodeRuling([]byte(opened)); err == nil {
 		t.Error("the ruling decoder accepted a dispute body")
 	}
 }

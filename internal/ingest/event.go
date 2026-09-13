@@ -22,6 +22,7 @@ type DisputeWebhook struct {
 	Data      DisputeData `json:"data"`
 }
 
+// DisputeData is the dispute inside a DisputeWebhook.
 type DisputeData struct {
 	DisputeID     string `json:"dispute_id"`
 	MerchantID    string `json:"merchant_id"`
@@ -48,20 +49,20 @@ type DisputeData struct {
 	CardholderClaim string `json:"cardholder_claim,omitempty"`
 }
 
-// MaxClaimBytes bounds the cardholder's claim at the door. Four thousand bytes
+// maxClaimBytes bounds the cardholder's claim at the door. Four thousand bytes
 // is several paragraphs - longer than any claim an issuer relays - and short
 // enough that the prompt boundary's own cut (internal/agent) is rarely reached.
-const MaxClaimBytes = 4000
+const maxClaimBytes = 4000
 
 var (
 	validKinds    = map[string]bool{"alert": true, "chargeback": true}
 	validNetworks = map[string]bool{"visa": true, "mastercard": true, "amex": true, "discover": true}
 )
 
-// Decode parses a raw body strictly: unknown fields are an error rather than a
-// shrug. A processor that starts sending a field this service silently drops is
-// a change worth noticing at the boundary, not three phases later.
-func Decode(body []byte) (DisputeWebhook, error) {
+// decodeDispute parses a raw body strictly: unknown fields are an error rather
+// than a shrug. A processor that starts sending a field this service silently
+// drops is a change worth noticing at the boundary, not three phases later.
+func decodeDispute(body []byte) (DisputeWebhook, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 
@@ -116,8 +117,8 @@ func (e DisputeWebhook) Validate(now time.Time) error {
 		// A deadline already in the past cannot be raced. Taking it would put a
 		// dispute in the queue that the worker can only ever mark expired.
 		return fmt.Errorf("%w: respond_by is already in the past", ErrInvalidEvent)
-	case len(d.CardholderClaim) > MaxClaimBytes:
-		return fmt.Errorf("%w: cardholder_claim exceeds %d bytes", ErrInvalidEvent, MaxClaimBytes)
+	case len(d.CardholderClaim) > maxClaimBytes:
+		return fmt.Errorf("%w: cardholder_claim exceeds %d bytes", ErrInvalidEvent, maxClaimBytes)
 	case !utf8.ValidString(d.CardholderClaim):
 		return fmt.Errorf("%w: cardholder_claim is not valid UTF-8", ErrInvalidEvent)
 	}
@@ -147,6 +148,7 @@ type RulingWebhook struct {
 	Data      RulingData `json:"data"`
 }
 
+// RulingData is the verdict inside a RulingWebhook.
 type RulingData struct {
 	DisputeID  string `json:"dispute_id"`
 	MerchantID string `json:"merchant_id"`
@@ -158,18 +160,20 @@ type RulingData struct {
 }
 
 const (
-	TypeDisputeOpened   = "dispute.opened"
+	// TypeDisputeOpened is a new dispute from the processor.
+	TypeDisputeOpened = "dispute.opened"
+	// TypeDisputeResolved is the network's ruling on a representment.
 	TypeDisputeResolved = "dispute.resolved"
 )
 
 var validOutcomes = map[string]bool{"won": true, "lost": true}
 
-// PeekType reads just enough of a body to route it.
+// peekType reads just enough of a body to route it.
 //
 // Deliberately lenient where the typed decoders are strict: this only has to
 // answer "which decoder", and a body it cannot classify is rejected by that
 // decoder with a message about the actual problem.
-func PeekType(body []byte) (id string, eventType string, err error) {
+func peekType(body []byte) (id string, eventType string, err error) {
 	var peek struct {
 		ID   string `json:"id"`
 		Type string `json:"type"`
@@ -183,7 +187,8 @@ func PeekType(body []byte) (id string, eventType string, err error) {
 	return peek.ID, peek.Type, nil
 }
 
-func DecodeRuling(body []byte) (RulingWebhook, error) {
+// decodeRuling parses a ruling body with the same strictness as decodeDispute.
+func decodeRuling(body []byte) (RulingWebhook, error) {
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 
@@ -197,6 +202,7 @@ func DecodeRuling(body []byte) (RulingWebhook, error) {
 	return event, nil
 }
 
+// Validate rejects a ruling that names no dispute or gives no verdict.
 func (e RulingWebhook) Validate() error {
 	switch {
 	case e.ID == "":

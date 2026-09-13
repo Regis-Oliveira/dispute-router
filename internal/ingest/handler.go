@@ -110,7 +110,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The type decides which decoder runs. Each one is strict about its own
 	// shape, so a ruling body cannot be quietly read as a dispute.
-	_, eventType, err := PeekType(body)
+	_, eventType, err := peekType(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -125,14 +125,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	switch eventType {
 	case TypeDisputeOpened:
-		opened, err = Decode(body)
+		opened, err = decodeDispute(body)
 		if err == nil {
 			err = opened.Validate(h.now())
 		}
 		eventID, merchantID = opened.ID, opened.Data.MerchantID
 
 	case TypeDisputeResolved:
-		ruling, err = DecodeRuling(body)
+		ruling, err = decodeRuling(body)
 		if err == nil {
 			err = ruling.Validate()
 		}
@@ -207,17 +207,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var (
-		result     RecordResult
+		result     recordResult
 		recordErr  error
 		unlinkable error
 	)
 
 	switch eventType {
 	case TypeDisputeOpened:
-		result, recordErr = h.store.Record(ctx, merchant, body, signatureValue, opened)
+		result, recordErr = h.store.record(ctx, merchant, body, signatureValue, opened)
 		unlinkable = ErrUnknownTransaction
 	case TypeDisputeResolved:
-		result, recordErr = h.store.RecordRuling(ctx, merchant, body, signatureValue, ruling)
+		result, recordErr = h.store.recordRuling(ctx, merchant, body, signatureValue, ruling)
 		unlinkable = ErrNotRepresented
 	}
 

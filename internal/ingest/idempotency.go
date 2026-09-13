@@ -19,6 +19,7 @@ type Guard struct {
 	ttl time.Duration
 }
 
+// NewGuard wraps a Redis client; ttl is how long a seen event id is remembered.
 func NewGuard(rdb *redis.Client, ttl time.Duration) *Guard {
 	return &Guard{rdb: rdb, ttl: ttl}
 }
