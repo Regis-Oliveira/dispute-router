@@ -8,8 +8,43 @@
 // it maps a Definition onto mcp.AddTool and marks every one of them read-only.
 //
 // The whole design question for an MCP server is not "what can I expose" but
-// "what should I". The list at the bottom of this file records what was
-// deliberately left out - that list is the more interesting half.
+// "what should I". The list below records what was deliberately left out -
+// that list is the more interesting half.
+//
+// # What is deliberately NOT here, and why
+//
+// This list is the design. Every entry was easy to add and is missing on
+// purpose. It applies to the Messages API envelope in internal/agent too -
+// there is one tool set, so there is one boundary.
+//
+//   - Any tool that writes. No refund, no state change, no evidence upload.
+//     A model decides on its own when to call things, prompted partly by text
+//     other people wrote. The blast radius of that should not include money.
+//
+//   - A generic run_query tool. It is the convenient thing to build and the
+//     wrong thing to ship: it collapses every access decision into "can it
+//     write SQL", and no amount of prompting re-establishes the boundary.
+//
+//   - Webhook signing secrets. Obvious, and worth stating: they are the one
+//     credential in this system that lets somebody forge a dispute.
+//
+//   - Presigned evidence URLs. list_evidence would be genuinely useful, but a
+//     presigned URL is a bearer credential with a TTL, and handing one to a
+//     model puts it in a transcript that gets logged, replayed and pasted into
+//     tickets. File names and sizes are the useful part; the URL is not.
+//
+//   - Unmasked customer emails. Theirs, not the platform's, and irrelevant to
+//     whether a dispute is winnable. customer_ref already answers "is this the
+//     same person".
+//
+// On prompt injection: the fields these tools return are controlled
+// vocabularies - reason codes, states, card networks. The one free-text field
+// on a dispute, the cardholder's own claim, is deliberately NOT returned here:
+// this transport has no way to mark a span as untrusted, so get_dispute drops
+// it and only internal/agent, which quarantines it, asks for it. The
+// mitigation that survives either way is the first entry above: read-only
+// tools mean the worst a hostile string can do is produce a wrong answer,
+// not a wrong refund.
 package mcpserver
 
 import (
@@ -21,10 +56,12 @@ import (
 	"github.com/regisoliveira/dispute-router/internal/disputetools"
 )
 
+// Server is the MCP envelope around the dispute tools.
 type Server struct {
 	tools *disputetools.Set
 }
 
+// New binds the tools to a read model.
 func New(store *api.Store) *Server {
 	return &Server{tools: disputetools.New(store)}
 }
@@ -79,38 +116,3 @@ func lift[In, Out any](fn func(context.Context, In) (Out, error)) mcp.ToolHandle
 		return nil, out, err
 	}
 }
-
-// What is deliberately NOT here, and why
-//
-// This list is the design. Every entry was easy to add and is missing on
-// purpose. It applies to the Messages API envelope in internal/agent too -
-// there is one tool set, so there is one boundary.
-//
-//   - Any tool that writes. No refund, no state change, no evidence upload.
-//     A model decides on its own when to call things, prompted partly by text
-//     other people wrote. The blast radius of that should not include money.
-//
-//   - A generic run_query tool. It is the convenient thing to build and the
-//     wrong thing to ship: it collapses every access decision into "can it
-//     write SQL", and no amount of prompting re-establishes the boundary.
-//
-//   - Webhook signing secrets. Obvious, and worth stating: they are the one
-//     credential in this system that lets somebody forge a dispute.
-//
-//   - Presigned evidence URLs. list_evidence would be genuinely useful, but a
-//     presigned URL is a bearer credential with a TTL, and handing one to a
-//     model puts it in a transcript that gets logged, replayed and pasted into
-//     tickets. File names and sizes are the useful part; the URL is not.
-//
-//   - Unmasked customer emails. Theirs, not the platform's, and irrelevant to
-//     whether a dispute is winnable. customer_ref already answers "is this the
-//     same person".
-//
-// On prompt injection: the fields these tools return are controlled
-// vocabularies - reason codes, states, card networks. The one free-text field
-// on a dispute, the cardholder's own claim, is deliberately NOT returned here:
-// this transport has no way to mark a span as untrusted, so get_dispute drops
-// it and only internal/agent, which quarantines it, asks for it. The
-// mitigation that survives either way is the first entry above: read-only
-// tools mean the worst a hostile string can do is produce a wrong answer,
-// not a wrong refund.
