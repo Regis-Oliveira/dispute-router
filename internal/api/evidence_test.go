@@ -5,6 +5,8 @@ import "testing"
 // safeName is the only thing standing between a caller-supplied filename and an
 // S3 key, so it gets tested like it matters.
 func TestSafeNameCannotEscapeItsPrefix(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]string{
 		"receipt.pdf":             "receipt.pdf",
 		"../../../etc/passwd":     "passwd",
@@ -30,6 +32,8 @@ func TestSafeNameCannotEscapeItsPrefix(t *testing.T) {
 }
 
 func TestSafeNameIsBounded(t *testing.T) {
+	t.Parallel()
+
 	long := ""
 	for range 500 {
 		long += "a"
@@ -42,6 +46,8 @@ func TestSafeNameIsBounded(t *testing.T) {
 // A whitelist, not a blacklist: evidence is a document or an image, and
 // anything else is a mistake or somebody using the bucket as free hosting.
 func TestOnlyDocumentTypesAreAccepted(t *testing.T) {
+	t.Parallel()
+
 	for _, accepted := range []string{"application/pdf", "image/png", "image/jpeg", "text/plain", "text/csv"} {
 		if _, ok := allowedTypes[accepted]; !ok {
 			t.Errorf("%s should be accepted", accepted)
@@ -60,6 +66,8 @@ func TestOnlyDocumentTypesAreAccepted(t *testing.T) {
 // The size limit has to be in the signed policy, not just in a JSON field the
 // client is trusted to read. A presigned PUT could not express it at all.
 func TestUploadPolicyCarriesTheSizeLimit(t *testing.T) {
+	t.Parallel()
+
 	if MaxUploadBytes <= 0 {
 		t.Fatal("MaxUploadBytes must be positive; a zero range refuses everything")
 	}

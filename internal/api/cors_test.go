@@ -19,6 +19,8 @@ func corsHandler() http.Handler {
 // refuses the request before it is ever sent. The presigned-upload endpoint is
 // a POST, and it was missing from this list.
 func TestPreflightAdvertisesEveryRoutedMethod(t *testing.T) {
+	t.Parallel()
+
 	request := httptest.NewRequest(http.MethodOptions, "/api/disputes/1/evidence", nil)
 	request.Header.Set("Origin", "http://localhost:4200")
 	request.Header.Set("Access-Control-Request-Method", "POST")
@@ -41,6 +43,8 @@ func TestPreflightAdvertisesEveryRoutedMethod(t *testing.T) {
 // A reflected origin would let any page on the internet read this data out of a
 // logged-in operator's browser.
 func TestUnknownOriginGetsNoAllowHeader(t *testing.T) {
+	t.Parallel()
+
 	request := httptest.NewRequest(http.MethodGet, "/api/disputes", nil)
 	request.Header.Set("Origin", "https://evil.example")
 
@@ -53,6 +57,8 @@ func TestUnknownOriginGetsNoAllowHeader(t *testing.T) {
 }
 
 func TestAllowedOriginIsEchoedExactly(t *testing.T) {
+	t.Parallel()
+
 	request := httptest.NewRequest(http.MethodGet, "/api/disputes", nil)
 	request.Header.Set("Origin", "http://localhost:4200")
 
@@ -70,6 +76,8 @@ func TestAllowedOriginIsEchoedExactly(t *testing.T) {
 
 // A wildcard would defeat the whole point of the allowlist.
 func TestNoWildcardIsEverSent(t *testing.T) {
+	t.Parallel()
+
 	for _, origin := range []string{"http://localhost:4200", "https://evil.example", ""} {
 		request := httptest.NewRequest(http.MethodGet, "/api/disputes", nil)
 		if origin != "" {

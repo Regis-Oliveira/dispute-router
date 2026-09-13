@@ -14,7 +14,7 @@ import (
 // Off by default: an empty address is "not enabled", not an error, so the
 // call can sit in an errgroup without changing how the group ends.
 func TestAnEmptyAddressIsOff(t *testing.T) {
-	if err := Serve(context.Background(), "", slog.Default()); err != nil {
+	if err := Serve(t.Context(), "", slog.Default()); err != nil {
 		t.Fatalf("Serve(\"\") = %v, want nil", err)
 	}
 }
@@ -28,7 +28,7 @@ func TestItServesPprofAndStopsWithTheContext(t *testing.T) {
 	addr := listener.Addr().String()
 	listener.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- Serve(ctx, addr, slog.Default()) }()
 

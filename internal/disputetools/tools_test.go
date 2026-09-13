@@ -5,6 +5,8 @@ import "testing"
 // The mask has to keep "is this the same person" answerable while giving away
 // nothing about who that person is.
 func TestMaskEmail(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]string{
 		"zeca.zanetti17283@inbox.test": "z***@inbox.test",
 		"a@b.com":                      "a@b.com",
@@ -26,6 +28,8 @@ func TestMaskEmail(t *testing.T) {
 // A masked address must never contain the original local part - that is the
 // whole job.
 func TestMaskEmailNeverLeaksTheLocalPart(t *testing.T) {
+	t.Parallel()
+
 	for _, address := range []string{
 		"charlotte.henriques@example.com",
 		"finance-team@merchant.test",
@@ -54,6 +58,8 @@ func indexOf(haystack, needle string) int {
 }
 
 func TestSplitCSV(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string][]string{
 		"":                     nil,
 		"   ":                  nil,
@@ -81,6 +87,8 @@ func TestSplitCSV(t *testing.T) {
 // The cap is a context limit, not a performance one, so it has to be small
 // enough that a full page still leaves room to reason about the results.
 func TestRowCapIsSane(t *testing.T) {
+	t.Parallel()
+
 	if MaxRows <= 0 || MaxRows > 100 {
 		t.Errorf("MaxRows = %d; a list tool that can return more than ~100 rows fills the context it was meant to inform", MaxRows)
 	}

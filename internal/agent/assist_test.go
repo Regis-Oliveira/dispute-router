@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
@@ -40,7 +39,7 @@ func TestTheBudgetIsCheckedBeforeTheGeneratorIsCalled(t *testing.T) {
 	assistant, pool := testAssistant(t, script, 1) // one micro-dollar
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	outcome, err := assistant.Assist(context.Background(), id)
+	outcome, err := assistant.Assist(t.Context(), id)
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -67,7 +66,7 @@ func TestABudgetStopOnTheLastAttemptReachesAPerson(t *testing.T) {
 	assistant.maxAttempts = 1
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	outcome, err := assistant.Assist(context.Background(), id)
+	outcome, err := assistant.Assist(t.Context(), id)
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -89,7 +88,7 @@ func TestTheCeilingCountsEarlierAttempts(t *testing.T) {
 	assistant, pool := testAssistant(t, script, 1_000_000)
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	if outcome, err := assistant.Assist(context.Background(), id); err != nil || outcome != OutcomeRejected {
+	if outcome, err := assistant.Assist(t.Context(), id); err != nil || outcome != OutcomeRejected {
 		t.Fatalf("first attempt: outcome %q, err %v", outcome, err)
 	}
 
@@ -97,12 +96,12 @@ func TestTheCeilingCountsEarlierAttempts(t *testing.T) {
 	// first attempt cost, plus one. If earlier spend were not counted the
 	// second attempt would see a fresh ceiling and buy tokens.
 	var spent int64
-	if err := pool.QueryRow(context.Background(),
+	if err := pool.QueryRow(t.Context(),
 		"SELECT cost_micros FROM agent_runs WHERE dispute_id = $1", id).Scan(&spent); err != nil {
 		t.Fatalf("read spend: %v", err)
 	}
 	assistant.maxCostMicros = spent + 1
-	outcome, err := assistant.Assist(context.Background(), id)
+	outcome, err := assistant.Assist(t.Context(), id)
 	if err != nil {
 		t.Fatalf("second attempt: %v", err)
 	}
@@ -126,10 +125,10 @@ func TestTheSecondAttemptIsToldWhyTheFirstWasRejected(t *testing.T) {
 	assistant, pool := testAssistant(t, script, 250_000)
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	if outcome, err := assistant.Assist(context.Background(), id); err != nil || outcome != OutcomeRejected {
+	if outcome, err := assistant.Assist(t.Context(), id); err != nil || outcome != OutcomeRejected {
 		t.Fatalf("first attempt: outcome %q, err %v", outcome, err)
 	}
-	if outcome, err := assistant.Assist(context.Background(), id); err != nil || outcome != OutcomeDrafted {
+	if outcome, err := assistant.Assist(t.Context(), id); err != nil || outcome != OutcomeDrafted {
 		t.Fatalf("second attempt: outcome %q, err %v", outcome, err)
 	}
 
@@ -176,7 +175,7 @@ func TestAZeroCeilingIsNoCeiling(t *testing.T) {
 	assistant, pool := testAssistant(t, script, 0)
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	outcome, err := assistant.Assist(context.Background(), id)
+	outcome, err := assistant.Assist(t.Context(), id)
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}
@@ -204,7 +203,7 @@ func TestAnInsufficientEvidenceLetterIsStillVerified(t *testing.T) {
 	assistant, pool := testAssistant(t, script, 250_000)
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	outcome, err := assistant.Assist(context.Background(), id)
+	outcome, err := assistant.Assist(t.Context(), id)
 	if err != nil {
 		t.Fatalf("Assist: %v", err)
 	}

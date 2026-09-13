@@ -26,11 +26,11 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Skip("DATABASE_URL not set; skipping database tests")
 	}
 
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	if err := pool.Ping(context.Background()); err != nil {
+	if err := pool.Ping(t.Context()); err != nil {
 		t.Skipf("postgres unreachable: %v", err)
 	}
 	t.Cleanup(pool.Close)
@@ -72,7 +72,7 @@ func openCandidate(t *testing.T, ctx context.Context, tx pgx.Tx, kind string) lo
 // balance is proved by forcing the deferred constraint trigger to fire before
 // the rollback, which is exactly what a COMMIT would have done.
 func TestApplyRefundPostsABalancedEntry(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := testPool(t)
 
 	tx, err := pool.Begin(ctx)
@@ -171,7 +171,7 @@ func refundedCandidate(t *testing.T, ctx context.Context, tx pgx.Tx) loaded {
 // transaction's refund total exactly as it was. The refund it records was
 // posted under the dispute that made it.
 func TestClosingAnAlreadyRefundedAlertMovesNoMoney(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := testPool(t)
 
 	tx, err := pool.Begin(ctx)
@@ -230,7 +230,7 @@ func TestClosingAnAlreadyRefundedAlertMovesNoMoney(t *testing.T) {
 // The unique external_ref is the last line of defence: a worker retrying after
 // a commit it did not see must not pay twice.
 func TestARefundCannotBePostedTwice(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := testPool(t)
 
 	tx, err := pool.Begin(ctx)
@@ -261,7 +261,7 @@ func TestARefundCannotBePostedTwice(t *testing.T) {
 
 // Two workers reading the same version, both writing: the second must lose.
 func TestApplyRefusesAStaleVersion(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	pool := testPool(t)
 
 	tx, err := pool.Begin(ctx)

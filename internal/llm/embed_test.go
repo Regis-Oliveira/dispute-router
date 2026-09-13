@@ -6,6 +6,8 @@ import (
 )
 
 func TestNormaliseMakesUnitVectors(t *testing.T) {
+	t.Parallel()
+
 	vec := normalise([]float32{3, 4, 0})
 	var sum float64
 	for _, v := range vec {

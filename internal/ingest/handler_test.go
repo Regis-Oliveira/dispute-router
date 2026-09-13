@@ -86,7 +86,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 		t.Skip("DATABASE_URL not set; skipping the ingest handler tests")
 	}
 
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

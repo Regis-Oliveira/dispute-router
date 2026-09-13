@@ -1,7 +1,6 @@
 package disputetools
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -16,7 +15,7 @@ func liveSet(t *testing.T) *Set {
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set; skipping the chaining tests")
 	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -36,7 +35,7 @@ func liveSet(t *testing.T) *Set {
 // shape a wrong answer can take.
 func TestTheMerchantFieldChainsBetweenTools(t *testing.T) {
 	set := liveSet(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	list, err := set.ListDisputes(ctx, ListDisputesInput{Limit: 1})
 	if err != nil {
@@ -83,7 +82,7 @@ func TestTheMerchantFieldChainsBetweenTools(t *testing.T) {
 // a value the list itself will filter on.
 func TestTheMerchantFieldChainsBackIntoTheFilter(t *testing.T) {
 	set := liveSet(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	list, err := set.ListDisputes(ctx, ListDisputesInput{Limit: 1})
 	if err != nil {
@@ -108,7 +107,7 @@ func TestTheMerchantFieldChainsBackIntoTheFilter(t *testing.T) {
 func TestTheHandleAndTheLabelAreBothPresent(t *testing.T) {
 	set := liveSet(t)
 
-	list, err := set.ListDisputes(context.Background(), ListDisputesInput{Limit: 1})
+	list, err := set.ListDisputes(t.Context(), ListDisputesInput{Limit: 1})
 	if err != nil {
 		t.Fatalf("list_disputes: %v", err)
 	}

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -30,7 +29,7 @@ func TestOnlyOneHolderGetsADispute(t *testing.T) {
 	runs := NewRuns(pool)
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	first, err := runs.Hold(context.Background(), id)
+	first, err := runs.Hold(t.Context(), id)
 	if err != nil {
 		t.Fatalf("first hold: %v", err)
 	}
@@ -41,7 +40,7 @@ func TestOnlyOneHolderGetsADispute(t *testing.T) {
 		t.Errorf("state = %q after a hold, want resolving", got)
 	}
 
-	if _, err := runs.Hold(context.Background(), id); !errors.Is(err, ErrClaimLost) {
+	if _, err := runs.Hold(t.Context(), id); !errors.Is(err, ErrClaimLost) {
 		t.Fatalf("second hold err = %v, want ErrClaimLost", err)
 	}
 }
@@ -53,7 +52,7 @@ func TestAHoldCarriesTheSpendAndTheFindingsSoFar(t *testing.T) {
 	runs := NewRuns(pool)
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
-	first, err := runs.Hold(context.Background(), id)
+	first, err := runs.Hold(t.Context(), id)
 	if err != nil {
 		t.Fatalf("first hold: %v", err)
 	}
@@ -63,11 +62,11 @@ func TestAHoldCarriesTheSpendAndTheFindingsSoFar(t *testing.T) {
 
 	rejected := aRun(OutcomeRejected, false)
 	rejected.Findings = []Finding{{Check: CheckUnsupportedClaim, Quote: "signed for", Why: "no signature on file"}}
-	if err := runs.Record(context.Background(), first, rejected); err != nil {
+	if err := runs.Record(t.Context(), first, rejected); err != nil {
 		t.Fatalf("record: %v", err)
 	}
 
-	second, err := runs.Hold(context.Background(), id)
+	second, err := runs.Hold(t.Context(), id)
 	if err != nil {
 		t.Fatalf("second hold: %v", err)
 	}
@@ -88,7 +87,7 @@ func TestAHoldCarriesTheSpendAndTheFindingsSoFar(t *testing.T) {
 func TestRecordIsAtomic(t *testing.T) {
 	pool := scratchDB(t)
 	runs := NewRuns(pool)
-	ctx := context.Background()
+	ctx := t.Context()
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
 	claim, err := runs.Hold(ctx, id)
@@ -114,7 +113,7 @@ func TestRecordIsAtomic(t *testing.T) {
 func TestRecordWritesTheRunTheMoveAndTheEvent(t *testing.T) {
 	pool := scratchDB(t)
 	runs := NewRuns(pool)
-	ctx := context.Background()
+	ctx := t.Context()
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
 	claim, err := runs.Hold(ctx, id)
@@ -149,7 +148,7 @@ func TestRecordWritesTheRunTheMoveAndTheEvent(t *testing.T) {
 func TestEscalationRoutesWithoutRelabelling(t *testing.T) {
 	pool := scratchDB(t)
 	runs := NewRuns(pool)
-	ctx := context.Background()
+	ctx := t.Context()
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
 	claim, err := runs.Hold(ctx, id)
@@ -185,7 +184,7 @@ func TestEscalationRoutesWithoutRelabelling(t *testing.T) {
 func TestARejectedRunReturnsTheDispute(t *testing.T) {
 	pool := scratchDB(t)
 	runs := NewRuns(pool)
-	ctx := context.Background()
+	ctx := t.Context()
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
 	claim, err := runs.Hold(ctx, id)
@@ -203,7 +202,7 @@ func TestARejectedRunReturnsTheDispute(t *testing.T) {
 func TestReleasePutsADisputeBack(t *testing.T) {
 	pool := scratchDB(t)
 	runs := NewRuns(pool)
-	ctx := context.Background()
+	ctx := t.Context()
 	id := fixture(t, pool, "chargeback", 72*time.Hour)
 
 	claim, err := runs.Hold(ctx, id)
@@ -227,7 +226,7 @@ func TestReleasePutsADisputeBack(t *testing.T) {
 func TestAlertsAreNotCandidates(t *testing.T) {
 	pool := scratchDB(t)
 	runs := NewRuns(pool)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	alert := fixture(t, pool, "alert", 72*time.Hour)
 	chargeback := fixture(t, pool, "chargeback", 72*time.Hour)
@@ -249,7 +248,7 @@ func TestAlertsAreNotCandidates(t *testing.T) {
 func TestCandidatesRespectTheDeadlineAndTheCeiling(t *testing.T) {
 	pool := scratchDB(t)
 	runs := NewRuns(pool)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	expired := fixture(t, pool, "chargeback", -time.Hour)
 	exhausted := fixture(t, pool, "chargeback", 72*time.Hour)

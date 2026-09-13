@@ -10,6 +10,8 @@ import (
 // first real multi-turn run failed on exactly this - the echo had dropped a
 // field the API requires.
 func TestBlocksFromTheAPIAreEchoedVerbatim(t *testing.T) {
+	t.Parallel()
+
 	wire := `{"type":"thinking","thinking":"","signature":"sig-1","future_field":{"x":1}}`
 	var block ContentBlock
 	if err := json.Unmarshal([]byte(wire), &block); err != nil {
@@ -35,6 +37,8 @@ func TestBlocksFromTheAPIAreEchoedVerbatim(t *testing.T) {
 // MarshalJSON so the method is found on a []ContentBlock element - and getting
 // either wrong is silent: the fields still encode, and only the API complains.
 func TestTheRawFormSurvivesInsideAMessage(t *testing.T) {
+	t.Parallel()
+
 	wire := `{"content":[{"type":"thinking","thinking":"","signature":"sig-1","future_field":{"x":1}}],"stop_reason":"tool_use","usage":{}}`
 
 	var response Response

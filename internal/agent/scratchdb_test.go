@@ -32,7 +32,7 @@ func scratchDB(t *testing.T) *pgxpool.Pool {
 	}
 
 	name := fmt.Sprintf("agent_scratch_%d", time.Now().UnixNano())
-	ctx := context.Background()
+	ctx := t.Context()
 
 	admin, err := pgx.Connect(ctx, dsn)
 	if err != nil {
@@ -86,7 +86,7 @@ func migrate(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatalf("read migrations: %v", err)
 	}
 
-	conn, err := pool.Acquire(context.Background())
+	conn, err := pool.Acquire(t.Context())
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
@@ -100,7 +100,7 @@ func migrate(t *testing.T, pool *pgxpool.Pool) {
 		if err != nil {
 			t.Fatalf("read %s: %v", entry.Name(), err)
 		}
-		if _, err := conn.Conn().PgConn().Exec(context.Background(), string(body)).ReadAll(); err != nil {
+		if _, err := conn.Conn().PgConn().Exec(t.Context(), string(body)).ReadAll(); err != nil {
 			t.Fatalf("apply %s: %v", entry.Name(), err)
 		}
 	}
@@ -110,7 +110,7 @@ func migrate(t *testing.T, pool *pgxpool.Pool) {
 // scratch database and returns the dispute id.
 func fixture(t *testing.T, pool *pgxpool.Pool, kind string, deadline time.Duration) int64 {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var merchantID int64
 	if err := pool.QueryRow(ctx, `
@@ -146,7 +146,7 @@ func fixture(t *testing.T, pool *pgxpool.Pool, kind string, deadline time.Durati
 func stateOf(t *testing.T, pool *pgxpool.Pool, disputeID int64) string {
 	t.Helper()
 	var state string
-	if err := pool.QueryRow(context.Background(),
+	if err := pool.QueryRow(t.Context(),
 		"SELECT state FROM disputes WHERE id = $1", disputeID).Scan(&state); err != nil {
 		t.Fatalf("read state: %v", err)
 	}
@@ -156,7 +156,7 @@ func stateOf(t *testing.T, pool *pgxpool.Pool, disputeID int64) string {
 func runNum(t *testing.T, pool *pgxpool.Pool, disputeID int64) int {
 	t.Helper()
 	var n int
-	if err := pool.QueryRow(context.Background(),
+	if err := pool.QueryRow(t.Context(),
 		"SELECT count(*) FROM agent_runs WHERE dispute_id = $1", disputeID).Scan(&n); err != nil {
 		t.Fatalf("count runs: %v", err)
 	}

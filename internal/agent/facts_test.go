@@ -69,7 +69,7 @@ func liveStore(t *testing.T) (*api.Store, *pgxpool.Pool) {
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set; skipping fact assembly tests")
 	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -79,7 +79,7 @@ func liveStore(t *testing.T) (*api.Store, *pgxpool.Pool) {
 
 func someDisputeID(t *testing.T, store *api.Store) int64 {
 	t.Helper()
-	list, err := disputetools.New(store).ListDisputes(context.Background(),
+	list, err := disputetools.New(store).ListDisputes(t.Context(),
 		disputetools.ListDisputesInput{Limit: 1})
 	if err != nil {
 		t.Fatalf("list: %v", err)
@@ -103,7 +103,7 @@ func TestFactsCarryEvidenceNamesAndNotTheirURLs(t *testing.T) {
 		SizeBytes:  4096,
 		UploadedAt: time.Now(),
 		URL:        secret,
-	}}}, FactSourceOptions{}).For(context.Background(), someDisputeID(t, store))
+	}}}, FactSourceOptions{}).For(t.Context(), someDisputeID(t, store))
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestFactsAreReadFromTheStoreAndStayMasked(t *testing.T) {
 	store, _ := liveStore(t)
 	id := someDisputeID(t, store)
 
-	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(t.Context(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestFactsAreReadFromTheStoreAndStayMasked(t *testing.T) {
 func TestPriorDisputesArriveForARepeatFiler(t *testing.T) {
 	store, pool := liveStore(t)
 	var id int64
-	err := pool.QueryRow(context.Background(), `
+	err := pool.QueryRow(t.Context(), `
 		SELECT d.id FROM disputes d
 		  JOIN transactions t ON t.id = d.transaction_id
 		 WHERE (SELECT count(*) FROM disputes d2 JOIN transactions t2 ON t2.id = d2.transaction_id
@@ -170,7 +170,7 @@ func TestPriorDisputesArriveForARepeatFiler(t *testing.T) {
 	if err != nil {
 		t.Skipf("no repeat filer seeded: %v", err)
 	}
-	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(t.Context(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestPriorDisputesArriveForARepeatFiler(t *testing.T) {
 func disputeWithAClaim(t *testing.T, pool *pgxpool.Pool, like string) int64 {
 	t.Helper()
 	var id int64
-	err := pool.QueryRow(context.Background(),
+	err := pool.QueryRow(t.Context(),
 		`SELECT id FROM disputes WHERE cardholder_claim LIKE $1 ORDER BY id LIMIT 1`, like).Scan(&id)
 	if err != nil {
 		t.Skipf("no seeded dispute matching %q: %v", like, err)
@@ -197,7 +197,7 @@ func TestTheClaimReachesTheFacts(t *testing.T) {
 	store, pool := liveStore(t)
 	id := disputeWithAClaim(t, pool, "The order never arrived%")
 
-	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(t.Context(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestTheClaimNeverReachesTheToolOutput(t *testing.T) {
 	store, pool := liveStore(t)
 	id := disputeWithAClaim(t, pool, "%Ignore all previous instructions%")
 
-	out, err := disputetools.New(store).GetDispute(context.Background(),
+	out, err := disputetools.New(store).GetDispute(t.Context(),
 		disputetools.GetDisputeInput{ID: id})
 	if err != nil {
 		t.Fatalf("GetDispute: %v", err)
@@ -235,7 +235,7 @@ func TestTheClaimNeverReachesTheToolOutput(t *testing.T) {
 	}
 
 	// And the same dispute, through the agent's path, does carry it.
-	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(t.Context(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}

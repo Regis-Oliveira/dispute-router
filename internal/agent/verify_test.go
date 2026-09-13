@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -35,6 +34,8 @@ func testVerifier(script *llmtest.ScriptedCompleter) *Verifier {
 // The property everything else leans on. A caller that ignores the error still
 // cannot get an approval out of what it is holding.
 func TestAZeroVerdictIsNotApproved(t *testing.T) {
+	t.Parallel()
+
 	var v Verdict
 	if v.Approved() {
 		t.Error("a zero Verdict approved a draft")
@@ -45,11 +46,13 @@ func TestAZeroVerdictIsNotApproved(t *testing.T) {
 }
 
 func TestACleanDraftPasses(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		verdictResponse(t, verdictInput{Pass: true}, llm.Usage{InputTokens: 2000, OutputTokens: 60}),
 	}}
 
-	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "a supported draft")
+	verdict, err := testVerifier(script).Check(t.Context(), Facts{}, "a supported draft")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -62,6 +65,8 @@ func TestACleanDraftPasses(t *testing.T) {
 }
 
 func TestAFindingBlocksTheDraft(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		verdictResponse(t, verdictInput{Pass: false, Findings: []Finding{{
 			Check: CheckUnsupportedClaim,
@@ -70,7 +75,7 @@ func TestAFindingBlocksTheDraft(t *testing.T) {
 		}}}, llm.Usage{}),
 	}}
 
-	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
+	verdict, err := testVerifier(script).Check(t.Context(), Facts{}, "draft")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -85,6 +90,8 @@ func TestAFindingBlocksTheDraft(t *testing.T) {
 // The rule "any finding means no pass" is stated in the prompt. A rule that
 // lives only in a prompt is a request, so the host enforces it too.
 func TestPassIsOverriddenWhenFindingsExist(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		verdictResponse(t, verdictInput{
 			Pass:     true,
@@ -92,7 +99,7 @@ func TestPassIsOverriddenWhenFindingsExist(t *testing.T) {
 		}, llm.Usage{}),
 	}}
 
-	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
+	verdict, err := testVerifier(script).Check(t.Context(), Facts{}, "draft")
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -105,6 +112,8 @@ func TestPassIsOverriddenWhenFindingsExist(t *testing.T) {
 // "approved by default". A verifier that fails open is worse than none: it
 // costs money to grant the approval it was supposed to withhold.
 func TestEveryFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+
 	cases := map[string]llm.Response{
 		"truncated": {StopReason: "max_tokens", Content: []llm.ContentBlock{{Type: "text", Text: "{\"pass\":tr"}}},
 		"no verdict call": {StopReason: "end_turn", Content: []llm.ContentBlock{
@@ -120,8 +129,9 @@ func TestEveryFailureFailsClosed(t *testing.T) {
 
 	for name, response := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			script := &llmtest.ScriptedCompleter{Responses: []llm.Response{response}}
-			verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
+			verdict, err := testVerifier(script).Check(t.Context(), Facts{}, "draft")
 			if err == nil {
 				t.Fatal("no error reported")
 			}
@@ -134,8 +144,10 @@ func TestEveryFailureFailsClosed(t *testing.T) {
 }
 
 func TestACompleterErrorIsNotAnApproval(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{} // empty script: the first call errors
-	verdict, err := testVerifier(script).Check(context.Background(), Facts{}, "draft")
+	verdict, err := testVerifier(script).Check(t.Context(), Facts{}, "draft")
 	if err == nil {
 		t.Fatal("no error reported")
 	}
@@ -147,10 +159,12 @@ func TestACompleterErrorIsNotAnApproval(t *testing.T) {
 // The verifier is given a shape to answer in and no way to go and look
 // anything up. Both halves matter, so both are pinned.
 func TestTheVerifierHasNoFetchingToolsAndIsForced(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		verdictResponse(t, verdictInput{Pass: true}, llm.Usage{}),
 	}}
-	if _, err := testVerifier(script).Check(context.Background(), Facts{}, "draft"); err != nil {
+	if _, err := testVerifier(script).Check(t.Context(), Facts{}, "draft"); err != nil {
 		t.Fatalf("Check: %v", err)
 	}
 
@@ -167,11 +181,13 @@ func TestTheVerifierHasNoFetchingToolsAndIsForced(t *testing.T) {
 // and the request has to show that: one message, carrying the record and the
 // draft and nothing else.
 func TestTheVerifierNeverSeesTheGeneratorsTranscript(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		verdictResponse(t, verdictInput{Pass: true}, llm.Usage{}),
 	}}
 	facts := Facts{CardholderClaim: "the item never arrived"}
-	if _, err := testVerifier(script).Check(context.Background(), facts, "THE DRAFT TEXT"); err != nil {
+	if _, err := testVerifier(script).Check(t.Context(), facts, "THE DRAFT TEXT"); err != nil {
 		t.Fatalf("Check: %v", err)
 	}
 
@@ -203,6 +219,8 @@ func TestTheVerifierNeverSeesTheGeneratorsTranscript(t *testing.T) {
 // Reporting "no evidence on file" when the evidence store was never wired up
 // turns a deployment fault into a stream of confident rejections.
 func TestAMissingEvidenceSourceIsAnError(t *testing.T) {
+	t.Parallel()
+
 	// Refused at construction, so a binary that never wired S3 up cannot get
 	// as far as drafting.
 	if _, err := NewFactSource(nil, nil, FactSourceOptions{}); !errors.Is(err, ErrNoEvidenceSource) {
@@ -210,7 +228,7 @@ func TestAMissingEvidenceSourceIsAnError(t *testing.T) {
 	}
 	// And still refused at the call, for a source that was built around the
 	// constructor.
-	_, err := (&FactSource{}).For(context.Background(), 1)
+	_, err := (&FactSource{}).For(t.Context(), 1)
 	if !errors.Is(err, ErrNoEvidenceSource) {
 		t.Fatalf("For err = %v, want ErrNoEvidenceSource", err)
 	}

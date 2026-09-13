@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -58,7 +57,7 @@ func TestTheRequestCarriesWhatTheAPIExpects(t *testing.T) {
 		_, _ = w.Write([]byte(`{"content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":2}}`))
 	})
 
-	response, err := client.Complete(context.Background(), Request{
+	response, err := client.Complete(t.Context(), Request{
 		System:    "be careful",
 		MaxTokens: 1024,
 		Messages:  []Message{{Role: "user", Content: []ContentBlock{{Type: "text", Text: "hi"}}}},
@@ -98,7 +97,7 @@ func TestOverloadIsRetried(t *testing.T) {
 		_, _ = w.Write([]byte(`{"content":[],"stop_reason":"end_turn","usage":{}}`))
 	})
 
-	if _, err := client.Complete(context.Background(), Request{MaxTokens: 16}); err != nil {
+	if _, err := client.Complete(t.Context(), Request{MaxTokens: 16}); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 	if got := calls.Load(); got != 2 {
@@ -124,7 +123,7 @@ func TestRetryAfterIsHonoured(t *testing.T) {
 	})
 
 	started := time.Now()
-	if _, err := client.Complete(context.Background(), Request{MaxTokens: 16}); err != nil {
+	if _, err := client.Complete(t.Context(), Request{MaxTokens: 16}); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 	took := time.Since(started)
@@ -144,7 +143,7 @@ func TestAFailedCallCarriesItsStatus(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"invalid x-api-key"}}`))
 	})
 
-	_, err := client.Complete(context.Background(), Request{MaxTokens: 16})
+	_, err := client.Complete(t.Context(), Request{MaxTokens: 16})
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) {
 		t.Fatalf("err = %v, want an *apiError", err)
@@ -168,7 +167,7 @@ func TestABadRequestIsNotRetried(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"max_tokens is required"}}`))
 	})
 
-	_, err := client.Complete(context.Background(), Request{})
+	_, err := client.Complete(t.Context(), Request{})
 	if err == nil {
 		t.Fatal("a 400 was reported as success")
 	}
@@ -186,7 +185,7 @@ func TestAResponseWithoutAStopReasonIsAnError(t *testing.T) {
 	client := against(t, func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"content":[],"usage":{}}`))
 	})
-	if _, err := client.Complete(context.Background(), Request{MaxTokens: 16}); err == nil {
+	if _, err := client.Complete(t.Context(), Request{MaxTokens: 16}); err == nil {
 		t.Fatal("a response with no stop_reason was accepted; callers branch on it")
 	}
 }

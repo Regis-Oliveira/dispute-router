@@ -6,6 +6,8 @@ import "testing"
 // wrong would report a saving that did not happen - or, as the first version
 // did, hide one that did.
 func TestCachedTokensAreBilledAtTheirOwnRate(t *testing.T) {
+	t.Parallel()
+
 	p := Pricing{
 		InputMicrosPerMTok:      3_000_000,
 		OutputMicrosPerMTok:     15_000_000,
@@ -29,6 +31,8 @@ func TestCachedTokensAreBilledAtTheirOwnRate(t *testing.T) {
 // Equal was the first version. It was safe for a ceiling and useless for a
 // measurement: a cache working perfectly would have reported no saving at all.
 func TestUnsetCacheRatesAreDerived(t *testing.T) {
+	t.Parallel()
+
 	p := Pricing{InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000}
 
 	if got := p.Cost(Usage{CacheReadInputTokens: 1_000_000}); got != 300_000 {
@@ -46,6 +50,8 @@ func TestUnsetCacheRatesAreDerived(t *testing.T) {
 // A configured cache rate wins over the derived one, so a provider whose
 // pricing differs can be described without editing code.
 func TestAConfiguredCacheRateWins(t *testing.T) {
+	t.Parallel()
+
 	p := Pricing{InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000}
 	p.CacheReadMicrosPerMTok = 150_000
 	if got := p.Cost(Usage{CacheReadInputTokens: 1_000_000}); got != 150_000 {

@@ -10,6 +10,8 @@ import (
 // Both calls ask for it, because both have a constant system prompt and a
 // constant tool schema in front of a record that changes.
 func TestBothCallsAskForTheCache(t *testing.T) {
+	t.Parallel()
+
 	gen := &llmtest.ScriptedCompleter{Responses: []llm.Response{draftResponseFor(t, RecommendRepresent, "x")}}
 	if _, err := NewGenerator(gen, "t", llm.Pricing{}, 4096).Write(t.Context(), Facts{}); err != nil {
 		t.Fatalf("generator: %v", err)

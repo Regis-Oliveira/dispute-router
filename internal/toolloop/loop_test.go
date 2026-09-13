@@ -30,12 +30,14 @@ func badCall(id string) llm.ToolUse {
 }
 
 func TestAnAnswerWithNoToolsFinishes(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		llmtest.Says("Nothing is due today.", llm.Usage{InputTokens: 1200, OutputTokens: 40}),
 	}}
 
 	result, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 100_000}).
-		Run(context.Background(), "system", "what is due today?")
+		Run(t.Context(), "system", "what is due today?")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -58,13 +60,15 @@ func TestAnAnswerWithNoToolsFinishes(t *testing.T) {
 // The round trip is the loop: the model asks, the tools answer, and the answer
 // goes back attached to the id it belongs to.
 func TestToolResultsGoBackOnTheNextTurn(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		llmtest.Calls(llm.Usage{InputTokens: 1000, OutputTokens: 50}, badCall("toolu_a")),
 		llmtest.Says("Done.", llm.Usage{InputTokens: 1400, OutputTokens: 30}),
 	}}
 
 	result, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 1_000_000}).
-		Run(context.Background(), "system", "look something up")
+		Run(t.Context(), "system", "look something up")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -103,12 +107,14 @@ func TestToolResultsGoBackOnTheNextTurn(t *testing.T) {
 // Every tool is offered on every turn. A loop that sends the tool list once and
 // then drops it produces a model that suddenly cannot look anything up.
 func TestToolsAreOfferedEveryTurn(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		llmtest.Calls(llm.Usage{}, badCall("toolu_a")),
 		llmtest.Says("Done.", llm.Usage{}),
 	}}
 	if _, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 1_000_000}).
-		Run(context.Background(), "system", "go"); err != nil {
+		Run(t.Context(), "system", "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	for i, req := range script.Requests {
@@ -123,6 +129,8 @@ func TestToolsAreOfferedEveryTurn(t *testing.T) {
 
 // A model that keeps calling tools has to be stopped by something.
 func TestTheTurnCeilingStops(t *testing.T) {
+	t.Parallel()
+
 	responses := make([]llm.Response, 20)
 	for i := range responses {
 		responses[i] = llmtest.Calls(llm.Usage{InputTokens: 100}, badCall("toolu_x"))
@@ -130,7 +138,7 @@ func TestTheTurnCeilingStops(t *testing.T) {
 	script := &llmtest.ScriptedCompleter{Responses: responses}
 
 	result, err := testLoop(t, script, Budget{MaxTurns: 5, MaxCostMicros: 100_000_000}).
-		Run(context.Background(), "system", "loop forever")
+		Run(t.Context(), "system", "loop forever")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -149,12 +157,14 @@ func TestTheTurnCeilingStops(t *testing.T) {
 // runner. Read the other way - and it used to be read the other way here alone
 // - it halts before the first call and looks exactly like a budget working.
 func TestAZeroCeilingDoesNotHaltTheLoop(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		llmtest.Says("Nothing is due today.", llm.Usage{InputTokens: 1200, OutputTokens: 40}),
 	}}
 
 	result, err := testLoop(t, script, Budget{MaxTurns: 8}).
-		Run(context.Background(), "system", "what is due today?")
+		Run(t.Context(), "system", "what is due today?")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -169,6 +179,8 @@ func TestAZeroCeilingDoesNotHaltTheLoop(t *testing.T) {
 // And a model that calls few tools but expensive ones has to be stopped by the
 // other ceiling, or an automation can outspend the chargeback it is working on.
 func TestTheBudgetStopsBeforeTheTurnCeiling(t *testing.T) {
+	t.Parallel()
+
 	responses := make([]llm.Response, 20)
 	for i := range responses {
 		responses[i] = llmtest.Calls(llm.Usage{InputTokens: 100_000, OutputTokens: 1000}, badCall("toolu_x"))
@@ -177,7 +189,7 @@ func TestTheBudgetStopsBeforeTheTurnCeiling(t *testing.T) {
 
 	// 100k in + 1k out = 300_000 + 15_000 = 315_000 micros per turn.
 	result, err := testLoop(t, script, Budget{MaxTurns: 20, MaxCostMicros: 700_000}).
-		Run(context.Background(), "system", "spend")
+		Run(t.Context(), "system", "spend")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -196,12 +208,14 @@ func TestTheBudgetStopsBeforeTheTurnCeiling(t *testing.T) {
 // The property the rest of the harness leans on: a cut-off draft must never
 // look like a finished one.
 func TestATruncatedAnswerIsNotDone(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		llmtest.Truncated("The cardholder claims the item never arri", llm.Usage{OutputTokens: 2048}),
 	}}
 
 	result, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 1_000_000}).
-		Run(context.Background(), "system", "draft it")
+		Run(t.Context(), "system", "draft it")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -220,12 +234,14 @@ func TestATruncatedAnswerIsNotDone(t *testing.T) {
 // trace whose order moves between runs cannot be diffed, and the eval set
 // depends on diffing it.
 func TestParallelToolResultsKeepTheirOrder(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		llmtest.Calls(llm.Usage{}, badCall("toolu_1"), badCall("toolu_2"), badCall("toolu_3")),
 		llmtest.Says("Done.", llm.Usage{}),
 	}}
 	if _, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 1_000_000}).
-		Run(context.Background(), "system", "go"); err != nil {
+		Run(t.Context(), "system", "go"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
@@ -245,11 +261,13 @@ func TestParallelToolResultsKeepTheirOrder(t *testing.T) {
 // empty result array and get the same answer back for as many turns as the
 // ceiling allows.
 func TestToolUseWithNoToolBlockDoesNotSpin(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		{Content: []llm.ContentBlock{{Type: "text", Text: "hm"}}, StopReason: "tool_use"},
 	}}
 	result, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 1_000_000}).
-		Run(context.Background(), "system", "go")
+		Run(t.Context(), "system", "go")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -264,11 +282,13 @@ func TestToolUseWithNoToolBlockDoesNotSpin(t *testing.T) {
 // A stop_reason added to the API after this was written is recorded, not
 // guessed at, and it does not count as finishing.
 func TestAnUnknownStopReasonHalts(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		{Content: []llm.ContentBlock{{Type: "text", Text: "no"}}, StopReason: "refusal"},
 	}}
 	result, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 1_000_000}).
-		Run(context.Background(), "system", "go")
+		Run(t.Context(), "system", "go")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -279,7 +299,9 @@ func TestAnUnknownStopReasonHalts(t *testing.T) {
 
 // A cancelled context ends the run rather than being absorbed as a tool error.
 func TestACancelledContextStopsTheRun(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{llmtest.Says("hi", llm.Usage{})}}
@@ -296,9 +318,11 @@ func TestACancelledContextStopsTheRun(t *testing.T) {
 // An exhausted script means the loop went further than the test described, and
 // that has to surface as a failure rather than a repeated last answer.
 func TestAnExhaustedScriptIsAnError(t *testing.T) {
+	t.Parallel()
+
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{llmtest.Calls(llm.Usage{}, badCall("toolu_a"))}}
 	_, err := testLoop(t, script, Budget{MaxTurns: 8, MaxCostMicros: 1_000_000}).
-		Run(context.Background(), "system", "go")
+		Run(t.Context(), "system", "go")
 	if err == nil || !strings.Contains(err.Error(), "no response for call 2") {
 		t.Fatalf("err = %v, want an exhausted-script error", err)
 	}
@@ -310,6 +334,8 @@ func TestAnExhaustedScriptIsAnError(t *testing.T) {
 // is to a name that does not exist, so the run needs no database and reaches
 // its second turn through a refusal.
 func TestThinkingBlocksSurviveTheRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	thinking := llm.ContentBlock{Type: "thinking", Thinking: "the queue summary will answer this", Signature: "sig-abc"}
 	script := &llmtest.ScriptedCompleter{Responses: []llm.Response{
 		{StopReason: "tool_use", Content: []llm.ContentBlock{
@@ -319,7 +345,7 @@ func TestThinkingBlocksSurviveTheRoundTrip(t *testing.T) {
 		llmtest.Says("done", llm.Usage{}),
 	}}
 	loop := NewLoop(script, offlineRegistry(), "test-model", llm.Pricing{}, Budget{MaxTurns: 3, MaxCostMicros: 1_000_000, MaxTokens: 256})
-	if _, err := loop.Run(context.Background(), "system", "what is due?"); err != nil {
+	if _, err := loop.Run(t.Context(), "system", "what is due?"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if len(script.Requests) != 2 {

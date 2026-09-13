@@ -1,6 +1,7 @@
 package dlq
 
 import (
+	"context"
 	"fmt"
 	"math/rand"
 	"os"
@@ -50,7 +51,9 @@ func testRedriver(t *testing.T) *Redriver {
 			t.Fatalf("create %s: %v", name, err)
 		}
 		t.Cleanup(func() {
-			_, _ = client.DeleteQueue(t.Context(), &sqs.DeleteQueueInput{QueueUrl: out.QueueUrl})
+			// Not t.Context(): it is cancelled just before cleanups run, so the
+			// delete was being refused locally and the queue left on LocalStack.
+			_, _ = client.DeleteQueue(context.Background(), &sqs.DeleteQueueInput{QueueUrl: out.QueueUrl})
 		})
 		return *out.QueueUrl
 	}

@@ -26,6 +26,8 @@ func offlineRegistry() *Registry {
 // derivation breaks, the tools still exist and are simply undescribed - which
 // fails silently and looks like the model getting worse at its job.
 func TestEveryToolIsFullyDescribed(t *testing.T) {
+	t.Parallel()
+
 	for _, tool := range offlineRegistry().Tools() {
 		if tool.Name == "" {
 			t.Fatal("a tool has no name")
@@ -60,6 +62,8 @@ func TestEveryToolIsFullyDescribed(t *testing.T) {
 // nothing else, so it is worth checking the two ends of that: an id the tool
 // cannot work without, and a set of filters that are all optional.
 func TestRequiredFieldsComeFromTheStruct(t *testing.T) {
+	t.Parallel()
+
 	schemas := map[string]json.RawMessage{}
 	for _, tool := range offlineRegistry().Tools() {
 		schemas[tool.Name] = tool.InputSchema
@@ -86,7 +90,9 @@ func TestRequiredFieldsComeFromTheStruct(t *testing.T) {
 // A guessed tool name is a message, not a crash - and the message has to carry
 // the real names, or the model has no way to correct itself.
 func TestUnknownToolIsAnswered(t *testing.T) {
-	result, err := offlineRegistry().Run(context.Background(), llm.ToolUse{
+	t.Parallel()
+
+	result, err := offlineRegistry().Run(t.Context(), llm.ToolUse{
 		ID: "toolu_1", Name: "refund_dispute", Input: json.RawMessage(`{}`),
 	})
 	if err != nil {
@@ -109,7 +115,9 @@ func TestUnknownToolIsAnswered(t *testing.T) {
 // alternative - accepting the call and ignoring the field - answers with every
 // merchant's disputes while the model believes its filter applied.
 func TestUnknownArgumentIsRefusedNotIgnored(t *testing.T) {
-	result, err := offlineRegistry().Run(context.Background(), llm.ToolUse{
+	t.Parallel()
+
+	result, err := offlineRegistry().Run(t.Context(), llm.ToolUse{
 		ID: "toolu_2", Name: "list_disputes", Input: json.RawMessage(`{"merchant_id":"mrc_northwind"}`),
 	})
 	if err != nil {
@@ -125,7 +133,9 @@ func TestUnknownArgumentIsRefusedNotIgnored(t *testing.T) {
 
 // Same rule for a value of the wrong type: answerable, so it is answered.
 func TestWrongArgumentTypeIsAnswered(t *testing.T) {
-	result, err := offlineRegistry().Run(context.Background(), llm.ToolUse{
+	t.Parallel()
+
+	result, err := offlineRegistry().Run(t.Context(), llm.ToolUse{
 		ID: "toolu_3", Name: "list_disputes", Input: json.RawMessage(`{"limit":"fifty"}`),
 	})
 	if err != nil {
@@ -139,6 +149,8 @@ func TestWrongArgumentTypeIsAnswered(t *testing.T) {
 // The tool surface is recorded per run in the audit trail, so it has to match
 // what the model was actually handed.
 func TestNamesMatchTheAdvertisedTools(t *testing.T) {
+	t.Parallel()
+
 	r := offlineRegistry()
 	names, tools := r.Names(), r.Tools()
 	if len(names) != len(tools) {
@@ -159,7 +171,7 @@ func TestAFullPageFitsUnderTheCeiling(t *testing.T) {
 	if dsn == "" {
 		t.Skip("DATABASE_URL not set; skipping the sizing check")
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -185,8 +197,10 @@ func TestAFullPageFitsUnderTheCeiling(t *testing.T) {
 // A refusal the model reads is prose; a refusal an operator counts is a rule.
 // Every way the registry can say no names the rule it said no under.
 func TestEveryRefusalNamesItsRule(t *testing.T) {
+	t.Parallel()
+
 	registry := offlineRegistry()
-	ctx := context.Background()
+	ctx := t.Context()
 
 	unknown, err := registry.Run(ctx, llm.ToolUse{ID: "t1", Name: "drop_table", Input: json.RawMessage(`{}`)})
 	if err != nil || unknown.Rule != RuleUnknownTool {

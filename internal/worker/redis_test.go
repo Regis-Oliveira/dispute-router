@@ -3,7 +3,6 @@
 package worker
 
 import (
-	"context"
 	"os"
 	"sync"
 	"testing"
@@ -35,11 +34,11 @@ func testRedis(t *testing.T) *redis.Client {
 	opts.DB = 15
 
 	rdb := redis.NewClient(opts)
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
+	if err := rdb.Ping(t.Context()).Err(); err != nil {
 		t.Skipf("redis unreachable: %v", err)
 	}
 
-	if err := rdb.FlushDB(context.Background()).Err(); err != nil {
+	if err := rdb.FlushDB(t.Context()).Err(); err != nil {
 		t.Fatalf("flush test db: %v", err)
 	}
 	t.Cleanup(func() { _ = rdb.Close() })
@@ -48,7 +47,7 @@ func testRedis(t *testing.T) *redis.Client {
 }
 
 func TestClaimReturnsOnlyWhatIsDue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := NewDeadlines(testRedis(t))
 	now := time.Now()
 
@@ -90,7 +89,7 @@ func TestClaimReturnsOnlyWhatIsDue(t *testing.T) {
 // The reason claiming is a Lua script. Read-then-remove from Go is two round
 // trips, and concurrent workers both read the same ids in the gap.
 func TestConcurrentClaimsNeverOverlap(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := NewDeadlines(testRedis(t))
 	now := time.Now()
 
@@ -141,7 +140,7 @@ func TestConcurrentClaimsNeverOverlap(t *testing.T) {
 // ZADD updates the score of a member already present, so rescheduling is not a
 // duplicate.
 func TestScheduleTwiceMovesRatherThanDuplicates(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	d := NewDeadlines(testRedis(t))
 	now := time.Now()
 
@@ -167,7 +166,7 @@ func TestScheduleTwiceMovesRatherThanDuplicates(t *testing.T) {
 }
 
 func TestLockIsExclusive(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	locks := NewLocks(testRedis(t), 5*time.Second)
 
 	lock, err := locks.Acquire(ctx, 7)
@@ -193,7 +192,7 @@ func TestLockIsExclusive(t *testing.T) {
 // another worker legitimately takes the lock, and the first one wakes up and
 // deletes a lock it no longer owns.
 func TestReleaseCannotDeleteSomebodyElsesLock(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	rdb := testRedis(t)
 	locks := NewLocks(rdb, 100*time.Millisecond)
 

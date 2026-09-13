@@ -41,6 +41,8 @@ func chargeback(mutate func(*Candidate)) Candidate {
 }
 
 func TestExpiryBeatsEveryOtherRule(t *testing.T) {
+	t.Parallel()
+
 	// A dispute that would otherwise be refunded, one second past its window.
 	c := alert(func(c *Candidate) { c.DeadlineAt = now.Add(-time.Second) })
 
@@ -55,6 +57,8 @@ func TestExpiryBeatsEveryOtherRule(t *testing.T) {
 
 // The deadline is an instant, not a grace period.
 func TestDeadlineIsExclusive(t *testing.T) {
+	t.Parallel()
+
 	exactly := alert(func(c *Candidate) { c.DeadlineAt = now })
 	if got := Decide(exactly, now); got.Action != ActionExpire {
 		t.Errorf("at the deadline: Action = %q, want expire", got.Action)
@@ -67,6 +71,8 @@ func TestDeadlineIsExclusive(t *testing.T) {
 }
 
 func TestAlertsRefundWithinTheCeiling(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]struct {
 		amount  int64
 		ceiling *int64
@@ -82,6 +88,7 @@ func TestAlertsRefundWithinTheCeiling(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			c := alert(func(c *Candidate) {
 				c.AmountMinor = tc.amount
 				c.AutoRefundCeilingMinor = tc.ceiling
@@ -98,8 +105,11 @@ func TestAlertsRefundWithinTheCeiling(t *testing.T) {
 // person sends it. Every chargeback with time left is left for them, whatever
 // its reason code - the code only changes the reason written down.
 func TestTheWorkerNeverRepresentsAChargeback(t *testing.T) {
+	t.Parallel()
+
 	for _, reason := range []string{"13.1", "12.5", "4855", "C08", "RG", "10.4", "4837", "F29", "ZZ99"} {
 		t.Run(reason, func(t *testing.T) {
+			t.Parallel()
 			c := chargeback(func(c *Candidate) { c.ReasonCode = reason })
 			got := Decide(c, now)
 			if got.Action != ActionEscalate {
@@ -116,6 +126,8 @@ func TestTheWorkerNeverRepresentsAChargeback(t *testing.T) {
 // like anything else once there is not. It used to be invisible to the sweeper
 // entirely, so it could sit past its deadline forever with the funds still held.
 func TestADraftAwaitingReviewExpiresButIsOtherwiseLeftAlone(t *testing.T) {
+	t.Parallel()
+
 	waiting := chargeback(func(c *Candidate) { c.State = "draft_ready" })
 	if got := Decide(waiting, now); got.Action != ActionSkip {
 		t.Errorf("a draft with time left: Action = %q, want skip (%s)", got.Action, got.Reason)
@@ -136,6 +148,8 @@ func TestADraftAwaitingReviewExpiresButIsOtherwiseLeftAlone(t *testing.T) {
 // chargeback, because that is a judgement about evidence and about a merchant
 // relationship.
 func TestNoRuleEverConcedesAChargeback(t *testing.T) {
+	t.Parallel()
+
 	for _, reason := range []string{"10.4", "13.1", "4837", "4855", "F29", "C08", "UA02", "RG", "ZZ99"} {
 		for _, amount := range []int64{1, 100, 5000, 1_000_000} {
 			c := chargeback(func(c *Candidate) {
@@ -151,6 +165,8 @@ func TestNoRuleEverConcedesAChargeback(t *testing.T) {
 }
 
 func TestAlreadyResolvedIsSkipped(t *testing.T) {
+	t.Parallel()
+
 	for _, state := range []dispute.State{
 		dispute.StateRefunded, dispute.StateWon, dispute.StateLost,
 		dispute.StateExpired, dispute.StateRepresented,
@@ -165,6 +181,8 @@ func TestAlreadyResolvedIsSkipped(t *testing.T) {
 // A dispute can be resolved between being scheduled and being claimed. The
 // worker must notice rather than act on what it read a minute ago.
 func TestResolvedFlagIsRespectedEvenInAnOpenState(t *testing.T) {
+	t.Parallel()
+
 	c := alert(func(c *Candidate) { c.Resolved = true })
 	if got := Decide(c, now); got.Action != ActionSkip {
 		t.Errorf("Action = %q, want skip", got.Action)
@@ -172,6 +190,8 @@ func TestResolvedFlagIsRespectedEvenInAnOpenState(t *testing.T) {
 }
 
 func TestEscalationNeverChangesState(t *testing.T) {
+	t.Parallel()
+
 	c := alert(func(c *Candidate) { c.AmountMinor = 999_999 })
 	got := Decide(c, now)
 	if got.Action != ActionEscalate {
@@ -183,6 +203,8 @@ func TestEscalationNeverChangesState(t *testing.T) {
 }
 
 func TestEveryDecisionCarriesAReason(t *testing.T) {
+	t.Parallel()
+
 	candidates := []Candidate{
 		alert(nil),
 		alert(func(c *Candidate) { c.AmountMinor = 999_999 }),
@@ -204,6 +226,8 @@ func TestEveryDecisionCarriesAReason(t *testing.T) {
 // backstop; deciding it here is what stops the worker retrying a permanent
 // condition forever.
 func TestRefundsCannotExceedWhatIsLeftOnTheCharge(t *testing.T) {
+	t.Parallel()
+
 	tests := map[string]struct {
 		amount    int64
 		remaining int64
@@ -218,6 +242,7 @@ func TestRefundsCannotExceedWhatIsLeftOnTheCharge(t *testing.T) {
 
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			c := alert(func(c *Candidate) {
 				c.AmountMinor = tc.amount
 				c.RefundableRemainingMinor = tc.remaining
@@ -234,6 +259,8 @@ func TestRefundsCannotExceedWhatIsLeftOnTheCharge(t *testing.T) {
 // about the money. Both have to hold, and the ceiling is checked first so the
 // reason given is the one an operator can act on.
 func TestCeilingIsReportedBeforeTheBalance(t *testing.T) {
+	t.Parallel()
+
 	c := alert(func(c *Candidate) {
 		c.AmountMinor = 999_999
 		c.RefundableRemainingMinor = 100
@@ -251,12 +278,15 @@ func TestCeilingIsReportedBeforeTheBalance(t *testing.T) {
 // closes as refunded, moves no money, and does so whatever the merchant's
 // ceiling says, because nothing is being refunded for a ceiling to bound.
 func TestAnAlertOnAChargeAlreadyRefundedIsClosedWithoutMoney(t *testing.T) {
+	t.Parallel()
+
 	for name, mutate := range map[string]func(*Candidate){
 		"within the ceiling": func(c *Candidate) {},
 		"above the ceiling":  func(c *Candidate) { c.AmountMinor = 999_999 },
 		"no ceiling at all":  func(c *Candidate) { c.AutoRefundCeilingMinor = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			c := alert(func(c *Candidate) {
 				mutate(c)
 				c.RefundableRemainingMinor = 0
@@ -279,6 +309,8 @@ func TestAnAlertOnAChargeAlreadyRefundedIsClosedWithoutMoney(t *testing.T) {
 // letter is "credit already issued", and the worker writes no letters - but
 // the reason names what they will find.
 func TestAChargebackOnAChargeAlreadyRefundedStillEscalates(t *testing.T) {
+	t.Parallel()
+
 	c := chargeback(func(c *Candidate) { c.RefundableRemainingMinor = 0 })
 	got := Decide(c, now)
 	if got.Action != ActionEscalate || got.ToState != "" {
@@ -293,6 +325,8 @@ func TestAChargebackOnAChargeAlreadyRefundedStillEscalates(t *testing.T) {
 // scored at or before now+lookahead is claimable right now, so a reschedule
 // must land strictly outside that window.
 func TestNextVisitAlwaysClearsTheClaimWindow(t *testing.T) {
+	t.Parallel()
+
 	for _, lookahead := range []time.Duration{0, 30 * time.Second, time.Hour, 720 * time.Hour} {
 		p := NewPool(Options{Lookahead: lookahead})
 
@@ -317,6 +351,8 @@ func TestNextVisitAlwaysClearsTheClaimWindow(t *testing.T) {
 
 // A preference beyond the window is honoured rather than pulled forward.
 func TestNextVisitKeepsALaterPreference(t *testing.T) {
+	t.Parallel()
+
 	p := NewPool(Options{Lookahead: time.Minute})
 	preferred := time.Now().Add(48 * time.Hour)
 

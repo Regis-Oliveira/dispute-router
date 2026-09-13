@@ -9,6 +9,8 @@ import (
 const secret = "whsec_0123456789abcdef"
 
 func TestVerifyAcceptsItsOwnSignature(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`{"id":"evt_1","type":"dispute.opened"}`)
 	now := time.Unix(1_767_225_600, 0).UTC()
 
@@ -20,6 +22,8 @@ func TestVerifyAcceptsItsOwnSignature(t *testing.T) {
 // The signature covers the body, so any edit to it - including one that keeps
 // the length identical - has to fail.
 func TestVerifyRejectsATamperedBody(t *testing.T) {
+	t.Parallel()
+
 	original := []byte(`{"amount_minor":1000}`)
 	tampered := []byte(`{"amount_minor":9000}`)
 	now := time.Now()
@@ -31,6 +35,8 @@ func TestVerifyRejectsATamperedBody(t *testing.T) {
 }
 
 func TestVerifyRejectsAnotherMerchantsSecret(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`{"id":"evt_1"}`)
 	now := time.Now()
 
@@ -43,6 +49,8 @@ func TestVerifyRejectsAnotherMerchantsSecret(t *testing.T) {
 // A captured request must not stay valid forever, in either direction: a
 // far-future timestamp is as suspicious as an old one.
 func TestVerifyRejectsReplayOutsideTolerance(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`{"id":"evt_1"}`)
 	signedAt := time.Now()
 
@@ -51,6 +59,7 @@ func TestVerifyRejectsReplayOutsideTolerance(t *testing.T) {
 		"too future": signedAt.Add(-10 * time.Minute),
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			err := Verify(secret, body, Sign(secret, body, signedAt), now, defaultTolerance)
 			if !errors.Is(err, ErrStaleTimestamp) {
 				t.Fatalf("Verify() = %v, want ErrStaleTimestamp", err)
@@ -60,6 +69,8 @@ func TestVerifyRejectsReplayOutsideTolerance(t *testing.T) {
 }
 
 func TestParseHeaderRejectsGarbage(t *testing.T) {
+	t.Parallel()
+
 	for _, header := range []string{
 		"",
 		"v1=abcd",                      // no timestamp
@@ -76,6 +87,8 @@ func TestParseHeaderRejectsGarbage(t *testing.T) {
 // Pins the exact bytes that get hashed. If this fails, the Go and TypeScript
 // halves of the contract have drifted apart.
 func TestComputeIsStableAcrossImplementations(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`{"hello":"world"}`)
 	ts := time.Unix(1_700_000_000, 0).UTC()
 
@@ -95,6 +108,8 @@ func TestComputeIsStableAcrossImplementations(t *testing.T) {
 // delivery is rejected - which is why keys that can only be rotated with an
 // outage never get rotated.
 func TestVerifyAnyAcceptsEitherSideOfARotation(t *testing.T) {
+	t.Parallel()
+
 	const (
 		next    = "whsec_rotated_in"
 		current = "whsec_rotating_out"
@@ -108,6 +123,7 @@ func TestVerifyAnyAcceptsEitherSideOfARotation(t *testing.T) {
 		"signed with the old key": current,
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if err := VerifyAny(secrets, body, Sign(secret, body, now), now, defaultTolerance); err != nil {
 				t.Errorf("VerifyAny() = %v, want nil", err)
 			}
@@ -116,6 +132,8 @@ func TestVerifyAnyAcceptsEitherSideOfARotation(t *testing.T) {
 }
 
 func TestVerifyAnyStillRejectsAStranger(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`{"id":"evt_1"}`)
 	now := time.Now()
 
@@ -126,6 +144,8 @@ func TestVerifyAnyStillRejectsAStranger(t *testing.T) {
 }
 
 func TestVerifyAnyWithNoSecretsRejects(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`{"id":"evt_1"}`)
 	now := time.Now()
 
@@ -137,6 +157,8 @@ func TestVerifyAnyWithNoSecretsRejects(t *testing.T) {
 // A stale timestamp fails the same way for every secret, so it is reported once
 // rather than after hashing against each.
 func TestVerifyAnyReportsAStaleTimestampWithoutTryingEverySecret(t *testing.T) {
+	t.Parallel()
+
 	body := []byte(`{"id":"evt_1"}`)
 	signedAt := time.Now()
 

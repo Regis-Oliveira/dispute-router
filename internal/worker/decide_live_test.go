@@ -1,7 +1,7 @@
 package worker
 
 import (
-	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +15,7 @@ import (
 // it passed on a fresh seed and failed the moment the worker had done its job.
 // A test that only holds before the system runs is worse than no test.
 func TestLoadPopulatesEverythingDecideReads(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	store := NewStore(testPool(t))
 
 	open, err := store.OpenDeadlines(ctx)
@@ -34,12 +34,20 @@ func TestLoadPopulatesEverythingDecideReads(t *testing.T) {
 		if checked >= 400 {
 			break
 		}
-		checked++
 
 		l, err := store.load(ctx, id)
+		// internal/ingest's handler tests seed a dispute into this same database
+		// and delete it again, and `go test ./...` runs that package beside this
+		// one - so an id listed a moment ago can be gone by the time it is
+		// loaded. The claim here is about which columns Load fills in, not about
+		// the dataset holding still while it runs.
+		if errors.Is(err, ErrNotFound) {
+			continue
+		}
 		if err != nil {
 			t.Fatalf("Load(%d): %v", id, err)
 		}
+		checked++
 
 		// A field left at its zero value is how a query that forgot a column
 		// turns into a policy that quietly escalates everything.

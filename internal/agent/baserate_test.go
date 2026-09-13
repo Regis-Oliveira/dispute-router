@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
@@ -14,6 +13,8 @@ import (
 // the counts go out and the rate does not - "67% win" from three disputes is
 // noise with a percent sign on it.
 func TestASmallSampleIsNotARate(t *testing.T) {
+	t.Parallel()
+
 	small := Facts{BaseRates: []BaseRate{
 		{Scope: "merchant+reason", ReasonCode: "10.4", Won: 2, Lost: 1},
 	}}
@@ -36,6 +37,8 @@ func TestASmallSampleIsNotARate(t *testing.T) {
 // An expired dispute was never argued. Folding it into losses would say this
 // kind of case is unwinnable when what happened is that nobody tried.
 func TestExpiredIsReportedSeparately(t *testing.T) {
+	t.Parallel()
+
 	facts := Facts{BaseRates: []BaseRate{
 		{Scope: "merchant", Won: 10, Lost: 10, Expired: 40},
 	}}
@@ -52,6 +55,8 @@ func TestExpiredIsReportedSeparately(t *testing.T) {
 // The failure this block could cause: a model declining a winnable case because
 // the population loses more often than it wins.
 func TestTheBlockSaysItIsNotAboutThisDispute(t *testing.T) {
+	t.Parallel()
+
 	facts := Facts{BaseRates: []BaseRate{{Scope: "merchant", Won: 2, Lost: 98}}}
 	rendered := facts.renderBaseRates()
 
@@ -64,6 +69,8 @@ func TestTheBlockSaysItIsNotAboutThisDispute(t *testing.T) {
 }
 
 func TestAMerchantWithNoHistorySaysSo(t *testing.T) {
+	t.Parallel()
+
 	rendered := Facts{}.renderBaseRates()
 	if !strings.Contains(rendered, "no settled disputes to compare against") {
 		t.Error("an absent base rate was passed over in silence")
@@ -73,16 +80,18 @@ func TestAMerchantWithNoHistorySaysSo(t *testing.T) {
 // Both calls see it, for the same reason precedent does: two judges working
 // from different records disagree about facts neither of them can check.
 func TestBaseRatesReachBothCalls(t *testing.T) {
+	t.Parallel()
+
 	facts := Facts{BaseRates: []BaseRate{
 		{Scope: "merchant+reason", ReasonCode: "13.1", Won: 12, Lost: 18},
 	}}
 
 	gen := &llmtest.ScriptedCompleter{Responses: []llm.Response{draftResponseFor(t, RecommendRepresent, "x")}}
-	if _, err := NewGenerator(gen, "t", llm.Pricing{}, 4096).Write(context.Background(), facts); err != nil {
+	if _, err := NewGenerator(gen, "t", llm.Pricing{}, 4096).Write(t.Context(), facts); err != nil {
 		t.Fatalf("generator: %v", err)
 	}
 	ver := &llmtest.ScriptedCompleter{Responses: []llm.Response{verdictPass(t)}}
-	if _, err := NewVerifier(ver, "t", llm.Pricing{}, 2048).Check(context.Background(), facts, "x"); err != nil {
+	if _, err := NewVerifier(ver, "t", llm.Pricing{}, 2048).Check(t.Context(), facts, "x"); err != nil {
 		t.Fatalf("verifier: %v", err)
 	}
 
@@ -105,7 +114,7 @@ func TestBaseRatesExistForAClaimlessDispute(t *testing.T) {
 	store, pool := liveStore(t)
 
 	var id int64
-	err := pool.QueryRow(context.Background(), `
+	err := pool.QueryRow(t.Context(), `
 		SELECT id FROM disputes
 		 WHERE kind = 'chargeback' AND cardholder_claim = ''
 		   AND state = 'received' ORDER BY id LIMIT 1`).Scan(&id)
@@ -116,7 +125,7 @@ func TestBaseRatesExistForAClaimlessDispute(t *testing.T) {
 	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{
 		Precedent: NewRetriever(pool, nil, 3),
 		BaseRates: pool,
-	}).For(context.Background(), id)
+	}).For(t.Context(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}

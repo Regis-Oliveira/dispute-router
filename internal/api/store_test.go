@@ -22,7 +22,7 @@ func testStore(t *testing.T) *Store {
 		t.Skip("DATABASE_URL not set; skipping database tests")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 
 	pool, err := pgxpool.New(ctx, dsn)
@@ -40,7 +40,7 @@ func testStore(t *testing.T) *Store {
 func firstDisputeID(t *testing.T, store *Store) int64 {
 	t.Helper()
 
-	list, err := store.ListDisputes(context.Background(), Filters{Limit: 1, Sort: defaultSort})
+	list, err := store.ListDisputes(t.Context(), Filters{Limit: 1, Sort: defaultSort})
 	if err != nil {
 		t.Fatalf("ListDisputes: %v", err)
 	}
@@ -53,7 +53,7 @@ func firstDisputeID(t *testing.T, store *Store) int64 {
 func TestListDisputes(t *testing.T) {
 	store := testStore(t)
 
-	list, err := store.ListDisputes(context.Background(), Filters{Limit: 5, Sort: defaultSort})
+	list, err := store.ListDisputes(t.Context(), Filters{Limit: 5, Sort: defaultSort})
 	if err != nil {
 		t.Fatalf("ListDisputes: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestDispute(t *testing.T) {
 	store := testStore(t)
 	id := firstDisputeID(t, store)
 
-	detail, err := store.Dispute(context.Background(), id)
+	detail, err := store.Dispute(t.Context(), id)
 	if err != nil {
 		t.Fatalf("Dispute(%d): %v", id, err)
 	}
@@ -118,7 +118,7 @@ func TestDisputeNotFound(t *testing.T) {
 func TestSummary(t *testing.T) {
 	store := testStore(t)
 
-	summary, err := store.Summary(context.Background(), Filters{})
+	summary, err := store.Summary(t.Context(), Filters{})
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}

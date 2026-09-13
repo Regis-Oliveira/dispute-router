@@ -37,7 +37,7 @@ func testSQS(t *testing.T) *sqs.Client {
 		t.Skip("AWS_ENDPOINT_URL not set; skipping SQS tests")
 	}
 
-	cfg, err := awsx.Load(context.Background(), awsx.Config{
+	cfg, err := awsx.Load(t.Context(), awsx.Config{
 		Region:          "us-east-1",
 		Endpoint:        endpoint,
 		AccessKeyID:     "test",
@@ -48,7 +48,7 @@ func testSQS(t *testing.T) *sqs.Client {
 	}
 
 	client := awsx.SQS(cfg)
-	if _, err := client.ListQueues(context.Background(), &sqs.ListQueuesInput{}); err != nil {
+	if _, err := client.ListQueues(t.Context(), &sqs.ListQueuesInput{}); err != nil {
 		t.Skipf("localstack unreachable: %v", err)
 	}
 	return client
@@ -58,7 +58,7 @@ func testSQS(t *testing.T) *sqs.Client {
 // visibility timeout so redelivery is observable inside a test.
 func newTestQueue(t *testing.T, client *sqs.Client, maxReceive int) (queueURL, dlqURL string) {
 	t.Helper()
-	ctx := context.Background()
+	ctx := t.Context()
 	suffix := fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Intn(1000))
 
 	dlq, err := client.CreateQueue(ctx, &sqs.CreateQueueInput{
@@ -109,7 +109,7 @@ func quietLogger() *slog.Logger {
 
 func depth(t *testing.T, client *sqs.Client, url string, attr types.QueueAttributeName) string {
 	t.Helper()
-	out, err := client.GetQueueAttributes(context.Background(), &sqs.GetQueueAttributesInput{
+	out, err := client.GetQueueAttributes(t.Context(), &sqs.GetQueueAttributesInput{
 		QueueUrl:       aws.String(url),
 		AttributeNames: []types.QueueAttributeName{attr},
 	})
@@ -122,7 +122,7 @@ func depth(t *testing.T, client *sqs.Client, url string, attr types.QueueAttribu
 // A dispute published by the relay comes back out of the queue and is scheduled
 // in the deadline index - the whole point of putting SQS in the path.
 func TestPublishedDisputeIsScheduledFromTheQueue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client := testSQS(t)
 	queueURL, _ := newTestQueue(t, client, 5)
 
@@ -190,7 +190,7 @@ func TestPublishedDisputeIsScheduledFromTheQueue(t *testing.T) {
 // deleted to keep the logs quiet, and must not be retried forever either - the
 // redrive policy takes it off the main queue after maxReceiveCount attempts.
 func TestAPoisonMessageEndsUpInTheDeadLetterQueue(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client := testSQS(t)
 	queueURL, dlqURL := newTestQueue(t, client, 2)
 
@@ -224,7 +224,7 @@ func TestAPoisonMessageEndsUpInTheDeadLetterQueue(t *testing.T) {
 // Events the consumer has no work for still have to be acknowledged. A queue
 // nobody drains is a queue that fills up.
 func TestUnrelatedEventsAreAcknowledged(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	client := testSQS(t)
 	queueURL, _ := newTestQueue(t, client, 5)
 

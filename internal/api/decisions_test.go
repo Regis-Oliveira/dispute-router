@@ -1,13 +1,20 @@
+//go:build integration
+
 package api
 
 import (
-	"context"
 	"testing"
 )
 
+// decided records a decision on a run, failing the test rather than handing
+// back an error nobody reads.
+//
+// This file carries reviews_test.go's integration tag because every test in it
+// seeds through awaitingReview, which needs the scratch database scratchStore
+// creates and drops.
 func decided(t *testing.T, store *Store, runID int64, decision Decision, reviewer string) {
 	t.Helper()
-	if err := store.Decide(context.Background(), runID, decision, reviewer); err != nil {
+	if err := store.Decide(t.Context(), runID, decision, reviewer); err != nil {
 		t.Fatalf("Decide: %v", err)
 	}
 }
@@ -17,7 +24,7 @@ func decided(t *testing.T, store *Store, runID int64, decision Decision, reviewe
 // reader agrees on what an override is.
 func TestAnOverrideIsMarked(t *testing.T) {
 	store, pool := scratchStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	rejected, _ := awaitingReview(t, pool, "rejected",
 		`[{"check":"unsupported_claim","quote":"tracking 1Z999","why":"not in the record"}]`)
@@ -60,7 +67,7 @@ func TestDiscardingARejectionIsNotAnOverride(t *testing.T) {
 	runID, _ := awaitingReview(t, pool, "rejected", `[]`)
 	decided(t, store, runID, "discarded", "Regis")
 
-	list, err := store.Decisions(context.Background(), DecisionFilters{})
+	list, err := store.Decisions(t.Context(), DecisionFilters{})
 	if err != nil {
 		t.Fatalf("Decisions: %v", err)
 	}
@@ -74,7 +81,7 @@ func TestDiscardingARejectionIsNotAnOverride(t *testing.T) {
 // assumption that has to go.
 func TestTheReviewerIsMatchedExactly(t *testing.T) {
 	store, pool := scratchStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	mine, _ := awaitingReview(t, pool, "drafted", `[]`)
 	theirs, _ := awaitingReview(t, pool, "drafted", `[]`)
@@ -113,7 +120,7 @@ func TestTheReviewerIsMatchedExactly(t *testing.T) {
 // selected them.
 func TestTheReviewerListIgnoresTheActiveFilter(t *testing.T) {
 	store, pool := scratchStore(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	a, _ := awaitingReview(t, pool, "drafted", `[]`)
 	b, _ := awaitingReview(t, pool, "drafted", `[]`)
@@ -134,7 +141,7 @@ func TestUndecidedRunsAreNotHistory(t *testing.T) {
 	store, pool := scratchStore(t)
 	awaitingReview(t, pool, "drafted", `[]`)
 
-	list, err := store.Decisions(context.Background(), DecisionFilters{})
+	list, err := store.Decisions(t.Context(), DecisionFilters{})
 	if err != nil {
 		t.Fatalf("Decisions: %v", err)
 	}

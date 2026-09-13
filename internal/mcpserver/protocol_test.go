@@ -1,11 +1,10 @@
 package mcpserver
 
 import (
-	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -25,7 +24,7 @@ func connect(t *testing.T) *mcp.ClientSession {
 		t.Skip("DATABASE_URL not set; skipping MCP protocol tests")
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
@@ -60,7 +59,7 @@ func connect(t *testing.T) *mcp.ClientSession {
 func TestEveryToolIsReadOnly(t *testing.T) {
 	session := connect(t)
 
-	tools, err := session.ListTools(context.Background(), nil)
+	tools, err := session.ListTools(t.Context(), nil)
 	if err != nil {
 		t.Fatalf("ListTools: %v", err)
 	}
@@ -82,7 +81,7 @@ func TestListDisputesRespectsTheCap(t *testing.T) {
 	session := connect(t)
 
 	// Ask for far more than the cap allows.
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
 		Name:      "list_disputes",
 		Arguments: map[string]any{"limit": 5000},
 	})
@@ -111,7 +110,7 @@ func TestListDisputesRespectsTheCap(t *testing.T) {
 func TestUnknownDisputeIsAToolError(t *testing.T) {
 	session := connect(t)
 
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
 		Name:      "get_dispute",
 		Arguments: map[string]any{"id": 99999999},
 	})
@@ -128,7 +127,7 @@ func TestUnknownDisputeIsAToolError(t *testing.T) {
 func TestBadArgumentTypeIsRejected(t *testing.T) {
 	session := connect(t)
 
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
 		Name:      "list_disputes",
 		Arguments: map[string]any{"limit": "muitos"},
 	})
@@ -140,7 +139,7 @@ func TestBadArgumentTypeIsRejected(t *testing.T) {
 // The email never leaves in the clear.
 func TestDisputeDetailMasksTheEmail(t *testing.T) {
 	session := connect(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	list, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "list_disputes",
@@ -168,7 +167,7 @@ func TestDisputeDetailMasksTheEmail(t *testing.T) {
 	if got.CustomerEmail == "" {
 		t.Fatal("no masked email returned")
 	}
-	if !containsRune(got.CustomerEmail, '*') {
+	if !strings.ContainsRune(got.CustomerEmail, '*') {
 		t.Errorf("customer_email_masked = %q, which is not masked", got.CustomerEmail)
 	}
 }
@@ -177,7 +176,7 @@ func TestDisputeDetailMasksTheEmail(t *testing.T) {
 func TestOverdueIsStatedNotImplied(t *testing.T) {
 	session := connect(t)
 
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
 		Name:      "list_disputes",
 		Arguments: map[string]any{"due_within": "24h", "limit": 20},
 	})
@@ -204,14 +203,3 @@ func decode(t *testing.T, result *mcp.CallToolResult, into any) {
 		t.Fatalf("decode structured content: %v", err)
 	}
 }
-
-func containsRune(s string, r rune) bool {
-	for _, c := range s {
-		if c == r {
-			return true
-		}
-	}
-	return false
-}
-
-var _ = time.Second

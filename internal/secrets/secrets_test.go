@@ -25,7 +25,7 @@ func testManager(t *testing.T, document string, ttl time.Duration) *FromManager 
 		t.Skip("AWS_ENDPOINT_URL not set; skipping Secrets Manager tests")
 	}
 
-	cfg, err := awsx.Load(context.Background(), awsx.Config{
+	cfg, err := awsx.Load(t.Context(), awsx.Config{
 		Region: "us-east-1", Endpoint: endpoint,
 		AccessKeyID: "test", SecretAccessKey: "test",
 	})
@@ -36,7 +36,7 @@ func testManager(t *testing.T, document string, ttl time.Duration) *FromManager 
 	client := awsx.SecretsManager(cfg)
 	name := "test/webhook-secrets-" + time.Now().Format("150405.000000")
 
-	if _, err := client.CreateSecret(context.Background(), &secretsmanager.CreateSecretInput{
+	if _, err := client.CreateSecret(t.Context(), &secretsmanager.CreateSecretInput{
 		Name:         aws.String(name),
 		SecretString: aws.String(document),
 	}); err != nil {
@@ -61,7 +61,7 @@ func TestReadsBothShapes(t *testing.T) {
 		"mrc_rotating": ["whsec_new", "whsec_old"]
 	}`, time.Minute)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	single, err := m.SecretsFor(ctx, "mrc_single")
 	if err != nil {
@@ -86,7 +86,7 @@ func TestReadsBothShapes(t *testing.T) {
 func TestUnknownMerchantIsEmptyNotAnError(t *testing.T) {
 	m := testManager(t, `{"mrc_known": "whsec_a"}`, time.Minute)
 
-	got, err := m.SecretsFor(context.Background(), "mrc_does_not_exist")
+	got, err := m.SecretsFor(t.Context(), "mrc_does_not_exist")
 	if err != nil {
 		t.Fatalf("SecretsFor = %v, want no error", err)
 	}
@@ -99,7 +99,7 @@ func TestUnknownMerchantIsEmptyNotAnError(t *testing.T) {
 func TestAMalformedEntryDoesNotBreakTheRest(t *testing.T) {
 	m := testManager(t, `{"mrc_good": "whsec_a", "mrc_bad": 12345}`, time.Minute)
 
-	good, err := m.SecretsFor(context.Background(), "mrc_good")
+	good, err := m.SecretsFor(t.Context(), "mrc_good")
 	if err != nil {
 		t.Fatalf("SecretsFor: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestAMalformedEntryDoesNotBreakTheRest(t *testing.T) {
 		t.Errorf("the good merchant returned %v", good)
 	}
 
-	bad, err := m.SecretsFor(context.Background(), "mrc_bad")
+	bad, err := m.SecretsFor(t.Context(), "mrc_bad")
 	if err != nil {
 		t.Errorf("a malformed entry produced an error: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestAMalformedEntryDoesNotBreakTheRest(t *testing.T) {
 // rate-limited service.
 func TestTheDocumentIsCached(t *testing.T) {
 	m := testManager(t, `{"mrc_a": "whsec_a"}`, time.Minute)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := m.SecretsFor(ctx, "mrc_a"); err != nil {
 		t.Fatalf("SecretsFor: %v", err)
@@ -143,7 +143,7 @@ func TestTheDocumentIsCached(t *testing.T) {
 // The TTL is the rotation latency: a key published now takes effect within it.
 func TestAnExpiredCacheIsRefetched(t *testing.T) {
 	m := testManager(t, `{"mrc_a": "whsec_a"}`, 50*time.Millisecond)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	if _, err := m.SecretsFor(ctx, "mrc_a"); err != nil {
 		t.Fatalf("SecretsFor: %v", err)

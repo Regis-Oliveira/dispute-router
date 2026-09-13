@@ -17,7 +17,7 @@ func liveRetrieval(t *testing.T) (*pgxpoolHandle, string, string) {
 	_ = store
 
 	var merchant, claim string
-	err := pool.QueryRow(context.Background(), `
+	err := pool.QueryRow(t.Context(), `
 		SELECT m.external_id, d.cardholder_claim
 		  FROM disputes d JOIN merchants m ON m.id = d.merchant_id
 		 WHERE d.state IN ('won','lost') AND d.cardholder_claim <> ''
@@ -34,7 +34,7 @@ func TestLexicalRetrievalFindsRealPrecedent(t *testing.T) {
 	handle, merchant, claim := liveRetrieval(t)
 
 	precedents, retrieval, err := NewRetriever(handle.pool, nil, 3).
-		For(context.Background(), -1, merchant, claim)
+		For(t.Context(), -1, merchant, claim)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestLexicalRetrievalFindsRealPrecedent(t *testing.T) {
 // distance order.
 func TestVectorRetrievalRoundTrips(t *testing.T) {
 	handle, merchant, claim := liveRetrieval(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	embedder := &wordVector{dims: 1024}
 
 	// A small backfill, because this is about the round trip and not the size.
@@ -103,7 +103,7 @@ func TestVectorRetrievalRoundTrips(t *testing.T) {
 // running it twice does not embed anything twice.
 func TestTheBackfillIsResumable(t *testing.T) {
 	handle, _, _ := liveRetrieval(t)
-	ctx := context.Background()
+	ctx := t.Context()
 	embedder := &wordVector{dims: 1024}
 	quiet := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 

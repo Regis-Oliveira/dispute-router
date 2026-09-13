@@ -6,7 +6,9 @@ import "testing"
 // dispute, because the record handed the model 5799 and the prompt told it to
 // copy the record's digits.
 func TestFormatMinorDividesExactlyOnce(t *testing.T) {
-	cases := map[string]struct {
+	t.Parallel()
+
+	for name, c := range map[string]struct {
 		minor    int64
 		currency string
 		want     string
@@ -17,17 +19,21 @@ func TestFormatMinorDividesExactlyOnce(t *testing.T) {
 		"a single minor unit":       {1, "USD", "0.01 USD"},
 		"grouped":                   {1234567, "EUR", "12,345.67 EUR"},
 		"lowercase currency":        {5799, "usd", "57.99 USD"},
-	}
-	for name, c := range cases {
-		if got := FormatMinor(c.minor, c.currency); got != c.want {
-			t.Errorf("%s: FormatMinor(%d, %q) = %q, want %q", name, c.minor, c.currency, got, c.want)
-		}
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			if got := FormatMinor(c.minor, c.currency); got != c.want {
+				t.Errorf("FormatMinor(%d, %q) = %q, want %q", c.minor, c.currency, got, c.want)
+			}
+		})
 	}
 }
 
 // Not every currency has cents. A blanket divide by 100 turns 5,000 yen into
 // 50, and nothing about the result looks wrong.
 func TestZeroDecimalCurrenciesAreNotDivided(t *testing.T) {
+	t.Parallel()
+
 	if got := FormatMinor(5000, "JPY"); got != "5,000 JPY" {
 		t.Errorf("FormatMinor(5000, JPY) = %q", got)
 	}
