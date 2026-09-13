@@ -9,6 +9,7 @@ package dlq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -25,6 +26,7 @@ import (
 // failure forever and look new every time.
 const redriveCountAttribute = "redrive_count"
 
+// Message is one dead-lettered message and what the queue knows about it.
 type Message struct {
 	ReceiptHandle string
 	Body          string
@@ -52,6 +54,8 @@ func (m Message) Summary() string {
 		envelope.EventType, envelope.AggregateID, envelope.OutboxID)
 }
 
+// Redriver reads the dead-letter queue and moves messages back to the main
+// one.
 type Redriver struct {
 	Client *sqs.Client
 	// Source is the dead-letter queue; Target is where replayed messages go.
@@ -59,6 +63,8 @@ type Redriver struct {
 	Target string
 }
 
+// Depth reports roughly how many messages a queue holds. Approximate: SQS
+// excludes in-flight messages and lags, so it is for reporting, not deciding.
 func (r *Redriver) Depth(ctx context.Context, queueURL string) (int, error) {
 	out, err := r.Client.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{
 		QueueUrl: aws.String(queueURL),
@@ -67,9 +73,13 @@ func (r *Redriver) Depth(ctx context.Context, queueURL string) (int, error) {
 		},
 	})
 	if err != nil {
-		return 0, fmt.Errorf("queue depth: %w", err)
+		return 0, fmt.Errorf("depth of %s: %w", queueURL, err)
 	}
-	return strconv.Atoi(out.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)])
+	n, err := strconv.Atoi(out.Attributes[string(types.QueueAttributeNameApproximateNumberOfMessages)])
+	if err != nil {
+		return 0, fmt.Errorf("depth of %s: %w", queueURL, err)
+	}
+	return n, nil
 }
 
 // receive pulls a batch.
@@ -156,10 +166,13 @@ func (r *Redriver) Peek(ctx context.Context, limit int) ([]Message, error) {
 	return seen, nil
 }
 
+// Stats is what one Replay did. Errors carries one entry per Failed message,
+// joined, so the count never stands in for the reasons.
 type Stats struct {
 	Replayed int
 	Skipped  int
 	Failed   int
+	Errors   error
 }
 
 // Replay moves messages back to the main queue.
@@ -173,6 +186,13 @@ type Stats struct {
 // worse than a queue that is visibly stuck.
 func (r *Redriver) Replay(ctx context.Context, limit, maxRedrives int, dryRun bool) (Stats, error) {
 	var stats Stats
+	var errs []error
+
+	// Skipped messages stay reserved until the loop ends. Released at once,
+	// the next receive picks the same message up again, and one over-redriven
+	// message is counted Skipped until limit is reached.
+	var skipped []Message
+	defer func() { r.release(ctx, skipped) }()
 
 	// A dry run must be a no-op in every observable sense, not just a durable
 	// one. Reserving the messages for thirty seconds leaves the queue looking
@@ -203,9 +223,7 @@ func (r *Redriver) Replay(ctx context.Context, limit, maxRedrives int, dryRun bo
 
 		for _, msg := range batch {
 			if msg.Redrives >= maxRedrives {
-				// Put it back now rather than leaving it reserved: it was not
-				// touched, and the next operator should be able to see it.
-				r.release(ctx, []Message{msg})
+				skipped = append(skipped, msg)
 				stats.Skipped++
 				continue
 			}
@@ -222,6 +240,7 @@ func (r *Redriver) Replay(ctx context.Context, limit, maxRedrives int, dryRun bo
 			})
 			if err != nil {
 				stats.Failed++
+				errs = append(errs, fmt.Errorf("send %s: %w", msg.Summary(), err))
 				continue
 			}
 
@@ -232,12 +251,14 @@ func (r *Redriver) Replay(ctx context.Context, limit, maxRedrives int, dryRun bo
 				// Already sent. Leaving it here means one duplicate, which the
 				// consumer handles; the alternative is losing it.
 				stats.Failed++
+				errs = append(errs, fmt.Errorf("delete %s after sending it: %w", msg.Summary(), err))
 				continue
 			}
 			stats.Replayed++
 		}
 	}
 
+	stats.Errors = errors.Join(errs...)
 	return stats, nil
 }
 

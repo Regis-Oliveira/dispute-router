@@ -7,9 +7,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/regisoliveira/dispute-router/internal/awsx"
@@ -36,13 +39,19 @@ func main() {
 	}
 
 	if err := run(os.Args[1], os.Args[2:]); err != nil {
+		// The flag package has already printed the usage for -h.
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(2)
+		}
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func run(command string, args []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	cfg, err := config.Load(".env")
@@ -80,7 +89,7 @@ func run(command string, args []string) error {
 }
 
 func peek(ctx context.Context, r *dlq.Redriver, args []string) error {
-	flags := flag.NewFlagSet("peek", flag.ExitOnError)
+	flags := flag.NewFlagSet("peek", flag.ContinueOnError)
 	limit := flags.Int("n", 10, "how many messages to show")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -116,7 +125,7 @@ func peek(ctx context.Context, r *dlq.Redriver, args []string) error {
 }
 
 func replay(ctx context.Context, r *dlq.Redriver, args []string) error {
-	flags := flag.NewFlagSet("replay", flag.ExitOnError)
+	flags := flag.NewFlagSet("replay", flag.ContinueOnError)
 	limit := flags.Int("n", 100, "how many messages to move")
 	maxRedrives := flags.Int("max-redrives", 3, "refuse a message already replayed this many times")
 	dryRun := flags.Bool("dry-run", false, "report what would move, change nothing")
@@ -149,11 +158,14 @@ func replay(ctx context.Context, r *dlq.Redriver, args []string) error {
 		fmt.Println("\nskipped messages have been put back and are still on the queue.")
 		fmt.Println("they are failing for a reason a replay will not change.")
 	}
+	if stats.Errors != nil {
+		return fmt.Errorf("%d message(s) could not be replayed:\n%w", stats.Failed, stats.Errors)
+	}
 	return nil
 }
 
 func purge(ctx context.Context, r *dlq.Redriver, args []string) error {
-	flags := flag.NewFlagSet("purge", flag.ExitOnError)
+	flags := flag.NewFlagSet("purge", flag.ContinueOnError)
 	confirmed := flags.Bool("yes", false, "required: this destroys the messages")
 	if err := flags.Parse(args); err != nil {
 		return err
