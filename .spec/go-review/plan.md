@@ -1,6 +1,8 @@
 # Go review: fixes, visibility, structure, observability
 
-Status: **Phases 0, 1 and 2 done (2026-09-13); 5.2 built early.** Next: Phase 3. Source: a full
+Status: **Phases 0, 1 and 2 done (2026-09-13); 5.2 built early. Phase 3 in
+progress: 3.1, 3.2, 3.4 and 3.7 done, with the agent-side and mains-side 3.9
+items.** Next in Phase 3: 3.3, 3.5, 3.6, 3.8 and the rest of 3.9. Source: a full
 idiomatic-Go review of the module on 2026-09-13 (gofmt, vet, build clean;
 staticcheck one test nit; 120 findings across three package slices).
 
@@ -221,7 +223,7 @@ treats a poison message like a transient failure.
 Behaviour-preserving. Each item is one commit; the order is by how many later
 items depend on it.
 
-**3.1 One insert for `outbox`, one for `dispute_events`.** `internal/outbox`,
+**3.1 One insert for `outbox`, one for `dispute_events`.** **DONE.** Decided: a new `internal/events` owns the `dispute_events` insert; the outbox insert went into `internal/outbox` beside the relay that reads the same columns, since separating the writer from the reader is how the two halves of a row contract drift. Ingest's `occurred_at` turned out to be deliberate, not drift: a webhook carries the processor's own clock and the API orders the trail by it. `internal/outbox`,
 new `internal/events` (or a function in `internal/ingest`… **DECIDE** which
 package owns `dispute_events`; the proposal is a small `internal/events`
 package with `Record(ctx, tx, Event)`), callers in `api/reviews.go`,
@@ -230,7 +232,7 @@ package with `Record(ctx, tx, Event)`), callers in `api/reviews.go`,
   `ingest` casts `::jsonb` from a string, `api` passes `[]byte` uncast).
 - Verify: the live store tests in all four packages; `make flow`.
 
-**3.2 One transaction idiom.** `pgx.BeginFunc` everywhere. `worker/store.go`
+**3.2 One transaction idiom.** **DONE.** `pgx.BeginFunc` everywhere. `worker/store.go`
 keeps its testable `applyTx` body; `ingest/store.go`'s "commit the failure"
 path returns nil from the body and carries `ErrUnknownTransaction` out in a
 captured variable. Extract `insertDelivery` from the duplicated block in
@@ -243,7 +245,7 @@ and the constants the SQL and Go both use (~60 literals today), following the
 string`. Verify: the compiler; `grep -rn '"draft_ready"' internal cmd` finds
 only the constant.
 
-**3.4 A boot package for the mains.** New `cmd/internal/boot` (Go restricts it
+**3.4 A boot package for the mains.** **DONE.** `Store.Ping` stayed as two methods on two types. Three things that looked duplicated were not, and the report in the commit message says why: the five commands open a pool without pinging it on purpose, `debugx.Serve`'s three call sites each carry a different comment, and `signal.NotifyContext` names its own signals. New `cmd/internal/boot` (Go restricts it
 to `cmd/`): `Logger(json bool)`, `Postgres(ctx, url)`, `Redis(ctx, url)`,
 `ServeHTTP(ctx, *http.Server, grace)`. Each main shrinks by ~40 lines; the
 stdout-JSON vs stderr-text logger choice becomes explicit per binary.
@@ -262,7 +264,7 @@ silently; `Entry{DisputeID, MerchantID, AmountMinor, Currency, At}` and
 `type direction string`. Verify: `go test ./internal/worker/` (the ledger's
 only live test path) and `make verify`.
 
-**3.7 Generator and verifier share one call.** `internal/agent/generate.go`,
+**3.7 Generator and verifier share one call.** **DONE.** The fail-closed validation stayed with each caller, so the shared transport cannot set `written` or `checked`. `mustSchema` now panics rather than shipping the error to the model as a tool description; the prompt fingerprint bytes are unchanged. `internal/agent/generate.go`,
 `verify.go`. The two 70-line "render, derive schema, forced tool call, price,
 check `max_tokens`, unmarshal" flows become `callTool[T any]`. JSON schemas are
 derived once (`sync.OnceValue`) instead of on every call, and one helper
@@ -279,24 +281,27 @@ tests can run without a database. Largest item in the plan; last in the phase
 so it lands on settled code.
 
 **3.9 Smaller shapes.** One commit each, any order:
-- `facts.go` `WithPrecedent`/`WithBaseRates` become fields on a
+- DONE `facts.go` `WithPrecedent`/`WithBaseRates` became fields on a
   `FactSourceOptions` struct with `evidence != nil` validated in the
   constructor.
-- `eval.Runner`: exported fields *or* setters, not both (keep the fields).
+- DONE `eval.Runner`: kept the exported fields, dropped the setters.
 - `worker.Locks` returns a `*Lock` with `Release(ctx)`; release and
   `rescheduleSoon` use `context.WithoutCancel` with a 2 s timeout so shutdown
   does not leave locks for the TTL.
 - `ingest.Handler.ServeHTTP` (190 lines) splits into `authenticate` and
   per-type `record` functions.
+- DONE `cmd/eval`'s `print` is `printReport`; `cmd/ask` takes an `io.Writer`.
+- DONE the loop returns only completed tool calls; `normalise` always returns
+  a fresh slice.
 - `api.Timeout` wraps per route instead of matching `/api/stream` by string;
   `Routes()` returns `http.Handler`.
 - `api/decisions.go` reuses `builder` from `filters.go` and copies `args`
   before appending (slice aliasing).
-- `Budget.MaxCostMicros == 0` means "no ceiling" everywhere (today it halts on
-  the first turn in `loop.go` and means no ceiling in `assist.go`/`eval`).
-- Two Anthropic/Voyage "retryable" signals become one `apiError` with
-  `Retryable()`; `Retry-After` honoured; the "fixed backoff" comment matches
-  the linear code or the code becomes fixed.
+- DONE `Budget.MaxCostMicros == 0` means "no ceiling" everywhere.
+- DONE one `apiError` with `Retryable()`, `Retry-After` honoured and capped at
+  a minute, the backoff comment corrected to "linear". Consequence to keep in
+  mind: the embedding client now retries 5xx, not only 429, under the same
+  three-attempt ceiling.
 - `debugx`: `syscall.Getrusage` behind `//go:build unix` with a stub; the
   150-line HTML page moves to `live.html` with `//go:embed`.
 

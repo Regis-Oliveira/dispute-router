@@ -1,0 +1,32 @@
+runs  22
+
+OUTCOMES                 
+  insufficient_evidence  20  91%
+  drafted                1   5%
+  rejected               1   5%
+  escalated to a person  1
+  second attempts        1
+
+COST                       
+  total                    $0.3872
+  per run                  $0.0176
+  tokens                   58831 in / 9635 out
+  input served from cache  45%  (58410 read, 12980 written)
+
+LATENCY (wall, per run)  
+  assemble the record    p50 300ms   p95 1.15s
+  generator call         p50 4.724s  p95 5.485s
+  verifier call          p50 1.529s  p95 1.624s
+  whole run              p50 6.824s  p95 8.061s
+
+RETRIEVAL                           
+  none                              16  73%
+  vector                            6   27%
+  runs with at least one precedent  6   27%
+
+EVIDENCE                                 
+  runs with a file on the dispute        1  5%
+  runs with a file's text in the record  1  5%
+
+FINDINGS BY RULE     
+  unsupported_claim  2
