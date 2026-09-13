@@ -6,6 +6,7 @@ import { provideHttpClient, withFetch } from '@angular/common/http';
 import { provideRouter, withComponentInputBinding } from '@angular/router';
 
 import { routes } from './app.routes';
+import { sentryErrorHandlerProvider } from './core/sentry';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -15,5 +16,6 @@ export const appConfig: ApplicationConfig = {
     // a fast filter change never gets painted over by a slow earlier response.
     provideHttpClient(withFetch()),
     provideRouter(routes, withComponentInputBinding()),
+    sentryErrorHandlerProvider,
   ],
 };
