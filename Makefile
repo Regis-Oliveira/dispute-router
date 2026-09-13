@@ -67,6 +67,11 @@ emit:
 # The same, with deadlines forty seconds out instead of days, so the worker
 # claims each one on its next tick. For watching the worker work (open
 # http://127.0.0.1:6061/debug/live beside it); not realistic traffic.
+# Expect most of it to expire: chargebacks and alerts above the ceiling are
+# handed to a person, and forty seconds gives that person ten to act, so the
+# worker's next visit - just past the deadline - writes them down as expired.
+# That is the policy working, not the worker missing them. Refunds and closes
+# are the decisions to watch for.
 emit-rush:
 	cd $(SIM) && npm run emit -- --rate 120 --rush
 
