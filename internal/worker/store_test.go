@@ -247,8 +247,13 @@ func TestARefundCannotBePostedTwice(t *testing.T) {
 	}
 
 	// Same dispute, same external_ref. Postgres has to refuse it.
-	err = ledger.Refund(ctx, tx, candidate.ID, candidate.MerchantID, candidate.AmountMinor,
-		candidate.Currency, time.Now(), candidate.ReasonCode)
+	err = ledger.Refund(ctx, tx, ledger.Entry{
+		DisputeID:   candidate.ID,
+		MerchantID:  candidate.MerchantID,
+		AmountMinor: candidate.AmountMinor,
+		Currency:    candidate.Currency,
+		At:          time.Now(),
+	}, candidate.ReasonCode)
 	if err == nil {
 		t.Fatal("a second refund for the same dispute was accepted")
 	}

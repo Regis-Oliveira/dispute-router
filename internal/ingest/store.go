@@ -160,8 +160,13 @@ func (s *Store) record(
 		// the money when the network filed it, and the outcome is weeks away. An
 		// alert is only a warning, so nothing moves.
 		if dispute.Kind(event.Data.Kind) == dispute.KindChargeback {
-			if err := ledger.Hold(ctx, tx, disputeID, merchant.ID, event.Data.AmountMinor,
-				event.Data.Currency, event.Data.OpenedAt, event.Data.ReasonCode); err != nil {
+			if err := ledger.Hold(ctx, tx, ledger.Entry{
+				DisputeID:   disputeID,
+				MerchantID:  merchant.ID,
+				AmountMinor: event.Data.AmountMinor,
+				Currency:    event.Data.Currency,
+				At:          event.Data.OpenedAt,
+			}, event.Data.ReasonCode); err != nil {
 				return err
 			}
 		}
@@ -366,12 +371,17 @@ func (s *Store) recordRuling(
 		// Both outcomes move money now, because the funds were held when the
 		// chargeback arrived. A win releases the hold back to the merchant; a loss
 		// sends it to the issuer and charges the fee.
+		entry := ledger.Entry{
+			DisputeID:   disputeID,
+			MerchantID:  merchant.ID,
+			AmountMinor: amountMinor,
+			Currency:    currency,
+			At:          event.Data.DecidedAt,
+		}
 		if ruled == dispute.StateLost {
-			err = ledger.SettleLoss(ctx, tx, disputeID, merchant.ID, amountMinor, currency,
-				event.Data.DecidedAt, "representment lost")
+			err = ledger.SettleLoss(ctx, tx, entry, "representment lost")
 		} else {
-			err = ledger.ReleaseHold(ctx, tx, disputeID, merchant.ID, amountMinor, currency,
-				event.Data.DecidedAt)
+			err = ledger.ReleaseHold(ctx, tx, entry)
 		}
 		if err != nil {
 			return err

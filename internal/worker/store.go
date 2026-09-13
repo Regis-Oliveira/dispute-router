@@ -130,16 +130,24 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 
 	// The version check is the actual guard against two workers acting on one
 	// dispute. The Redis lock only makes it unlikely; this makes it impossible.
+	//
+	// now() comes back out because the ledger needs the same instant. It is
+	// transaction_timestamp(), so it is also the value this UPDATE stamped on
+	// resolved_at and the one events.Record's own now() will use: one decision
+	// written down three times reads as one moment, which it was. Taking
+	// time.Now() here instead put the ledger entry a few microseconds off the
+	// state change it pays for, on a different clock, for no reason.
 	var newVersion int32
+	var at time.Time
 	err := tx.QueryRow(ctx, `
 		UPDATE disputes
 		   SET state = $3,
 		       version = version + 1,
 		       resolved_at = CASE WHEN $4 THEN now() ELSE resolved_at END
 		 WHERE id = $1 AND version = $2
-		RETURNING version`,
+		RETURNING version, now()`,
 		l.ID, l.Version, decision.ToState, resolved,
-	).Scan(&newVersion)
+	).Scan(&newVersion, &at)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrStaleCandidate
@@ -162,10 +170,17 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 		return err
 	}
 
+	entry := ledger.Entry{
+		DisputeID:   l.ID,
+		MerchantID:  l.MerchantID,
+		AmountMinor: l.AmountMinor,
+		Currency:    l.Currency,
+		At:          at,
+	}
+
 	switch decision.Action {
 	case ActionRefund:
-		if err := ledger.Refund(ctx, tx, l.ID, l.MerchantID, l.AmountMinor,
-			l.Currency, time.Now(), l.ReasonCode); err != nil {
+		if err := ledger.Refund(ctx, tx, entry, l.ReasonCode); err != nil {
 			return err
 		}
 		if err := addRefundToTransaction(ctx, tx, l); err != nil {
@@ -184,8 +199,8 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 		// expired alert costs nothing here - no money was ever held, and the
 		// chargeback it invites has not arrived yet.
 		if l.Kind == dispute.KindChargeback {
-			if err := ledger.SettleLoss(ctx, tx, l.ID, l.MerchantID, l.AmountMinor,
-				l.Currency, time.Now(), "response window closed with no representment"); err != nil {
+			if err := ledger.SettleLoss(ctx, tx, entry,
+				"response window closed with no representment"); err != nil {
 				return err
 			}
 		}
