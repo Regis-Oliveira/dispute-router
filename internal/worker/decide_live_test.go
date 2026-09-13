@@ -36,7 +36,7 @@ func TestLoadPopulatesEverythingDecideReads(t *testing.T) {
 		}
 		checked++
 
-		l, err := store.Load(ctx, id)
+		l, err := store.load(ctx, id)
 		if err != nil {
 			t.Fatalf("Load(%d): %v", id, err)
 		}

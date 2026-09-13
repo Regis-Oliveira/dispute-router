@@ -34,12 +34,12 @@ type loaded struct {
 	Version    int32
 }
 
-// Load reads a dispute at claim time.
+// load reads a dispute at claim time.
 //
 // Deliberately re-read rather than carried through the queue: a dispute
 // scheduled an hour ago may already have been resolved by a human, and acting
 // on the version that was scheduled would undo their work.
-func (s *Store) Load(ctx context.Context, disputeID int64) (loaded, error) {
+func (s *Store) load(ctx context.Context, disputeID int64) (loaded, error) {
 	var l loaded
 	err := s.pool.QueryRow(ctx, `
 		SELECT d.id, d.merchant_id, d.kind, d.state, d.reason_code,
@@ -97,13 +97,13 @@ func (s *Store) OpenDeadlines(ctx context.Context) (map[int64]time.Time, error) 
 	return out, rows.Err()
 }
 
-// Apply writes a decision.
+// apply writes a decision.
 //
 // One transaction: the state change, its audit event, any money it moved, and
 // the outbox message telling the rest of the system. A dispute cannot end up
 // refunded with no ledger entry, or refunded with nothing downstream ever
 // hearing about it.
-func (s *Store) Apply(ctx context.Context, l loaded, decision Decision, workerID string) error {
+func (s *Store) apply(ctx context.Context, l loaded, decision Decision, workerID string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
@@ -120,7 +120,7 @@ func (s *Store) Apply(ctx context.Context, l loaded, decision Decision, workerID
 	return nil
 }
 
-// applyTx is Apply's body, separated from the transaction that wraps it.
+// applyTx is apply's body, separated from the transaction that wraps it.
 //
 // Not an abstraction for its own sake: it is what lets a test run the real
 // write path against a real database inside a transaction it then rolls back,

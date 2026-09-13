@@ -9,9 +9,9 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// DeadlineKey is the sorted set of open disputes, scored by their deadline as
+// deadlineKey is the sorted set of open disputes, scored by their deadline as
 // a unix timestamp.
-const DeadlineKey = "disputes:deadlines"
+const deadlineKey = "disputes:deadlines"
 
 // claimDue pops the ids that are due and removes them in the same breath.
 //
@@ -41,6 +41,7 @@ type Deadlines struct {
 	rdb *redis.Client
 }
 
+// NewDeadlines wraps a Redis client.
 func NewDeadlines(rdb *redis.Client) *Deadlines {
 	return &Deadlines{rdb: rdb}
 }
@@ -49,7 +50,7 @@ func NewDeadlines(rdb *redis.Client) *Deadlines {
 // that is already present, so scheduling the same dispute twice is not a
 // duplicate - it is a reschedule.
 func (d *Deadlines) Schedule(ctx context.Context, disputeID int64, at time.Time) error {
-	err := d.rdb.ZAdd(ctx, DeadlineKey, redis.Z{
+	err := d.rdb.ZAdd(ctx, deadlineKey, redis.Z{
 		Score:  float64(at.Unix()),
 		Member: strconv.FormatInt(disputeID, 10),
 	}).Err()
@@ -73,7 +74,7 @@ func (d *Deadlines) ScheduleMany(ctx context.Context, entries map[int64]time.Tim
 		})
 	}
 
-	if err := d.rdb.ZAdd(ctx, DeadlineKey, members...).Err(); err != nil {
+	if err := d.rdb.ZAdd(ctx, deadlineKey, members...).Err(); err != nil {
 		return fmt.Errorf("schedule %d disputes: %w", len(entries), err)
 	}
 	return nil
@@ -85,7 +86,7 @@ func (d *Deadlines) ScheduleMany(ctx context.Context, entries map[int64]time.Tim
 // dispute is handled late. Work is claimed slightly *before* it is due so the
 // decision lands inside the window.
 func (d *Deadlines) Claim(ctx context.Context, upto time.Time, limit int) ([]int64, error) {
-	raw, err := claimDue.Run(ctx, d.rdb, []string{DeadlineKey}, upto.Unix(), limit).StringSlice()
+	raw, err := claimDue.Run(ctx, d.rdb, []string{deadlineKey}, upto.Unix(), limit).StringSlice()
 	if err != nil {
 		return nil, fmt.Errorf("claim due disputes: %w", err)
 	}
@@ -106,5 +107,5 @@ func (d *Deadlines) Claim(ctx context.Context, upto time.Time, limit int) ([]int
 // Pending is how many disputes are currently indexed, for the log line that
 // tells you whether a reconcile did anything.
 func (d *Deadlines) Pending(ctx context.Context) (int64, error) {
-	return d.rdb.ZCard(ctx, DeadlineKey).Result()
+	return d.rdb.ZCard(ctx, deadlineKey).Result()
 }

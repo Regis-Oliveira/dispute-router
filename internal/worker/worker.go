@@ -158,8 +158,6 @@ func (p *Pool) pollLoop(ctx context.Context) error {
 					break
 				}
 				p.claimed.Add(int64(claimed))
-				// Keep going while the batch came back full, so a backlog
-				// clears at full speed rather than one batch per tick.
 				if claimed < p.opts.BatchSize {
 					break
 				}
@@ -228,7 +226,7 @@ func (p *Pool) handle(ctx context.Context, disputeID int64) {
 		}
 	}()
 
-	current, err := p.opts.Store.Load(ctx, disputeID)
+	current, err := p.opts.Store.load(ctx, disputeID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			// Deleted between scheduling and claiming. Nothing to reschedule.
@@ -268,7 +266,7 @@ func (p *Pool) handle(ctx context.Context, disputeID int64) {
 		return
 	}
 
-	if err := p.opts.Store.Apply(ctx, current, decision, p.opts.ID); err != nil {
+	if err := p.opts.Store.apply(ctx, current, decision, p.opts.ID); err != nil {
 		if errors.Is(err, ErrStaleCandidate) {
 			// Somebody changed it underneath us. Correct outcome: the write
 			// was refused rather than applied to a dispute that had moved on.

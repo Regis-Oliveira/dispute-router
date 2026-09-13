@@ -288,7 +288,7 @@ func TestApplyRefusesAStaleVersion(t *testing.T) {
 func TestLoadTranslatesAMissingDisputeToErrNotFound(t *testing.T) {
 	store := NewStore(testPool(t))
 
-	_, err := store.Load(t.Context(), -1)
+	_, err := store.load(t.Context(), -1)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Load(-1) = %v, want ErrNotFound", err)
 	}

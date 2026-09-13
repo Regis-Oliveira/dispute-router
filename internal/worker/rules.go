@@ -33,6 +33,7 @@ const (
 	ActionSkip Action = "skip"
 )
 
+// Decision is what the worker will do to one dispute and why.
 type Decision struct {
 	Action Action
 	// ToState is empty for actions that change nothing.
@@ -111,6 +112,14 @@ type Candidate struct {
 // Decide is the whole policy, and it is a pure function on purpose: what the
 // system does with someone's money is the part that most needs to be readable,
 // reviewable, and testable without standing up a database.
+//
+// What this policy deliberately does not do: it never automatically concedes a
+// chargeback, and it never represents one either - the only path to
+// 'represented' is a person approving a draft. Auto-refunding an alert is
+// strictly cheaper than the alternative, so it is safe to automate; giving up
+// on a chargeback is a judgement about evidence and about a merchant
+// relationship, and a rule engine that quietly writes off money is the one
+// nobody notices is wrong.
 func Decide(c Candidate, now time.Time) Decision {
 	if c.Resolved || (c.State != "received" && c.State != "resolving" && c.State != "draft_ready") {
 		return Decision{Action: ActionSkip, Reason: "already resolved"}
@@ -235,10 +244,3 @@ func Decide(c Candidate, now time.Time) Decision {
 
 	return Decision{Action: ActionEscalate, Reason: "unknown dispute kind " + c.Kind}
 }
-
-// Note on what this policy deliberately does not do: it never automatically
-// concedes a chargeback, and it never represents one either - the only path
-// to 'represented' is a person approving a draft. Auto-refunding an alert is strictly cheaper than the
-// alternative, so it is safe to automate; giving up on a chargeback is a
-// judgement about evidence and about a merchant relationship, and a rule engine
-// that quietly writes off money is the one nobody notices is wrong.

@@ -38,6 +38,8 @@ type Locks struct {
 	ttl time.Duration
 }
 
+// NewLocks wraps a Redis client; ttl bounds how long a stalled holder keeps
+// a lock.
 func NewLocks(rdb *redis.Client, ttl time.Duration) *Locks {
 	return &Locks{rdb: rdb, ttl: ttl}
 }
