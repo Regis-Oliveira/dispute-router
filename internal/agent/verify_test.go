@@ -200,8 +200,15 @@ func TestTheVerifierNeverSeesTheGeneratorsTranscript(t *testing.T) {
 // Reporting "no evidence on file" when the evidence store was never wired up
 // turns a deployment fault into a stream of confident rejections.
 func TestAMissingEvidenceSourceIsAnError(t *testing.T) {
-	_, err := NewFactSource(nil, nil).For(context.Background(), 1)
+	// Refused at construction, so a binary that never wired S3 up cannot get
+	// as far as drafting.
+	if _, err := NewFactSource(nil, nil, FactSourceOptions{}); !errors.Is(err, ErrNoEvidenceSource) {
+		t.Fatalf("NewFactSource err = %v, want ErrNoEvidenceSource", err)
+	}
+	// And still refused at the call, for a source that was built around the
+	// constructor.
+	_, err := (&FactSource{}).For(context.Background(), 1)
 	if !errors.Is(err, ErrNoEvidenceSource) {
-		t.Fatalf("err = %v, want ErrNoEvidenceSource", err)
+		t.Fatalf("For err = %v, want ErrNoEvidenceSource", err)
 	}
 }

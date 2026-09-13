@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -99,6 +101,104 @@ type anthropicBody struct {
 // not a loop.
 const maxAttempts = 3
 
+// maxRetryAfter caps what a provider may ask us to wait.
+//
+// Retry-After is a value from outside the process, and an unbounded one would
+// hold a dispute in 'resolving' for as long as the header says. A minute is
+// longer than any real rate-limit window this system meets and still short
+// enough that a stuck run is noticed rather than waited on.
+const maxRetryAfter = time.Minute
+
+// apiError is a model provider's answer, or its failure to answer one.
+//
+// One type for both providers, because there was one question - is this worth
+// another attempt - answered two different ways: Anthropic returned a bool
+// alongside the error, which nothing could inspect after the fact, and Voyage
+// wrapped a bare errRateLimited sentinel, which said a rate limit had happened
+// and not what the API had actually returned. Neither exposed the status, so
+// neither could tell a caller whether the key was out of credit or the API was
+// busy.
+type apiError struct {
+	// op names the provider, for the message: the two clients produce the same
+	// type and an error that does not say which one it came from is worse than
+	// the string it replaced.
+	op string
+	// statusCode is zero when the request never reached an answer, in which
+	// case err carries the transport failure.
+	statusCode int
+	status     string
+	body       string
+	// retryAfter is what the response asked for, zero when it asked for
+	// nothing.
+	retryAfter time.Duration
+	err        error
+}
+
+func (e *apiError) Error() string {
+	if e.statusCode == 0 {
+		return fmt.Sprintf("%s: %v", e.op, e.err)
+	}
+	// The API's own message is included. "429" alone sends somebody to the
+	// wrong place; "429: this key has no credit" does not.
+	return fmt.Sprintf("%s: %s: %s", e.op, e.status, e.body)
+}
+
+func (e *apiError) Unwrap() error { return e.err }
+
+// Retryable reports whether another attempt is worth paying for.
+//
+// A request that never got an answer is worth one more; so is a rate limit, an
+// overload (529 is Anthropic's) and anything else the server blames on itself.
+// Everything else - a bad key, a malformed request - fails the same way three
+// times and bills for the privilege.
+func (e *apiError) Retryable() bool {
+	if e.statusCode == 0 {
+		return e.err != nil
+	}
+	return e.statusCode == http.StatusTooManyRequests ||
+		e.statusCode == 529 ||
+		e.statusCode >= 500
+}
+
+// retryable is the question both retry loops ask.
+func retryable(err error) bool {
+	var apiErr *apiError
+	return errors.As(err, &apiErr) && apiErr.Retryable()
+}
+
+// delayFor is how long to wait before the next attempt: what the provider
+// asked for where it said, and the caller's own computed delay where it did
+// not.
+func delayFor(err error, computed time.Duration) time.Duration {
+	var apiErr *apiError
+	if errors.As(err, &apiErr) && apiErr.retryAfter > 0 {
+		return apiErr.retryAfter
+	}
+	return computed
+}
+
+// parseRetryAfter reads the header in both of its forms, seconds and an HTTP
+// date, and reports zero for anything it cannot use - including a date already
+// in the past, which asks for no wait at all.
+func parseRetryAfter(header http.Header) time.Duration {
+	value := strings.TrimSpace(header.Get("Retry-After"))
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.Atoi(value); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return min(time.Duration(seconds)*time.Second, maxRetryAfter)
+	}
+	if when, err := http.ParseTime(value); err == nil {
+		if wait := time.Until(when); wait > 0 {
+			return min(wait, maxRetryAfter)
+		}
+	}
+	return 0
+}
+
 // Complete sends one request, retrying a busy API up to maxAttempts times.
 func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error) {
 	body, err := json.Marshal(anthropicBody{
@@ -116,30 +216,32 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error)
 
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		response, retryable, err := a.once(ctx, body)
+		response, err := a.once(ctx, body)
 		if err == nil {
 			return response, nil
 		}
 		lastErr = err
-		if !retryable || attempt == maxAttempts {
+		if !retryable(err) || attempt == maxAttempts {
 			break
 		}
-		// Fixed backoff rather than exponential: three attempts never get far
-		// enough apart for the difference to matter, and a predictable delay is
-		// easier to reason about when something is being billed for.
+		// Linear backoff: two seconds, then four. Not exponential, because
+		// three attempts never get far enough apart for the difference to
+		// matter, and a predictable delay is easier to reason about when
+		// something is being billed for. Where the API says how long to wait,
+		// its answer wins over this arithmetic.
 		select {
 		case <-ctx.Done():
 			return Response{}, ctx.Err()
-		case <-time.After(time.Duration(attempt) * 2 * time.Second):
+		case <-time.After(delayFor(err, time.Duration(attempt)*2*time.Second)):
 		}
 	}
 	return Response{}, lastErr
 }
 
-func (a *Anthropic) once(ctx context.Context, body []byte) (Response, bool, error) {
+func (a *Anthropic) once(ctx context.Context, body []byte) (Response, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, a.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return Response{}, false, fmt.Errorf("anthropic: building request: %w", err)
+		return Response{}, fmt.Errorf("anthropic: building request: %w", err)
 	}
 	request.Header.Set("content-type", "application/json")
 	request.Header.Set("anthropic-version", anthropicVersion)
@@ -147,8 +249,12 @@ func (a *Anthropic) once(ctx context.Context, body []byte) (Response, bool, erro
 
 	res, err := a.client.Do(request)
 	if err != nil {
-		// A transport failure is worth one more try; a cancelled context is not.
-		return Response{}, ctx.Err() == nil, fmt.Errorf("anthropic: %w", err)
+		// A transport failure is worth one more try; a cancelled context is
+		// not, and is returned as a plain error so nothing retries it.
+		if ctx.Err() != nil {
+			return Response{}, fmt.Errorf("anthropic: %w", err)
+		}
+		return Response{}, &apiError{op: "anthropic", err: err}
 	}
 	defer res.Body.Close()
 
@@ -156,26 +262,27 @@ func (a *Anthropic) once(ctx context.Context, body []byte) (Response, bool, erro
 	// up in a log and in an agent_runs row.
 	payload, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if err != nil {
-		return Response{}, true, fmt.Errorf("anthropic: reading response: %w", err)
+		return Response{}, &apiError{op: "anthropic", err: fmt.Errorf("reading response: %w", err)}
 	}
 
 	if res.StatusCode != http.StatusOK {
-		// The API's own message is included. "429" alone sends somebody to the
-		// wrong place; "429: this key has no credit" does not.
-		retryable := res.StatusCode == http.StatusTooManyRequests ||
-			res.StatusCode == 529 ||
-			res.StatusCode >= 500
-		return Response{}, retryable, fmt.Errorf("anthropic: %s: %s", res.Status, bytes.TrimSpace(payload))
+		return Response{}, &apiError{
+			op:         "anthropic",
+			statusCode: res.StatusCode,
+			status:     res.Status,
+			body:       string(bytes.TrimSpace(payload)),
+			retryAfter: parseRetryAfter(res.Header),
+		}
 	}
 
 	var response Response
 	if err := json.Unmarshal(payload, &response); err != nil {
-		return Response{}, false, fmt.Errorf("anthropic: decoding response: %w", err)
+		return Response{}, fmt.Errorf("anthropic: decoding response: %w", err)
 	}
 	if response.StopReason == "" {
-		return Response{}, false, errors.New("anthropic: response carried no stop_reason")
+		return Response{}, errors.New("anthropic: response carried no stop_reason")
 	}
-	return response, false, nil
+	return response, nil
 }
 
 // systemFor renders the system prompt, with a cache breakpoint when one was

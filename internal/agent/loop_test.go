@@ -142,6 +142,27 @@ func TestTheTurnCeilingStops(t *testing.T) {
 	}
 }
 
+// A zero ceiling means no ceiling, as it does for the Assistant and the eval
+// runner. Read the other way - and it used to be read the other way here alone
+// - it halts before the first call and looks exactly like a budget working.
+func TestAZeroCeilingDoesNotHaltTheLoop(t *testing.T) {
+	script := &ScriptedCompleter{Responses: []Response{
+		Says("Nothing is due today.", Usage{InputTokens: 1200, OutputTokens: 40}),
+	}}
+
+	result, err := testLoop(t, script, Budget{MaxTurns: 8}).
+		Run(context.Background(), "system", "what is due today?")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if result.Halt != HaltCompleted {
+		t.Fatalf("halt = %q, want %q: a zero ceiling stopped the run", result.Halt, HaltCompleted)
+	}
+	if script.Calls() != 1 {
+		t.Errorf("%d calls, want 1", script.Calls())
+	}
+}
+
 // And a model that calls few tools but expensive ones has to be stopped by the
 // other ceiling, or an automation can outspend the chargeback it is working on.
 func TestTheBudgetStopsBeforeTheTurnCeiling(t *testing.T) {

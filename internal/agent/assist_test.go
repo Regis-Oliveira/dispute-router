@@ -21,7 +21,7 @@ func testAssistant(t *testing.T, script *ScriptedCompleter, maxCostMicros int64)
 	store := api.NewStore(pool)
 	pricing := Pricing{InputMicrosPerMTok: 3_000_000, OutputMicrosPerMTok: 15_000_000}
 	assistant := NewAssistant(
-		NewFactSource(store, fakeEvidence{}),
+		factSource(t, store, fakeEvidence{}, FactSourceOptions{}),
 		NewGenerator(script, "test-model", pricing, 4096),
 		NewVerifier(script, "test-model", pricing, 2048),
 		NewRuns(pool),

@@ -108,29 +108,48 @@ type FactSource struct {
 	pool      *pgxpool.Pool
 }
 
+// FactSourceOptions configures NewFactSource. Both fields are optional and
+// independent of each other; the zero value assembles the record from this
+// dispute alone.
+type FactSourceOptions struct {
+	// Precedent turns on retrieval of settled disputes that resemble this one.
+	// Without it every draft is written from this dispute alone.
+	Precedent *Retriever
+
+	// BaseRates turns on the population numbers, which are queried from this
+	// pool. Separate from Precedent because they answer different questions
+	// and one is available for every dispute while the other is not:
+	// retrieval needs a cardholder claim to match on, and most disputes have
+	// none.
+	BaseRates *pgxpool.Pool
+}
+
 // NewFactSource reads the record through the dispute tools and the files
 // through evidence.
-func NewFactSource(store *api.Store, evidence EvidenceSource) *FactSource {
-	return &FactSource{tools: disputetools.New(store), evidence: evidence}
-}
-
-// WithPrecedent turns on retrieval. Optional: without it the record is exactly
-// what it was before, and every draft is written from this dispute alone.
-func (f *FactSource) WithPrecedent(r *Retriever) *FactSource {
-	f.retriever = r
-	return f
-}
-
-// WithBaseRates turns on the population numbers. Separate from WithPrecedent
-// because they answer different questions and one is available for every
-// dispute while the other is not.
-func (f *FactSource) WithBaseRates(pool *pgxpool.Pool) *FactSource {
-	f.pool = pool
-	return f
+//
+// A nil evidence source is refused here rather than discovered on the first
+// call. It used to be a WithX pair that returned the receiver, which read like
+// functional options and was neither: the caller could not tell a configured
+// source from a half-built one, and the one dependency that is not optional
+// was only checked once a dispute was already being drafted.
+func NewFactSource(store *api.Store, evidence EvidenceSource, opts FactSourceOptions) (*FactSource, error) {
+	if evidence == nil {
+		return nil, ErrNoEvidenceSource
+	}
+	return &FactSource{
+		tools:     disputetools.New(store),
+		evidence:  evidence,
+		retriever: opts.Precedent,
+		pool:      opts.BaseRates,
+	}, nil
 }
 
 // For reads everything known about one dispute, fresh.
 func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
+	// Kept as well as the constructor's check, not instead of it: the zero
+	// value of this struct is reachable without NewFactSource, and reporting
+	// "no evidence on file" for a source that was never wired up turns a
+	// deployment fault into a stream of confident rejections.
 	if f.evidence == nil {
 		return Facts{}, ErrNoEvidenceSource
 	}
@@ -375,11 +394,11 @@ const maxClaimRunes = 1500
 func fence(label, text string, maxRunes int) string {
 	open, closing := "<<<"+label, label+">>>"
 	clean := strings.ReplaceAll(text, closing, "[marker removed]")
-	if maxRunes > 0 {
-		runes := []rune(clean)
-		if len(runes) > maxRunes {
-			clean = string(runes[:maxRunes]) + "…"
-		}
+	// Counted before it is converted: almost every claim is under the cap, and
+	// the conversion allocates four bytes a rune for a slice that is thrown
+	// away unchanged.
+	if maxRunes > 0 && utf8.RuneCountInString(clean) > maxRunes {
+		clean = string([]rune(clean)[:maxRunes]) + "…"
 	}
 	return open + "\n" + clean + "\n" + closing + "\n"
 }

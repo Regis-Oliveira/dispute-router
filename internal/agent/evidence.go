@@ -106,8 +106,11 @@ func readEvidence(ctx context.Context, source EvidenceSource, disputeID int64, f
 
 		ref.Status = EvidenceRead
 		limit := min(budget, maxEvidenceFileRunes)
-		if runes := []rune(text); len(runes) > limit {
-			text = string(runes[:limit])
+		// Counted before it is converted: a file that fits - which most do -
+		// pays nothing for the check, where the conversion allocated four
+		// bytes a rune for a slice thrown away unchanged.
+		if utf8.RuneCountInString(text) > limit {
+			text = string([]rune(text)[:limit])
 			ref.Status = EvidenceCut
 			ref.Note = fmt.Sprintf("cut at %d characters", limit)
 		}

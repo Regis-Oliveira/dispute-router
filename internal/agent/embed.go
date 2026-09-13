@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -135,10 +136,9 @@ func (v *Voyage) Embed(ctx context.Context, texts []string, kind EmbedKind) ([][
 	return out, nil
 }
 
-// errRateLimited marks the one failure worth waiting out rather than giving up
-// on. Everything else is either permanent or transient in seconds.
-var errRateLimited = errors.New("rate limited")
-
+// withRetry waits out the one failure worth waiting out. What counts as one is
+// apiError.Retryable, the same question the Anthropic client asks; what is
+// different here is the wait, because Voyage's limit is per minute.
 func (v *Voyage) withRetry(ctx context.Context, texts []string, kind EmbedKind) ([][]float32, error) {
 	var lastErr error
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
@@ -147,13 +147,13 @@ func (v *Voyage) withRetry(ctx context.Context, texts []string, kind EmbedKind) 
 			return vectors, nil
 		}
 		lastErr = err
-		if !errors.Is(err, errRateLimited) || attempt == maxAttempts {
+		if !retryable(err) || attempt == maxAttempts {
 			break
 		}
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(v.pause):
+		case <-time.After(delayFor(err, v.pause)):
 		}
 	}
 	return nil, lastErr
@@ -187,11 +187,14 @@ func (v *Voyage) batch(ctx context.Context, texts []string, kind EmbedKind) ([][
 	if err != nil {
 		return nil, fmt.Errorf("voyage: reading response: %w", err)
 	}
-	if res.StatusCode == http.StatusTooManyRequests {
-		return nil, fmt.Errorf("voyage: %w: %s", errRateLimited, bytes.TrimSpace(payload))
-	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("voyage: %s: %s", res.Status, bytes.TrimSpace(payload))
+		return nil, &apiError{
+			op:         "voyage",
+			statusCode: res.StatusCode,
+			status:     res.Status,
+			body:       string(bytes.TrimSpace(payload)),
+			retryAfter: parseRetryAfter(res.Header),
+		}
 	}
 
 	var decoded voyageResponse
@@ -235,7 +238,11 @@ func normalise(vec []float32) []float32 {
 		sum += float64(v) * float64(v)
 	}
 	if sum == 0 {
-		return vec
+		// A copy, like every other answer. It used to hand back the caller's
+		// own slice here and a fresh one otherwise, so whether the result
+		// aliased the input depended on the data in it - which is the kind of
+		// thing that holds until the one vector that is all zeroes arrives.
+		return slices.Clone(vec)
 	}
 	norm := float32(math.Sqrt(sum))
 	out := make([]float32, len(vec))

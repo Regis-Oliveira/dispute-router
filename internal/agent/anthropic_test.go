@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -102,6 +103,57 @@ func TestOverloadIsRetried(t *testing.T) {
 	}
 	if got := calls.Load(); got != 2 {
 		t.Errorf("%d calls; a 429 was not retried exactly once before succeeding", got)
+	}
+}
+
+// When the API says how long to wait, its answer beats the computed backoff.
+// It knows when its own window reopens and the arithmetic here does not.
+func TestRetryAfterIsHonoured(t *testing.T) {
+	var calls atomic.Int32
+
+	client := against(t, func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			// Shorter than the two seconds the first retry would otherwise
+			// wait, so honouring it is visible in the clock.
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":{"message":"slow down"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"content":[],"stop_reason":"end_turn","usage":{}}`))
+	})
+
+	started := time.Now()
+	if _, err := client.Complete(context.Background(), Request{MaxTokens: 16}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	took := time.Since(started)
+	if calls.Load() != 2 {
+		t.Fatalf("%d calls, want 2", calls.Load())
+	}
+	if took >= 2*time.Second {
+		t.Errorf("waited %s; the computed backoff was used instead of Retry-After", took)
+	}
+}
+
+// The status has to survive as something a caller can inspect. It used to be a
+// bool alongside the error, which nothing could read after the fact.
+func TestAFailedCallCarriesItsStatus(t *testing.T) {
+	client := against(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid x-api-key"}}`))
+	})
+
+	_, err := client.Complete(context.Background(), Request{MaxTokens: 16})
+	var apiErr *apiError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want an *apiError", err)
+	}
+	if apiErr.statusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", apiErr.statusCode)
+	}
+	if apiErr.Retryable() {
+		t.Error("a bad key reported itself as worth retrying")
 	}
 }
 

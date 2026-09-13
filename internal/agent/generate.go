@@ -2,12 +2,9 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
-
-	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // RepresentmentTool and VerdictTool are exported because they are recorded on
@@ -166,71 +163,42 @@ func (g *Generator) Write(ctx context.Context, facts Facts) (Draft, error) {
 	}
 	record += renderPriorReview(facts.PriorFindings)
 
-	schema, err := jsonschema.For[draftInput](nil)
+	parsed, paid, err := callTool[draftInput](ctx, toolCall{
+		completer: g.completer,
+		model:     g.model,
+		pricing:   g.pricing,
+		maxTokens: g.maxTokens,
+		label:     "generator",
+		noun:      "draft",
+
+		system:      generatorSystem,
+		tool:        RepresentmentTool,
+		description: "Record the representment, or that the record does not support one.",
+		schema:      draftSchema,
+	}, record)
+	// The spend is carried out of every failure. A letter that was paid for and
+	// arrived unusable still cost what it cost.
+	spent := Draft{Usage: paid.usage, CostMicros: paid.costMicros}
 	if err != nil {
-		return Draft{}, fmt.Errorf("generator: deriving draft schema: %w", err)
-	}
-	encodedSchema, err := json.Marshal(schema)
-	if err != nil {
-		return Draft{}, fmt.Errorf("generator: encoding draft schema: %w", err)
+		return spent, err
 	}
 
-	response, err := g.completer.Complete(ctx, Request{
-		Model:     g.model,
-		System:    generatorSystem,
-		MaxTokens: g.maxTokens,
-		Messages: []Message{{
-			Role:    "user",
-			Content: []ContentBlock{{Type: "text", Text: record}},
-		}},
-		Tools: []Tool{{
-			Name:        RepresentmentTool,
-			Description: "Record the representment, or that the record does not support one.",
-			InputSchema: encodedSchema,
-		}},
-		ToolChoice: &ToolChoice{Type: "tool", Name: RepresentmentTool},
-		// The system prompt and the tool schema are identical on every call;
-		// only the record below them changes.
-		CacheSystem: true,
-	})
-	if err != nil {
-		return Draft{}, fmt.Errorf("generator: %w", err)
+	// The closed set is checked here rather than by the schema, because a
+	// recommendation the host does not understand must never become an
+	// outcome: this is the system declining to write off a chargeback on a
+	// word it cannot read.
+	if parsed.Recommendation != RecommendRepresent && parsed.Recommendation != RecommendInsufficient {
+		return spent, fmt.Errorf("generator: unknown recommendation %q", parsed.Recommendation)
 	}
 
-	cost := g.pricing.cost(response.Usage)
-
-	if response.StopReason == "max_tokens" {
-		// A letter cut off partway is not a short letter. Sending it for review
-		// as though it were finished is how half an argument reaches an issuer.
-		return Draft{Usage: response.Usage, CostMicros: cost},
-			fmt.Errorf("generator: response was truncated at max_tokens")
-	}
-
-	for _, block := range response.Content {
-		if block.Type != "tool_use" || block.Name != RepresentmentTool {
-			continue
-		}
-		var parsed draftInput
-		if err := json.Unmarshal(block.Input, &parsed); err != nil {
-			return Draft{Usage: response.Usage, CostMicros: cost},
-				fmt.Errorf("generator: unreadable draft: %w", err)
-		}
-		if parsed.Recommendation != RecommendRepresent && parsed.Recommendation != RecommendInsufficient {
-			return Draft{Usage: response.Usage, CostMicros: cost},
-				fmt.Errorf("generator: unknown recommendation %q", parsed.Recommendation)
-		}
-		return Draft{
-			Recommendation: parsed.Recommendation,
-			Letter:         parsed.Letter,
-			CitedEvidence:  parsed.CitedEvidence,
-			Usage:          response.Usage,
-			CostMicros:     cost,
-			written:        true,
-		}, nil
-	}
-
-	return Draft{Usage: response.Usage, CostMicros: cost},
-		fmt.Errorf("generator: no %s call in the response (stop_reason %q)", RepresentmentTool, response.StopReason)
+	return Draft{
+		Recommendation: parsed.Recommendation,
+		Letter:         parsed.Letter,
+		CitedEvidence:  parsed.CitedEvidence,
+		Usage:          paid.usage,
+		CostMicros:     paid.costMicros,
+		written:        true,
+	}, nil
 }
 
 // CheckCitations is the part of the review that does not need a model.

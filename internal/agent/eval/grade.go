@@ -13,6 +13,7 @@ package eval
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -191,13 +192,9 @@ func toMinor(raw string, scale int) (int64, bool) {
 	if err != nil {
 		return 0, false
 	}
-	multiplier := 1.0
-	for i := 0; i < scale; i++ {
-		multiplier *= 10
-	}
 	// Rounded rather than truncated: 41.00 parsed as a float can land a hair
 	// under, and truncating turns it into 4099.
-	return int64(value*multiplier + 0.5), true
+	return int64(math.Round(value * math.Pow10(scale))), true
 }
 
 // ---------------------------------------------------------------------------

@@ -104,8 +104,6 @@ func run() error {
 		InputMicrosPerMTok:  cfg.AgentInputPerMTok,
 		OutputMicrosPerMTok: cfg.AgentOutputPerMTok,
 	}
-	facts := agent.NewFactSource(api.NewStore(pool),
-		api.NewEvidence(awsx.S3(awsCfg), cfg.S3EvidenceBucket, time.Minute))
 
 	// Precedent retrieval. The embedder is optional: without a key the
 	// retriever uses full-text search, which is the baseline anyway.
@@ -117,22 +115,30 @@ func run() error {
 		}
 		embedder = voyage
 	}
-	facts = facts.
-		WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit)).
-		// Available for every dispute, unlike precedent, which needs a claim to
-		// match on and therefore covers about one in seven.
-		WithBaseRates(pool)
+
+	facts, err := agent.NewFactSource(api.NewStore(pool),
+		api.NewEvidence(awsx.S3(awsCfg), cfg.S3EvidenceBucket, time.Minute),
+		agent.FactSourceOptions{
+			Precedent: agent.NewRetriever(pool, embedder, cfg.PrecedentLimit),
+			// Available for every dispute, unlike precedent, which needs a
+			// claim to match on and therefore covers about one in seven.
+			BaseRates: pool,
+		})
+	if err != nil {
+		return err
+	}
 
 	var verifier *agent.Verifier
 	if *withVerify {
 		verifier = agent.NewVerifier(completer, model, pricing, 2048)
 	}
 
-	report, err := eval.NewRunner(pool, facts,
-		agent.NewGenerator(completer, model, pricing, 4096), verifier).
-		WithSamples(*samples).
-		WithCostCeiling(int64(*maxCost*1_000_000)).
-		Run(ctx, cases)
+	runner := eval.NewRunner(pool, facts,
+		agent.NewGenerator(completer, model, pricing, 4096), verifier)
+	runner.Samples = *samples
+	runner.MaxTotalCostMicros = int64(*maxCost * 1_000_000)
+
+	report, err := runner.Run(ctx, cases)
 	if err != nil {
 		return err
 	}
@@ -178,6 +184,7 @@ func list(ctx context.Context, pool *pgxpool.Pool, cases []eval.Case) error {
 	return w.Flush()
 }
 
+// printReport writes the table and the paragraphs under it to stdout.
 func print(report eval.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "CASE\tDISPUTE\tPASSED\tVERIFIER\tCOST\tPRECEDENT\tFAILURES")

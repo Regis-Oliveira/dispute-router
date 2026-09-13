@@ -104,7 +104,6 @@ func run(logger *slog.Logger) error {
 	}
 
 	evidence := awsx.S3(awsCfg)
-	facts := agent.NewFactSource(store, api.NewEvidence(evidence, cfg.S3EvidenceBucket, time.Minute))
 
 	// Precedent retrieval. The embedder is optional: without a key the
 	// retriever uses full-text search, which is the baseline anyway.
@@ -116,11 +115,18 @@ func run(logger *slog.Logger) error {
 		}
 		embedder = voyage
 	}
-	facts = facts.
-		WithPrecedent(agent.NewRetriever(pool, embedder, cfg.PrecedentLimit)).
-		// Available for every dispute, unlike precedent, which needs a claim to
-		// match on and therefore covers about one in seven.
-		WithBaseRates(pool)
+
+	facts, err := agent.NewFactSource(store,
+		api.NewEvidence(evidence, cfg.S3EvidenceBucket, time.Minute),
+		agent.FactSourceOptions{
+			Precedent: agent.NewRetriever(pool, embedder, cfg.PrecedentLimit),
+			// Available for every dispute, unlike precedent, which needs a
+			// claim to match on and therefore covers about one in seven.
+			BaseRates: pool,
+		})
+	if err != nil {
+		return err
+	}
 
 	// Printing the record spends nothing and is the fastest way to answer the
 	// question that actually comes up: not "what did the model say" but "what

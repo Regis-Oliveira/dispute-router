@@ -49,6 +49,17 @@ func (f fakeEvidence) Open(_ context.Context, _ int64, key string) (api.Evidence
 	}, nil
 }
 
+// factSource builds a source the way a binary does, failing the test on a
+// configuration error rather than returning one nobody reads.
+func factSource(t *testing.T, store *api.Store, evidence EvidenceSource, opts FactSourceOptions) *FactSource {
+	t.Helper()
+	source, err := NewFactSource(store, evidence, opts)
+	if err != nil {
+		t.Fatalf("NewFactSource: %v", err)
+	}
+	return source
+}
+
 // Returns the pool alongside the store: a couple of these tests need to pick a
 // row by a condition the store has no method for, and widening the store's API
 // for a test would be the wrong trade.
@@ -86,13 +97,13 @@ func TestFactsCarryEvidenceNamesAndNotTheirURLs(t *testing.T) {
 	store, _ := liveStore(t)
 	const secret = "https://s3.example/evidence.pdf?X-Amz-Signature=deadbeef"
 
-	facts, err := NewFactSource(store, fakeEvidence{files: []api.EvidenceFile{{
+	facts, err := factSource(t, store, fakeEvidence{files: []api.EvidenceFile{{
 		Key:        "dispute/1/receipt.pdf",
 		Name:       "receipt.pdf",
 		SizeBytes:  4096,
 		UploadedAt: time.Now(),
 		URL:        secret,
-	}}}).For(context.Background(), someDisputeID(t, store))
+	}}}, FactSourceOptions{}).For(context.Background(), someDisputeID(t, store))
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -122,7 +133,7 @@ func TestFactsAreReadFromTheStoreAndStayMasked(t *testing.T) {
 	store, _ := liveStore(t)
 	id := someDisputeID(t, store)
 
-	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -159,7 +170,7 @@ func TestPriorDisputesArriveForARepeatFiler(t *testing.T) {
 	if err != nil {
 		t.Skipf("no repeat filer seeded: %v", err)
 	}
-	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -186,7 +197,7 @@ func TestTheClaimReachesTheFacts(t *testing.T) {
 	store, pool := liveStore(t)
 	id := disputeWithAClaim(t, pool, "The order never arrived%")
 
-	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}
@@ -224,7 +235,7 @@ func TestTheClaimNeverReachesTheToolOutput(t *testing.T) {
 	}
 
 	// And the same dispute, through the agent's path, does carry it.
-	facts, err := NewFactSource(store, fakeEvidence{}).For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{}).For(context.Background(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}

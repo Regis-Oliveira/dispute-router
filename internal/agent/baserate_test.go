@@ -110,10 +110,10 @@ func TestBaseRatesExistForAClaimlessDispute(t *testing.T) {
 		t.Skipf("no claimless open chargeback: %v", err)
 	}
 
-	facts, err := NewFactSource(store, fakeEvidence{}).
-		WithPrecedent(NewRetriever(pool, nil, 3)).
-		WithBaseRates(pool).
-		For(context.Background(), id)
+	facts, err := factSource(t, store, fakeEvidence{}, FactSourceOptions{
+		Precedent: NewRetriever(pool, nil, 3),
+		BaseRates: pool,
+	}).For(context.Background(), id)
 	if err != nil {
 		t.Fatalf("For: %v", err)
 	}

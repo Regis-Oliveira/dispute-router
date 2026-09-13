@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -230,11 +231,20 @@ const (
 // stopped by one of the ceilings.
 func (h Halt) Done() bool { return h == HaltCompleted }
 
-// Budget bounds one run. Both ceilings are required: turns alone does not stop
+// Budget bounds one run. Both ceilings are wanted: turns alone does not stop
 // a model that reads enormous results, and cost alone does not stop one that
 // ping-pongs cheaply forever.
 type Budget struct {
-	MaxTurns      int
+	MaxTurns int
+
+	// MaxCostMicros is the ceiling on one run. Zero means no ceiling, the same
+	// convention AssistantOptions and the eval runner use.
+	//
+	// It used to mean the opposite here - a zero halted the loop before its
+	// first call - so the one field had two readings depending on which file
+	// was looking at it. A zero read as "nothing may be spent" is the worse of
+	// the two: it stops every run before anything is bought and looks exactly
+	// like a budget that is working.
 	MaxCostMicros int64
 
 	// MaxTokens caps a single response. It is what bounds the overshoot
@@ -323,7 +333,7 @@ func (l *Loop) Run(ctx context.Context, system string, prompt string) (Result, e
 
 	result := Result{Halt: HaltTurnCeiling}
 
-	for turn := 0; turn < l.budget.MaxTurns; turn++ {
+	for turn := range l.budget.MaxTurns {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -332,7 +342,7 @@ func (l *Loop) Run(ctx context.Context, system string, prompt string) (Result, e
 		// exceeded. It can still be overshot by one response, because the price
 		// of a call is not known until it returns - which is what MaxTokens is
 		// for: it bounds how large that last overshoot can be.
-		if result.CostMicros >= l.budget.MaxCostMicros {
+		if l.budget.MaxCostMicros > 0 && result.CostMicros >= l.budget.MaxCostMicros {
 			result.Halt = HaltBudget
 			return result, nil
 		}
@@ -456,9 +466,25 @@ func (l *Loop) runTools(ctx context.Context, uses []ToolUse) ([]ContentBlock, []
 	}
 
 	if err := group.Wait(); err != nil {
-		return nil, calls, err
+		// Only the calls that finished. The slice is filled by index, so a
+		// failure partway left zero-value entries in it, and a zero ToolCall in
+		// a trace reads as a nameless tool that answered instantly with
+		// nothing - an audit trail describing calls that never happened.
+		return nil, completed(calls), err
 	}
 	return blocks, calls, nil
+}
+
+// completed drops the entries no goroutine filled in. Safe to read here
+// because every goroutine has returned by the time Wait does.
+func completed(calls []ToolCall) []ToolCall {
+	out := make([]ToolCall, 0, len(calls))
+	for _, call := range calls {
+		if call.Name != "" {
+			out = append(out, call)
+		}
+	}
+	return out
 }
 
 func (r ToolResult) block() ContentBlock {
@@ -486,14 +512,15 @@ func toolUsesIn(content []ContentBlock) []ToolUse {
 // it is about to look up - so this is not only the final answer. The loop keeps
 // the most recent one, and Halt says whether it is finished.
 func textOf(content []ContentBlock) string {
-	var joined string
+	var b strings.Builder
 	for _, block := range content {
-		if block.Type == "text" {
-			if joined != "" {
-				joined += "\n"
-			}
-			joined += block.Text
+		if block.Type != "text" {
+			continue
 		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(block.Text)
 	}
-	return joined
+	return b.String()
 }

@@ -4,15 +4,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // Assistant is the whole flow for one dispute: hold it, read the record, draft,
@@ -88,20 +85,10 @@ func promptFingerprint() string {
 	if err != nil {
 		template = "render error: " + err.Error()
 	}
-	draftSchema, _ := json.Marshal(mustSchema[draftInput]())
-	verdictSchema, _ := json.Marshal(mustSchema[verdictInput]())
 	sum := sha256.Sum256([]byte(strings.Join([]string{
-		generatorSystem, verifierSystem, string(draftSchema), string(verdictSchema), template,
+		generatorSystem, verifierSystem, string(draftSchema()), string(verdictSchema()), template,
 	}, "\x00")))
 	return "sha256:" + hex.EncodeToString(sum[:8])
-}
-
-func mustSchema[T any]() *jsonschema.Schema {
-	schema, err := jsonschema.For[T](nil)
-	if err != nil {
-		return &jsonschema.Schema{Description: "schema error: " + err.Error()}
-	}
-	return schema
 }
 
 // Trace is what the run did, as stored in agent_runs.trace and read back by

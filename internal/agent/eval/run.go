@@ -48,20 +48,12 @@ type Runner struct {
 
 // NewRunner binds a runner to the record source and the generator; a nil
 // verifier means the graders alone decide.
+//
+// Samples and MaxTotalCostMicros are set on the returned value. They used to
+// have setters as well as being exported, which left two ways to say the same
+// thing and no way to tell which one a caller had used.
 func NewRunner(pool *pgxpool.Pool, facts *agent.FactSource, generator *agent.Generator, verifier *agent.Verifier) *Runner {
 	return &Runner{pool: pool, facts: facts, generator: generator, verifier: verifier}
-}
-
-// WithSamples sets how many drafts each case gets.
-func (r *Runner) WithSamples(n int) *Runner {
-	r.Samples = n
-	return r
-}
-
-// WithCostCeiling bounds what the whole run may spend.
-func (r *Runner) WithCostCeiling(micros int64) *Runner {
-	r.MaxTotalCostMicros = micros
-	return r
 }
 
 // Sample is one draft of one case.
@@ -254,7 +246,7 @@ func (r *Runner) Run(ctx context.Context, cases []Case) (Report, error) {
 		result.Retrieval = facts.Retrieval.Method
 		result.Precedents = len(facts.Precedents)
 
-		for i := 0; i < samples; i++ {
+		for i := range samples {
 			if r.MaxTotalCostMicros > 0 && report.TotalCostMicros >= r.MaxTotalCostMicros {
 				report.Stopped = fmt.Sprintf("cost ceiling reached during %s, sample %d of %d",
 					c.Name, i+1, samples)

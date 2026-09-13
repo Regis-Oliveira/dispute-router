@@ -2,10 +2,7 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-
-	"github.com/google/jsonschema-go/jsonschema"
 )
 
 // VerdictTool is the only tool the verifier is given, and it fetches nothing.
@@ -137,80 +134,43 @@ func (v *Verifier) Check(ctx context.Context, facts Facts, draft string) (Verdic
 		return Verdict{}, fmt.Errorf("verifier: %w", err)
 	}
 
-	schema, err := jsonschema.For[verdictInput](nil)
-	if err != nil {
-		return Verdict{}, fmt.Errorf("verifier: deriving verdict schema: %w", err)
-	}
-	encodedSchema, err := json.Marshal(schema)
-	if err != nil {
-		return Verdict{}, fmt.Errorf("verifier: encoding verdict schema: %w", err)
-	}
-
 	// Fenced like the claim. The draft was shaped by the claim, and it used to
 	// follow a bare heading with nothing to say where it ended - the one piece
 	// of text downstream of the cardholder that crossed a boundary undelimited.
 	prompt := record + "\nDRAFT\nThe text between the markers below is the draft under examination.\n" +
 		fence(draftLabel, draft, 0)
 
-	response, err := v.completer.Complete(ctx, Request{
-		Model:     v.model,
-		System:    verifierSystem,
-		MaxTokens: v.maxTokens,
-		Messages: []Message{{
-			Role:    "user",
-			Content: []ContentBlock{{Type: "text", Text: prompt}},
-		}},
-		Tools: []Tool{{
-			Name:        VerdictTool,
-			Description: "Record whether the draft is supported by the record, and every rule it breaks.",
-			InputSchema: encodedSchema,
-		}},
-		// Forced, so the answer arrives as a structure rather than as prose
-		// that has to be interpreted - and interpreting prose is where a
-		// "no problems found" becomes a pass by accident.
-		ToolChoice: &ToolChoice{Type: "tool", Name: VerdictTool},
-		// The system prompt and the tool schema are identical on every call;
-		// only the record below them changes.
-		CacheSystem: true,
-	})
+	parsed, paid, err := callTool[verdictInput](ctx, toolCall{
+		completer: v.completer,
+		model:     v.model,
+		pricing:   v.pricing,
+		maxTokens: v.maxTokens,
+		label:     "verifier",
+		noun:      "verdict",
+
+		system:      verifierSystem,
+		tool:        VerdictTool,
+		description: "Record whether the draft is supported by the record, and every rule it breaks.",
+		schema:      verdictSchema,
+	}, prompt)
 	if err != nil {
-		return Verdict{}, fmt.Errorf("verifier: %w", err)
+		// checked stays false, so a caller that reads this value without
+		// reading the error still cannot approve anything with it.
+		return Verdict{Usage: paid.usage, CostMicros: paid.costMicros}, err
 	}
 
-	cost := v.pricing.cost(response.Usage)
-
-	if response.StopReason == "max_tokens" {
-		// A verdict cut off partway is not a verdict. It could have been in
-		// the middle of listing the findings.
-		return Verdict{Usage: response.Usage, CostMicros: cost},
-			fmt.Errorf("verifier: response was truncated at max_tokens")
+	verdict := Verdict{
+		Pass:       parsed.Pass,
+		Findings:   parsed.Findings,
+		Usage:      paid.usage,
+		CostMicros: paid.costMicros,
+		checked:    true,
 	}
-
-	for _, block := range response.Content {
-		if block.Type != "tool_use" || block.Name != VerdictTool {
-			continue
-		}
-		var parsed verdictInput
-		if err := json.Unmarshal(block.Input, &parsed); err != nil {
-			return Verdict{Usage: response.Usage, CostMicros: cost},
-				fmt.Errorf("verifier: unreadable verdict: %w", err)
-		}
-		verdict := Verdict{
-			Pass:       parsed.Pass,
-			Findings:   parsed.Findings,
-			Usage:      response.Usage,
-			CostMicros: cost,
-			checked:    true,
-		}
-		// The model was told a finding means no pass. Believing it on that
-		// point would put the rule in the prompt only, and a rule that lives
-		// only in a prompt is a request.
-		if len(verdict.Findings) > 0 {
-			verdict.Pass = false
-		}
-		return verdict, nil
+	// The model was told a finding means no pass. Believing it on that point
+	// would put the rule in the prompt only, and a rule that lives only in a
+	// prompt is a request.
+	if len(verdict.Findings) > 0 {
+		verdict.Pass = false
 	}
-
-	return Verdict{Usage: response.Usage, CostMicros: cost},
-		fmt.Errorf("verifier: no %s call in the response (stop_reason %q)", VerdictTool, response.StopReason)
+	return verdict, nil
 }
