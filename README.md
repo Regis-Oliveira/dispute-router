@@ -521,6 +521,11 @@ nothing ran.
 - **[`docs/DECISIONS.md`](docs/DECISIONS.md)** — why the project is shaped the
   way it is, including the alternatives that were rejected. This README says what
   exists; that says what was chosen against, which is the part that gets lost.
+- **[`docs/go-conventions.md`](docs/go-conventions.md)** — why the Go rules in
+  `CLAUDE.md` are the rules, taught from what the 2026-09-13 review found here:
+  visibility is per package rather than per file, zero values that have to work,
+  a hand-written vocabulary that drifted until a money check failed, byte versus
+  rune, slices that alias, errors that carry meaning, and comments that lie.
 - **[`docs/conceitos-pt.md`](docs/conceitos-pt.md)** — the same ground explained
   in Portuguese, for study rather than record: why Terraform exists and what
   category of thing it is, why Go rather than Node here, what HMAC proves, and

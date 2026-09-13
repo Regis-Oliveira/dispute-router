@@ -987,7 +987,195 @@ indistinguível de um worker travado.**
 
 ---
 
-## 12. Onde está o resto do contexto
+## 12. Go idiomático: onde este código fugia dele
+
+Uma revisão de Go idiomático passou pelo módulo inteiro em 2026-09-13. Ela não
+achou nenhum problema de build, de `gofmt` ou de `go vet` — os 120 achados eram
+todos sobre **forma**: onde os nomes moram, o que o valor zero de um struct
+significa, quais erros atravessam a fronteira de um pacote, e se o compilador
+estava sendo informado o bastante para ajudar. A versão completa, em inglês e
+com o arquivo de cada exemplo, está em
+[`go-conventions.md`](go-conventions.md). Aqui fica o resumo.
+
+### Visibilidade é por **pacote**, não por arquivo
+
+Essa é a que mais precisa ser desaprendida vindo de Node. Lá, um `const` que o
+módulo não exporta é invisível para qualquer outro arquivo — a unidade é o
+arquivo. Em Go a unidade é o **diretório**. Todo `.go` dentro de
+`internal/worker` é o mesmo pacote, e cada um enxerga os nomes minúsculos dos
+outros sem import e sem export: `worker.go` lê o struct `loaded` declarado em
+`store.go` porque são o mesmo pacote, não porque alguém compartilhou algo.
+
+Então minúscula não quer dizer "privado de mim". Quer dizer "privado deste
+pacote" — e o pacote passa a ser a unidade que se revisa e se mantém honesta. O
+arquivo é só uma decisão de arquivamento.
+
+`internal/` é uma segunda parede por cima disso, imposta pelo compilador e
+baseada no **caminho**: nada fora do módulo importa nada sob `internal/`. E a
+regra se aplica em qualquer nível, que é a parte útil: `cmd/internal/boot` só
+pode ser importado por código sob `cmd/`, e foi exatamente por isso que os dez
+binários puderam dividir um bootstrap comum sem que ele virasse API do módulo.
+
+Consequência: dentro de `internal/`, um nome com inicial maiúscula é uma
+**promessa** aos outros pacotes deste módulo. A revisão achou cerca de setenta
+nomes maiúsculos sem nenhum leitor fora do próprio pacote. Continuam exportados
+de propósito: constantes de enum de um tipo exportado e os sentinelas `Err` —
+um sentinela existe justamente para ser comparado de fora com `errors.Is`.
+
+**O formato específico do bug:** função exportada que devolve tipo não
+exportado. `worker.Store.Load` devolvia `loaded`, e `Store.Apply` recebia um.
+Os métodos eram públicos, o tipo não. Go compila isso sem reclamar, mas quem
+estivesse em outro pacote não conseguiria declarar uma variável daquele tipo —
+só poderia devolver o valor de volta sem olhar. A correção é escolher qual lado
+está errado: aqui ninguém de fora chamava, então os dois desceram para `load` e
+`apply`. No caso do `agent.Trace` foi o contrário — o tipo merecia subir, e
+`cmd/agent/report.go` deixou de manter uma cópia privada do struct sincronizada
+na mão.
+
+Por isso também os **dublês de teste** saíram do pacote de produção para um
+subpacote (`internal/agent/agenttest`): um fake exportado é superfície pública
+que vai junto no binário. Detalhe de Go: arquivos de teste vêm em dois sabores,
+`package agent` (enxerga os nomes minúsculos) e `package agent_test` (só a
+API). Os dezessete arquivos de teste daquele pacote são do primeiro tipo, e o
+primeiro tipo não pode importar `agenttest`, porque `agenttest` importa `agent`
+— ciclo.
+
+### O valor zero tem que funcionar
+
+Go não tem construtor obrigatório nem campo obrigatório. Qualquer pacote que
+consiga nomear o tipo escreve `T{}`. O valor zero é parte da API, tendo sido
+projetado ou não.
+
+`api.Filters{}` renderizava `ORDER BY  DESC` e `LIMIT 0`, porque os defaults
+moravam no parser de query string e não no tipo — e `internal/disputetools`
+montava o struct direto. E `worker.Consumer{}` era pior porque *funcionava*:
+`WaitTime` zero é long poll de zero segundo, ou seja, um busy loop contra o
+SQS. Duas correções diferentes de propósito: o filtro normaliza no uso (montar
+um literal com três campos é razoável), o consumidor ganhou `NewConsumer` com
+as opções não exportadas (não existe literal razoável — todo campo é uma
+decisão sobre um serviço remoto).
+
+### Vocabulário escrito à mão sempre diverge (a melhor história)
+
+A migration `000003` adicionou o estado `draft_ready` em 2026-09-08, e o valor
+não chegou a **nenhum** dos cinco lugares que listavam estados em prosa: o
+whitelist de filtros da API (então `?state=draft_ready`, que é a fila de
+revisão, respondia 400), a union `DisputeState` do dashboard e seu controle de
+filtro, a tag `jsonschema` da ferramenta `list_disputes` (que dizia ao modelo
+que o estado não existia), e o invariante de dinheiro do simulador.
+
+O último é o que importou. A checagem "money held equals the chargebacks still
+open" listava `received`, `resolving` e `represented`, então treze chargebacks
+parados na fila de revisão seguravam 1.184,38 USD que a checagem contava como
+*não* segurados — e as quatro divergências por merchant somavam exatamente esse
+número. O `make verify` estava falhando havia cinco dias. **O ledger estava
+certo o tempo todo; a checagem é que estava velha.** Com `draft_ready` incluído,
+os onze invariantes passam.
+
+A correção é o pacote `internal/dispute`, com `type State string` e as
+constantes que substituem uns sessenta literais espalhados por Go e pelo SQL
+dentro do Go. Os valores foram conferidos contra os `CHECK` das migrations, que
+são a autoridade.
+
+O que vale gravar é o limite da técnica. Um tipo string nomeado transforma o
+compilador num leitor a mais: erro de digitação vira erro de compilação no
+lugar onde foi digitado, e não um resultado vazio uma hora depois. Mas ele
+**não alcança** tag de struct, union de TypeScript nem string de SQL. Dos cinco
+leitores que perderam o `draft_ready`, dois eram TypeScript e um era uma tag —
+uma string que o compilador nunca lê. Então a afirmação honesta não é "constante
+tipada teria evitado o bug": é que ela teria pego o whitelist, e que quem
+percebeu o dinheiro foi o invariante **falhando**. O valor daquela checagem é
+ter falhado; uma suíte verde não diria nada.
+
+A mesma intuição vale para parâmetros. Toda função de lançamento do ledger
+recebia `disputeID`, `merchantID` e `amountMinor` como três `int64` vizinhos:
+trocar dois compila e lança dinheiro no merchant errado, em silêncio, num razão
+de partidas dobradas cuja razão de existir é não poder errar em silêncio. Hoje
+recebem um `Entry`, e sobrou uma regra curta: **um parâmetro sem vizinho do
+mesmo tipo não tem com quem ser trocado.**
+
+### Byte não é rune, e um slice pode ser a memória de outro
+
+String em Go é um slice de bytes: `range` entrega runes, mas `s[i]` entrega um
+byte e `s[:n]` corta num offset de byte — e é essa inconsistência que pega.
+Mascarar e-mail com `local[:1]` cortou o `é` de `é@example.com` no meio e
+produziu UTF-8 inválido dentro de um resultado de ferramenta JSON.
+
+A outra metade é menos visível: um `[]T` recebido é uma janela para o array de
+outra pessoa, e `append` pode escrever nele em vez de alocar. Em
+`internal/api/decisions.go` o limit e o offset eram anexados direto no mesmo
+array que os argumentos da query de contagem ainda apontavam — seguro só porque
+aquela query já tinha retornado, o que é um fato sobre ordem de execução e não
+sobre o código. Dois arquivos adiante, `ListDisputes` roda as duas em paralelo.
+Regra: se você guarda ou faz crescer um slice que recebeu, copie antes.
+
+### Erro carrega significado
+
+`%w` embrulha em vez de achatar, `errors.Is` percorre a cadeia (por isso `==`
+está errado mesmo quando funciona: só compara o erro de fora) e `errors.As` faz
+o mesmo passeio procurando um *tipo* e devolve o valor tipado.
+
+A regra que mais rende: traduzir o sentinela do driver na fronteira do store.
+`Store.Load` devolvia `pgx.ErrNoRows` para fora do pacote, então o worker
+importava o driver só para comparar — todo consumidor do store era obrigado a
+saber qual biblioteca de banco estava embaixo. Hoje é `worker.ErrNotFound`,
+embrulhado com o id da disputa, e o import do pgx sumiu.
+
+E há o erro que nunca chega. Em `internal/config/config.go`, um valor
+**presente mas ilegível** devolvia o default: `WORKER_LOCK_TTL=30` (sem
+unidade) virava silenciosamente os 30 s padrão. É assim que uma configuração
+errada se esconde — não como valor errado, mas como default plausível. Hoje as
+falhas de parse são juntadas com `errors.Join` e voltam de `Load`, então um
+restart reporta todas de uma vez. Ausente ou vazio continua significando
+default; presente e errado é erro.
+
+### Context não é só um parâmetro
+
+Context é um sinal de cancelamento que por acaso viaja como argumento. Passar
+adiante é a parte fácil; difícil é notar os dois lugares onde o cancelamento
+está errado.
+
+O primeiro é limpeza. O release do lock e os reagendamentos do worker rodavam
+sob o contexto da requisição. No shutdown esse contexto já está cancelado —
+então todo handler em voo falhava em soltar o lock, e cada disputa ficava
+travada pelo TTL inteiro, no exato momento em que o lock é menos útil e mais
+atrapalha. Hoje rodam sob `context.WithoutCancel` com dois segundos de timeout:
+`WithoutCancel` mantém os valores e descarta o cancelamento, e o timeout existe
+porque o contexto de origem não carrega mais prazo nenhum.
+
+O segundo é o oposto — terminar cedo e não avisar. O backfill saía do loop
+quando o contexto acabava e devolvia `stats, nil`, então `cmd/embed` imprimia
+resumo de sucesso para uma execução interrompida. Devolve `stats, ctx.Err()`
+agora: `ctx.Err()` é como uma função diz "parei porque mandaram parar", e `nil`
+diz "terminei".
+
+### Comentário que mente
+
+Apareceram três formatos, e eles não são igualmente graves. Comentário
+descrevendo um componente que não existe (frases prometendo Bedrock em produção,
+sendo que o provider foi construído e apagado) e comentário citando um passo de
+plano que foi removido apenas gastam o tempo de quem lê.
+
+O terceiro faz estrago: `internal/api/reviews.go` afirma que `ReviewFinding` e
+`agent.Finding` "são fixados juntos por um teste", e esse teste não existe em
+lugar nenhum do módulo. Os dois structs são redeclarados em vez de
+compartilhados porque `agent` importa `api` e o contrário seria ciclo — ou
+seja, *só* um teste pode pegar um campo divergindo, e o comentário é exatamente
+o motivo de ninguém ter ido procurar. Comentário que afirma uma garantia é
+carga estrutural; falso, é pior que silêncio, porque silêncio pelo menos
+convida à conferência.
+
+E há uma regra de posição que é específica de Go: um comentário vira
+documentação **pela posição** — colado na declaração e começando pelo nome
+declarado. Parágrafo solto no fim do arquivo é invisível para `go doc`, isto é,
+invisível justamente para quem mais o queria. Ler `go doc ./internal/<pkg>` e
+perguntar se aquilo funciona como índice é a revisão mais barata deste
+repositório: pega o comentário faltando, o nome exportado que não devia estar, e
+a função pública devolvendo tipo que o leitor não consegue nomear.
+
+---
+
+## 13. Onde está o resto do contexto
 
 Este documento explica *conceitos* — o porquê de cada tecnologia, em português,
 para reler antes de uma entrevista. Ele não é o registro das decisões do projeto.
@@ -996,6 +1184,10 @@ para reler antes de uma entrevista. Ele não é o registro das decisões do proj
   ao longo das 5 fases, o que foi rejeitado e por quê, e os bugs cuja lição virou
   regra (o tipo de parâmetro em SQL, o livelock do worker, a fronteira read-only
   do MCP). Em inglês, porque referencia identificadores do código.
+- **[`go-conventions.md`](go-conventions.md)** — a versão longa da seção 12: o
+  que a revisão de Go idiomático ensinou, com o arquivo de cada exemplo, de
+  visibilidade por pacote a comentário que mente. Em inglês, como o
+  `DECISIONS.md`, e pelo mesmo motivo.
 - **[`../.spec/agent-harness/part-b.md`](../.spec/agent-harness/part-b.md)** — o
   desenho completo da Parte B (o harness agêntico): o loop manual, o verificador
   independente, as guardrails, os evals e a ordem de construção. Desenhado, não
