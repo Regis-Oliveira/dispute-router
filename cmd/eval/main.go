@@ -146,7 +146,7 @@ func run() error {
 	if *asJSON {
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
-	print(report)
+	printReport(report)
 	if *showLetter {
 		printLetters(report)
 	}
@@ -185,7 +185,7 @@ func list(ctx context.Context, pool *pgxpool.Pool, cases []eval.Case) error {
 }
 
 // printReport writes the table and the paragraphs under it to stdout.
-func print(report eval.Report) {
+func printReport(report eval.Report) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "CASE\tDISPUTE\tPASSED\tVERIFIER\tCOST\tPRECEDENT\tFAILURES")
 	for _, r := range report.Results {

@@ -1,7 +1,6 @@
 package ingest
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -9,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/regisoliveira/dispute-router/internal/httpx"
 	"github.com/regisoliveira/dispute-router/internal/secrets"
 	"github.com/regisoliveira/dispute-router/internal/signing"
 )
@@ -83,10 +83,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if allowed, _, err := h.ipLimiter.Allow(ctx, clientIP(r)); err != nil {
 		logger.ErrorContext(ctx, "ip rate limit failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "rate limiter unavailable")
+		httpx.WriteError(w, http.StatusServiceUnavailable, "rate limiter unavailable")
 		return
 	} else if !allowed {
-		writeError(w, http.StatusTooManyRequests, "too many requests")
+		httpx.WriteError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 
@@ -95,16 +95,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// Only the cap is 413. A client that hangs up mid-body used to be told
 		// its body was too large, which is a lie about a limit it never hit.
 		if errors.As(err, new(*http.MaxBytesError)) {
-			writeError(w, http.StatusRequestEntityTooLarge, "body too large")
+			httpx.WriteError(w, http.StatusRequestEntityTooLarge, "body too large")
 			return
 		}
-		writeError(w, http.StatusBadRequest, "could not read body")
+		httpx.WriteError(w, http.StatusBadRequest, "could not read body")
 		return
 	}
 
 	signatureValue := r.Header.Get(signatureHeader)
 	if signatureValue == "" {
-		writeError(w, http.StatusUnauthorized, "missing signature")
+		httpx.WriteError(w, http.StatusUnauthorized, "missing signature")
 		return
 	}
 
@@ -112,7 +112,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// shape, so a ruling body cannot be quietly read as a dispute.
 	_, eventType, err := peekType(body)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -139,12 +139,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		eventID, merchantID = ruling.ID, ruling.Data.MerchantID
 
 	default:
-		writeError(w, http.StatusBadRequest, "unsupported event type "+eventType)
+		httpx.WriteError(w, http.StatusBadRequest, "unsupported event type "+eventType)
 		return
 	}
 
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -154,11 +154,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// Same answer as a bad signature, on purpose.
 			logger.WarnContext(ctx, "rejected delivery", "reason", "unknown merchant",
 				"claimed_merchant", merchantID)
-			writeError(w, http.StatusUnauthorized, "invalid signature")
+			httpx.WriteError(w, http.StatusUnauthorized, "invalid signature")
 			return
 		}
 		logger.ErrorContext(ctx, "merchant lookup failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		httpx.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -168,14 +168,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	merchantSecrets, err := h.secrets.SecretsFor(ctx, merchant.ExternalID)
 	if err != nil {
 		logger.ErrorContext(ctx, "secret lookup failed", "error", err, "merchant", merchant.ExternalID)
-		writeError(w, http.StatusServiceUnavailable, "cannot verify signatures right now")
+		httpx.WriteError(w, http.StatusServiceUnavailable, "cannot verify signatures right now")
 		return
 	}
 
 	if err := signing.VerifyAny(merchantSecrets, body, signatureValue, h.now(), h.tolerance); err != nil {
 		logger.WarnContext(ctx, "rejected delivery", "reason", "signature", "error", err,
 			"merchant", merchant.ExternalID)
-		writeError(w, http.StatusUnauthorized, "invalid signature")
+		httpx.WriteError(w, http.StatusUnauthorized, "invalid signature")
 		return
 	}
 
@@ -184,11 +184,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if allowed, remaining, err := h.merchantLimiter.Allow(ctx, merchant.ExternalID); err != nil {
 		logger.ErrorContext(ctx, "merchant rate limit failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "rate limiter unavailable")
+		httpx.WriteError(w, http.StatusServiceUnavailable, "rate limiter unavailable")
 		return
 	} else if !allowed {
 		logger.WarnContext(ctx, "merchant rate limited", "merchant", merchant.ExternalID, "remaining", remaining)
-		writeError(w, http.StatusTooManyRequests, "too many requests")
+		httpx.WriteError(w, http.StatusTooManyRequests, "too many requests")
 		return
 	}
 
@@ -198,11 +198,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	claimed, err := h.guard.Claim(ctx, eventID)
 	if err != nil {
 		logger.ErrorContext(ctx, "idempotency claim failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, "idempotency store unavailable")
+		httpx.WriteError(w, http.StatusServiceUnavailable, "idempotency store unavailable")
 		return
 	}
 	if !claimed {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": eventID})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": eventID})
 		return
 	}
 
@@ -229,7 +229,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			logger.ErrorContext(ctx, "could not release idempotency claim", "error", releaseErr, "event_id", eventID)
 		}
 		logger.ErrorContext(ctx, "record failed", "error", recordErr, "event_id", eventID)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		httpx.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
@@ -238,14 +238,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// on. 422 tells the sender this will not succeed on retry.
 		logger.WarnContext(ctx, "unlinkable delivery", "merchant", merchant.ExternalID,
 			"reason", recordErr.Error(), "webhook_event_id", result.WebhookEventID)
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
+		httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]any{
 			"status": "unlinkable", "reason": recordErr.Error(), "event_id": eventID,
 		})
 		return
 	}
 
 	if result.Duplicate {
-		writeJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": eventID})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"status": "duplicate", "event_id": eventID})
 		return
 	}
 
@@ -265,7 +265,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"outcome", ruling.Data.Outcome)
 	}
 
-	writeJSON(w, http.StatusAccepted, map[string]any{
+	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"status":     "accepted",
 		"event_id":   eventID,
 		"dispute_id": result.DisputeID,
@@ -278,14 +278,4 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{"error": message})
 }

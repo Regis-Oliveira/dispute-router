@@ -4,7 +4,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,10 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/regisoliveira/dispute-router/cmd/internal/boot"
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
@@ -27,7 +25,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := boot.Logger(true)
 
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "error", err)
@@ -45,28 +43,17 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
 
-	// Fail at startup rather than on the first request, so a bad DSN is a crash
-	// loop instead of a stream of 500s.
-	if err := pool.Ping(ctx); err != nil {
-		return err
-	}
-
-	redisOptions, err := redis.ParseURL(cfg.RedisURL)
+	rdb, err := boot.Redis(ctx, cfg.RedisURL)
 	if err != nil {
 		return err
 	}
-	rdb := redis.NewClient(redisOptions)
 	defer func() { _ = rdb.Close() }()
-
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		return err
-	}
 
 	// One AWS config, built before either the secret resolver or the outbox
 	// publisher asks for a client.
@@ -159,13 +146,8 @@ func run(logger *slog.Logger) error {
 
 	group, groupCtx := errgroup.WithContext(ctx)
 
-	group.Go(func() error {
-		logger.Info("ingest listening", "addr", cfg.Addr)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return nil
-	})
+	logger.Info("ingest listening", "addr", cfg.Addr)
+	boot.ServeHTTP(groupCtx, group, server, cfg.ShutdownTimeout, logger)
 
 	group.Go(func() error {
 		return relay.Run(groupCtx)
@@ -174,16 +156,6 @@ func run(logger *slog.Logger) error {
 	// Runtime diagnostics on loopback, off unless PPROF_ADDR is set.
 	// Convention: 127.0.0.1:6062 for this binary.
 	group.Go(func() error { return debugx.Serve(groupCtx, cfg.PprofAddr, logger) })
-
-	group.Go(func() error {
-		<-groupCtx.Done()
-		// A fresh context: groupCtx is already cancelled, and Shutdown needs a
-		// live one to give in-flight requests their grace period.
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-		defer cancel()
-		logger.Info("shutting down", "grace", cfg.ShutdownTimeout.String())
-		return server.Shutdown(shutdownCtx)
-	})
 
 	if err := group.Wait(); err != nil {
 		return err

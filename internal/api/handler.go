@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+
+	"github.com/regisoliveira/dispute-router/internal/httpx"
 )
 
 // Handler serves the dashboard's HTTP routes.
@@ -51,7 +53,7 @@ func (h *Handler) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/merchants", h.merchants)
 	mux.HandleFunc("GET /api/stream", h.stream)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	mux.HandleFunc("GET /readyz", h.ready)
 	return mux
@@ -60,59 +62,59 @@ func (h *Handler) Routes() *http.ServeMux {
 func (h *Handler) listDisputes(w http.ResponseWriter, r *http.Request) {
 	filters, err := parseFilters(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	list, err := h.store.ListDisputes(r.Context(), filters)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "list disputes failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httpx.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	httpx.WriteJSON(w, http.StatusOK, list)
 }
 
 func (h *Handler) getDispute(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be an integer")
+		httpx.WriteError(w, http.StatusBadRequest, "id must be an integer")
 		return
 	}
 
 	detail, err := h.store.Dispute(r.Context(), id)
 	if errors.Is(err, ErrNotFound) {
-		writeError(w, http.StatusNotFound, "no such dispute")
+		httpx.WriteError(w, http.StatusNotFound, "no such dispute")
 		return
 	}
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "load dispute failed", "error", err, "id", id)
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httpx.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	httpx.WriteJSON(w, http.StatusOK, detail)
 }
 
 func (h *Handler) listEvidence(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be an integer")
+		httpx.WriteError(w, http.StatusBadRequest, "id must be an integer")
 		return
 	}
 
 	files, err := h.evidence.List(r.Context(), id)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "list evidence failed", "error", err, "dispute_id", id)
-		writeError(w, http.StatusInternalServerError, "could not list evidence")
+		httpx.WriteError(w, http.StatusInternalServerError, "could not list evidence")
 		return
 	}
-	writeJSON(w, http.StatusOK, files)
+	httpx.WriteJSON(w, http.StatusOK, files)
 }
 
 func (h *Handler) presignEvidence(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be an integer")
+		httpx.WriteError(w, http.StatusBadRequest, "id must be an integer")
 		return
 	}
 
@@ -121,7 +123,7 @@ func (h *Handler) presignEvidence(w http.ResponseWriter, r *http.Request) {
 		ContentType string `json:"content_type"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body must be {filename, content_type}")
+		httpx.WriteError(w, http.StatusBadRequest, "body must be {filename, content_type}")
 		return
 	}
 
@@ -130,51 +132,51 @@ func (h *Handler) presignEvidence(w http.ResponseWriter, r *http.Request) {
 	// under keys that will never be read.
 	if _, err := h.store.Dispute(r.Context(), id); err != nil {
 		if errors.Is(err, ErrNotFound) {
-			writeError(w, http.StatusNotFound, "no such dispute")
+			httpx.WriteError(w, http.StatusNotFound, "no such dispute")
 			return
 		}
 		h.logger.ErrorContext(r.Context(), "dispute lookup failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
+		httpx.WriteError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	target, err := h.evidence.PresignUpload(r.Context(), id, body.Filename, body.ContentType)
 	if err != nil {
 		if errors.Is(err, ErrInvalidInput) {
-			writeError(w, http.StatusBadRequest, err.Error())
+			httpx.WriteError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		h.logger.ErrorContext(r.Context(), "presign failed", "error", err, "dispute_id", id)
-		writeError(w, http.StatusInternalServerError, "could not create an upload url")
+		httpx.WriteError(w, http.StatusInternalServerError, "could not create an upload url")
 		return
 	}
-	writeJSON(w, http.StatusOK, target)
+	httpx.WriteJSON(w, http.StatusOK, target)
 }
 
 func (h *Handler) summary(w http.ResponseWriter, r *http.Request) {
 	filters, err := parseFilters(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	summary, err := h.store.Summary(r.Context(), filters)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "summary failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httpx.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, summary)
+	httpx.WriteJSON(w, http.StatusOK, summary)
 }
 
 func (h *Handler) merchants(w http.ResponseWriter, r *http.Request) {
 	options, err := h.store.Merchants(r.Context())
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "merchants failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httpx.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, options)
+	httpx.WriteJSON(w, http.StatusOK, options)
 }
 
 // exportDisputes streams a CSV of everything matching the filters.
@@ -186,7 +188,7 @@ func (h *Handler) merchants(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) exportDisputes(w http.ResponseWriter, r *http.Request) {
 	filters, err := parseFilters(r)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// The export is not paged; the whole filtered set is the point.
@@ -276,7 +278,7 @@ func (h *Handler) ready(w http.ResponseWriter, r *http.Request) {
 		checks["redis"] = err.Error()
 		status = http.StatusServiceUnavailable
 	}
-	writeJSON(w, status, checks)
+	httpx.WriteJSON(w, status, checks)
 }
 
 // CORS allows exactly the origins passed in.
@@ -336,16 +338,6 @@ func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]string{"error": message})
-}
-
 // ---------------------------------------------------------------------------
 // review queue
 // ---------------------------------------------------------------------------
@@ -356,30 +348,30 @@ func (h *Handler) listReviews(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.store.Reviews(r.Context(), limit)
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "list reviews failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httpx.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	httpx.WriteJSON(w, http.StatusOK, rows)
 }
 
 func (h *Handler) getReview(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be an integer")
+		httpx.WriteError(w, http.StatusBadRequest, "id must be an integer")
 		return
 	}
 
 	detail, err := h.store.Review(r.Context(), id)
 	if errors.Is(err, ErrNotFound) {
-		writeError(w, http.StatusNotFound, "no such run")
+		httpx.WriteError(w, http.StatusNotFound, "no such run")
 		return
 	}
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "load review failed", "error", err, "run", id)
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httpx.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, detail)
+	httpx.WriteJSON(w, http.StatusOK, detail)
 }
 
 // decideReview is the write.
@@ -394,7 +386,7 @@ func (h *Handler) getReview(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "id must be an integer")
+		httpx.WriteError(w, http.StatusBadRequest, "id must be an integer")
 		return
 	}
 
@@ -403,22 +395,22 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
 		Reviewer string `json:"reviewer"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "body must be JSON with decision and reviewer")
+		httpx.WriteError(w, http.StatusBadRequest, "body must be JSON with decision and reviewer")
 		return
 	}
 
 	err = h.store.Decide(r.Context(), id, body.Decision, body.Reviewer)
 	switch {
 	case errors.Is(err, ErrInvalidInput):
-		writeError(w, http.StatusBadRequest, err.Error())
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrNotReviewable):
 		// 409 rather than 404: the run exists, somebody else already decided,
 		// and the page in front of this caller is out of date. Telling them it
 		// is missing would send them looking for the wrong problem.
-		writeError(w, http.StatusConflict, "this run has already been decided, its deadline has passed, or the dispute moved on")
+		httpx.WriteError(w, http.StatusConflict, "this run has already been decided, its deadline has passed, or the dispute moved on")
 	case err != nil:
 		h.logger.ErrorContext(r.Context(), "decide failed", "error", err, "run", id)
-		writeError(w, http.StatusInternalServerError, "could not record the decision")
+		httpx.WriteError(w, http.StatusInternalServerError, "could not record the decision")
 	default:
 		h.logger.InfoContext(r.Context(), "review decided",
 			"run", id, "decision", body.Decision, "reviewer", body.Reviewer)
@@ -431,7 +423,7 @@ func (h *Handler) listDecisions(w http.ResponseWriter, r *http.Request) {
 
 	decision := q.Get("decision")
 	if decision != "" && decision != "submitted" && decision != "discarded" {
-		writeError(w, http.StatusBadRequest, "decision must be submitted or discarded")
+		httpx.WriteError(w, http.StatusBadRequest, "decision must be submitted or discarded")
 		return
 	}
 
@@ -447,8 +439,8 @@ func (h *Handler) listDecisions(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		h.logger.ErrorContext(r.Context(), "list decisions failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "query failed")
+		httpx.WriteError(w, http.StatusInternalServerError, "query failed")
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	httpx.WriteJSON(w, http.StatusOK, list)
 }

@@ -13,10 +13,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/regisoliveira/dispute-router/cmd/internal/boot"
 	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
 	"github.com/regisoliveira/dispute-router/internal/debugx"
@@ -24,7 +23,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := boot.Logger(true)
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "error", err)
 		os.Exit(1)
@@ -40,24 +39,17 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		return err
-	}
 
-	redisOptions, err := redis.ParseURL(cfg.RedisURL)
+	rdb, err := boot.Redis(ctx, cfg.RedisURL)
 	if err != nil {
 		return err
 	}
-	rdb := redis.NewClient(redisOptions)
 	defer func() { _ = rdb.Close() }()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		return err
-	}
 
 	// Names the process in every dispute_events row it writes, so an automated
 	// decision can be traced back to the thing that made it.

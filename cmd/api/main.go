@@ -7,7 +7,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,10 +14,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/regisoliveira/dispute-router/cmd/internal/boot"
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/awsx"
 	"github.com/regisoliveira/dispute-router/internal/config"
@@ -27,7 +25,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := boot.Logger(true)
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "error", err)
 		os.Exit(1)
@@ -43,24 +41,17 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		return err
-	}
 
-	redisOptions, err := redis.ParseURL(cfg.RedisURL)
+	rdb, err := boot.Redis(ctx, cfg.RedisURL)
 	if err != nil {
 		return err
 	}
-	rdb := redis.NewClient(redisOptions)
 	defer func() { _ = rdb.Close() }()
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		return err
-	}
 
 	awsCfg, err := awsx.Load(ctx, cfg.AWS())
 	if err != nil {
@@ -102,21 +93,8 @@ func run(logger *slog.Logger) error {
 	// convention at 127.0.0.1:6060 for this binary.
 	group.Go(func() error { return debugx.Serve(groupCtx, cfg.PprofAddr, logger) })
 
-	group.Go(func() error {
-		logger.Info("api listening", "addr", cfg.APIAddr, "cors", cfg.CORSOrigins)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return err
-		}
-		return nil
-	})
-
-	group.Go(func() error {
-		<-groupCtx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-		defer cancel()
-		logger.Info("shutting down", "grace", cfg.ShutdownTimeout.String())
-		return server.Shutdown(shutdownCtx)
-	})
+	logger.Info("api listening", "addr", cfg.APIAddr, "cors", cfg.CORSOrigins)
+	boot.ServeHTTP(groupCtx, group, server, cfg.ShutdownTimeout, logger)
 
 	if err := group.Wait(); err != nil {
 		return err

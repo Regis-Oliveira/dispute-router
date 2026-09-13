@@ -29,6 +29,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/regisoliveira/dispute-router/cmd/internal/boot"
 	"github.com/regisoliveira/dispute-router/internal/agent"
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/awsx"
@@ -36,7 +37,7 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := boot.Logger(false)
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "error", err)
 		os.Exit(1)

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"sort"
@@ -164,7 +165,7 @@ func summarise(question, model string, result agent.Result) session {
 	return s
 }
 
-func (s session) print(w *os.File) {
+func (s session) print(w io.Writer) {
 	fmt.Fprintf(w, "\n== SESSION ==\n")
 	fmt.Fprintf(w, "  stopped:   %s\n", s.Halt)
 	fmt.Fprintf(w, "  turns:     %d\n", s.Turns)

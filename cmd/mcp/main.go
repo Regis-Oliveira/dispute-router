@@ -14,9 +14,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/regisoliveira/dispute-router/cmd/internal/boot"
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/config"
 	"github.com/regisoliveira/dispute-router/internal/mcpserver"
@@ -26,7 +26,7 @@ const version = "0.1.0"
 
 func main() {
 	// stderr, never stdout. See the package comment.
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	logger := boot.Logger(false)
 
 	if err := run(logger); err != nil {
 		logger.Error("fatal", "error", err)
@@ -43,14 +43,11 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, err := boot.Postgres(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		return err
-	}
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:        "dispute-router",
