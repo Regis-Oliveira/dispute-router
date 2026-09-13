@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/regisoliveira/dispute-router/internal/events"
 )
 
 // ErrClaimLost means another process moved the dispute between the read and
@@ -227,27 +229,21 @@ func (r *Runs) Record(ctx context.Context, claim Claim, run Run) error {
 			return ErrClaimLost
 		}
 
-		detail, err := json.Marshal(map[string]any{
-			"attempt":         claim.Attempt,
-			"outcome":         run.Outcome,
-			"model":           run.Model,
-			"cost_micros":     run.CostMicros,
-			"findings":        len(findings),
-			"escalated":       run.Escalated,
-			"awaiting_review": awaitingReview,
+		return events.Record(ctx, tx, events.Event{
+			DisputeID: claim.DisputeID,
+			FromState: "resolving",
+			ToState:   toState,
+			Actor:     "agent",
+			Detail: map[string]any{
+				"attempt":         claim.Attempt,
+				"outcome":         run.Outcome,
+				"model":           run.Model,
+				"cost_micros":     run.CostMicros,
+				"findings":        len(findings),
+				"escalated":       run.Escalated,
+				"awaiting_review": awaitingReview,
+			},
 		})
-		if err != nil {
-			return fmt.Errorf("encode event detail: %w", err)
-		}
-
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO dispute_events (dispute_id, from_state, to_state, actor, detail)
-			VALUES ($1, 'resolving', $2, 'agent', $3)`,
-			claim.DisputeID, toState, detail,
-		); err != nil {
-			return fmt.Errorf("insert dispute event: %w", err)
-		}
-		return nil
 	})
 }
 

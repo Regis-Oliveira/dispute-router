@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/regisoliveira/dispute-router/internal/events"
 )
 
 // ErrNotReviewable means the run is not in a state a decision can be made
@@ -262,22 +264,16 @@ func (s *Store) Decide(ctx context.Context, runID int64, decision, reviewer stri
 			return ErrNotReviewable
 		}
 
-		detail, err := json.Marshal(map[string]any{
-			"run":      runID,
-			"decision": decision,
-			"reviewer": reviewer,
+		return events.Record(ctx, tx, events.Event{
+			DisputeID: disputeID,
+			FromState: "draft_ready",
+			ToState:   toState,
+			Actor:     "user:" + reviewer,
+			Detail: map[string]any{
+				"run":      runID,
+				"decision": decision,
+				"reviewer": reviewer,
+			},
 		})
-		if err != nil {
-			return fmt.Errorf("encode event detail: %w", err)
-		}
-
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO dispute_events (dispute_id, from_state, to_state, actor, detail)
-			VALUES ($1, 'draft_ready', $2, $3, $4)`,
-			disputeID, toState, "user:"+reviewer, detail,
-		); err != nil {
-			return fmt.Errorf("insert dispute event: %w", err)
-		}
-		return nil
 	})
 }
