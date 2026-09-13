@@ -25,8 +25,20 @@ type builder struct {
 }
 
 func (b *builder) add(fragment string, value any) {
-	b.args = append(b.args, value)
-	b.conds = append(b.conds, fmt.Sprintf(fragment, len(b.args)))
+	b.conds = append(b.conds, b.expr(fragment, value))
+}
+
+// expr binds values and returns the fragment that reads them, without making it
+// a condition. It is what add is built from, and what a caller uses when the
+// same expression belongs somewhere the WHERE clause is not: decisions.go
+// computes the override pair in its SELECT list as well.
+func (b *builder) expr(fragment string, values ...any) string {
+	positions := make([]any, len(values))
+	for i, value := range values {
+		b.args = append(b.args, value)
+		positions[i] = len(b.args)
+	}
+	return fmt.Sprintf(fragment, positions...)
 }
 
 func (b *builder) where() string {

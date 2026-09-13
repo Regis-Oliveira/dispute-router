@@ -408,9 +408,12 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Decoded straight into the vocabulary's type. It is still whatever the
+	// caller sent - Store.Decide is what refuses a value that is not one of
+	// the two, and it has to, being the only writer of the column.
 	var body struct {
-		Decision string `json:"decision"`
-		Reviewer string `json:"reviewer"`
+		Decision Decision `json:"decision"`
+		Reviewer string   `json:"reviewer"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "body must be JSON with decision and reviewer")
@@ -439,8 +442,9 @@ func (h *Handler) decideReview(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) listDecisions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
-	decision := q.Get("decision")
-	if decision != "" && decision != "submitted" && decision != "discarded" {
+	// Empty means "every decision", which is why this is not just valid().
+	decision := Decision(q.Get("decision"))
+	if decision != "" && !decision.valid() {
 		httpx.WriteError(w, http.StatusBadRequest, "decision must be submitted or discarded")
 		return
 	}

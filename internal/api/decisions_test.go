@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func decided(t *testing.T, store *Store, runID int64, decision, reviewer string) {
+func decided(t *testing.T, store *Store, runID int64, decision Decision, reviewer string) {
 	t.Helper()
 	if err := store.Decide(context.Background(), runID, decision, reviewer); err != nil {
 		t.Fatalf("Decide: %v", err)

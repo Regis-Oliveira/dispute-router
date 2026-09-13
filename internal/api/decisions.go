@@ -6,6 +6,52 @@ import (
 	"time"
 )
 
+// Decision is what a reviewer did with a draft.
+//
+// It is the vocabulary of the agent_runs.review column, whose CHECK constraint
+// (agent_runs_review_check, db/migrations/000003_agent.up.sql) allows exactly
+// these two values plus NULL for "nobody has decided yet". The strings are the
+// database's: a value changed here without a migration is a write Postgres
+// refuses. This package is the only writer of that column, which is why the
+// type lives here rather than in internal/dispute - a decision is made about a
+// run, not about a dispute's own lifecycle.
+type Decision string
+
+const (
+	// DecisionSubmitted sends the letter to the card network and moves the
+	// dispute to 'represented'.
+	DecisionSubmitted Decision = "submitted"
+
+	// DecisionDiscarded means the draft was not good enough and the dispute
+	// returns to the queue. It does not mean giving up on the dispute; see
+	// Store.Decide for why there is no third value.
+	DecisionDiscarded Decision = "discarded"
+)
+
+// valid reports whether d is one of the two values the CHECK constraint
+// accepts, so that a bad one is refused at the edge rather than at the write.
+func (d Decision) valid() bool {
+	return d == DecisionSubmitted || d == DecisionDiscarded
+}
+
+// outcomeRejected is agent.OutcomeRejected, the verifier's verdict that half of
+// an override is made of.
+//
+// Spelled again rather than imported: internal/agent imports this package (for
+// api.Store, api.Filters and api.MaxUploadBytes), so the import cannot go the
+// other way. Nothing makes the compiler check the two against each other -
+// renaming the constant in internal/agent would leave this matching a value
+// nothing writes any more, and the query would quietly report no overrides.
+// The third copy is agent_runs.outcome's CHECK constraint, which is the only
+// one of the three that would refuse a bad write.
+const outcomeRejected = "rejected"
+
+// overrideExpr is the pair the decision history exists to show: the verifier
+// refused this letter and a person sent it anyway. One format string, because
+// it is a column in the SELECT list and sometimes a condition in the WHERE
+// clause, and those two must always test the same thing.
+const overrideExpr = "(a.outcome = $%d AND a.review = $%d)"
+
 // DecisionRow is one decision.
 type DecisionRow struct {
 	RunID     int64  `json:"run_id"`
@@ -46,7 +92,7 @@ type DecisionFilters struct {
 	// Matching it loosely now would build in the assumption that it is a name,
 	// which is the assumption that has to go.
 	Reviewer      string
-	Decision      string
+	Decision      Decision
 	OnlyOverrides bool
 	Limit         int
 	Offset        int
@@ -99,7 +145,12 @@ func (s *Store) Decisions(ctx context.Context, f DecisionFilters) (DecisionList,
 		b.add("a.review = $%d", f.Decision)
 	}
 	if f.OnlyOverrides {
-		b.conds = append(b.conds, "(a.outcome = 'rejected' AND a.review = 'submitted')")
+		// Bound, not spelled into the statement: no index predicate on
+		// agent_runs names either value. The one partial index there
+		// (agent_runs_awaiting_review_idx) is on `review IS NULL AND outcome =
+		// 'drafted'`, which this expression cannot satisfy anyway - a decided
+		// run is exactly what it excludes.
+		b.conds = append(b.conds, b.expr(overrideExpr, outcomeRejected, DecisionSubmitted))
 	}
 	where := b.where()
 
@@ -113,21 +164,26 @@ func (s *Store) Decisions(ctx context.Context, f DecisionFilters) (DecisionList,
 	// the offset into the backing array the count query above is still reading
 	// from - safe today only because that query had already returned, which is
 	// a fact about statement order rather than about this code.
-	args := append(append([]any{}, b.args...), f.Limit, f.Offset)
+	//
+	// This query binds more than the count did: the override pair is a column
+	// in its SELECT list whether or not it is also a condition, and the count
+	// query's text must not be handed parameters it never mentions.
+	rowArgs := builder{args: append([]any{}, b.args...)}
+	overrideColumn := rowArgs.expr(overrideExpr, outcomeRejected, DecisionSubmitted)
+	page := rowArgs.expr(" LIMIT $%d OFFSET $%d", f.Limit, f.Offset)
 
 	rows, err := s.pool.Query(ctx, `
 		SELECT a.id, d.id, d.external_id, m.name, d.amount_minor, d.currency,
 		       a.outcome, coalesce(a.recommendation, ''),
 		       jsonb_array_length(a.findings), a.attempt, a.cost_micros,
 		       a.review, a.reviewed_by, a.reviewed_at,
-		       (a.outcome = 'rejected' AND a.review = 'submitted'),
+		       `+overrideColumn+`,
 		       d.state
 		  FROM agent_runs a
 		  JOIN disputes  d ON d.id = a.dispute_id
 		  JOIN merchants m ON m.id = d.merchant_id`+where+`
-		 ORDER BY a.reviewed_at DESC`+
-		fmt.Sprintf(" LIMIT $%d OFFSET $%d", len(b.args)+1, len(b.args)+2),
-		args...)
+		 ORDER BY a.reviewed_at DESC`+page,
+		rowArgs.args...)
 	if err != nil {
 		return DecisionList{}, fmt.Errorf("list decisions: %w", err)
 	}

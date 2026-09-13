@@ -222,12 +222,12 @@ func validReviewer(reviewer string) error {
 // One transaction, and the dispute's state is part of the WHERE clause rather
 // than something checked beforehand: two reviewers with the page open is the
 // ordinary case, not the exotic one.
-func (s *Store) Decide(ctx context.Context, runID int64, decision, reviewer string) error {
+func (s *Store) Decide(ctx context.Context, runID int64, decision Decision, reviewer string) error {
 	var toState dispute.State
 	switch decision {
-	case "submitted":
+	case DecisionSubmitted:
 		toState = dispute.StateRepresented
-	case "discarded":
+	case DecisionDiscarded:
 		toState = dispute.StateReceived
 	default:
 		return fmt.Errorf("%w: decision must be submitted or discarded, got %q", ErrInvalidInput, decision)
