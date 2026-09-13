@@ -23,6 +23,7 @@ type Backfill struct {
 	log      *slog.Logger
 }
 
+// NewBackfill binds a backfill to a pool and an embedder; a nil log means the default.
 func NewBackfill(pool *pgxpool.Pool, embedder Embedder, log *slog.Logger) *Backfill {
 	if log == nil {
 		log = slog.Default()
@@ -30,6 +31,7 @@ func NewBackfill(pool *pgxpool.Pool, embedder Embedder, log *slog.Logger) *Backf
 	return &Backfill{pool: pool, embedder: embedder, log: log}
 }
 
+// BackfillStats is what one Run did and what it left outstanding.
 type BackfillStats struct {
 	Embedded  int
 	Remaining int64
@@ -66,6 +68,7 @@ func PendingEmbeddings(ctx context.Context, pool *pgxpool.Pool, model string) (i
 	return n, nil
 }
 
+// Pending counts the claims still to embed for this backfill's model.
 func (b *Backfill) Pending(ctx context.Context) (int64, error) {
 	return PendingEmbeddings(ctx, b.pool, b.embedder.Model())
 }
@@ -127,7 +130,10 @@ func (b *Backfill) Run(ctx context.Context, batchSize, limit int) (stats Backfil
 		b.log.Info("embedded", "batch", stats.Batches, "rows", len(ids), "total", stats.Embedded)
 
 		if ctx.Err() != nil {
-			break
+			// A run that was cut short is not a run that finished. Returning nil
+			// here made cmd/embed print a success for a backfill that had been
+			// interrupted, with the stats above as the only hint.
+			return stats, ctx.Err()
 		}
 	}
 
