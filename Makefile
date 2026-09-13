@@ -21,6 +21,7 @@ help:
 	@echo "stack        what to run, in which order"
 	@echo ""
 	@echo "go-test      go test ./... -race"
+	@echo "go-lint      go vet and staticcheck"
 	@echo "dash-test    unit tests for the dashboard"
 	@echo "tidy         resolve Go module dependencies"
 	@echo ""
@@ -143,6 +144,7 @@ go-test:
 
 go-lint:
 	go vet ./...
+	go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
 
 dash:
 	cd $(DASH) && npm start
