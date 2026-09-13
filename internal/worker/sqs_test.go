@@ -142,10 +142,10 @@ func TestPublishedDisputeIsScheduledFromTheQueue(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 
-	consumer := &Consumer{
+	consumer := NewConsumer(ConsumerOptions{
 		Client: client, QueueURL: queueURL, Deadlines: deadlines,
 		Logger: quietLogger(), MaxMessages: 10, WaitTime: 2,
-	}
+	})
 
 	runCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
@@ -196,10 +196,10 @@ func TestAPoisonMessageEndsUpInTheDeadLetterQueue(t *testing.T) {
 		t.Fatalf("SendMessage: %v", err)
 	}
 
-	consumer := &Consumer{
+	consumer := NewConsumer(ConsumerOptions{
 		Client: client, QueueURL: queueURL, Deadlines: NewDeadlines(testRedis(t)),
 		Logger: quietLogger(), MaxMessages: 10, WaitTime: 1,
-	}
+	})
 
 	runCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
 	defer cancel()
@@ -228,10 +228,10 @@ func TestUnrelatedEventsAreAcknowledged(t *testing.T) {
 		t.Fatalf("SendMessage: %v", err)
 	}
 
-	consumer := &Consumer{
+	consumer := NewConsumer(ConsumerOptions{
 		Client: client, QueueURL: queueURL, Deadlines: NewDeadlines(testRedis(t)),
 		Logger: quietLogger(), MaxMessages: 10, WaitTime: 1,
-	}
+	})
 
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()

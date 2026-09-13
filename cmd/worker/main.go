@@ -92,14 +92,14 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 
-	consumer := &worker.Consumer{
+	consumer := worker.NewConsumer(worker.ConsumerOptions{
 		Client:      awsx.SQS(awsCfg, cfg.AWSEndpoint),
 		QueueURL:    cfg.SQSQueueURL,
 		Deadlines:   deadlines,
 		Logger:      logger,
 		MaxMessages: int32(cfg.SQSMaxMessages),
 		WaitTime:    int32(cfg.SQSWaitSeconds),
-	}
+	})
 
 	logger.Info("worker starting",
 		"concurrency", cfg.WorkerConcurrency,

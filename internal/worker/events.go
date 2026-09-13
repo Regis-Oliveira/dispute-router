@@ -40,6 +40,12 @@ type disputeReceived struct {
 //
 // The reconcile pass stays: this is the fast path, that is the guarantee.
 type Consumer struct {
+	opts ConsumerOptions
+}
+
+// ConsumerOptions configures a Consumer; NewConsumer fills in MaxMessages and
+// WaitTime when they are zero.
+type ConsumerOptions struct {
 	Client    *sqs.Client
 	QueueURL  string
 	Deadlines *Deadlines
@@ -54,19 +60,33 @@ type Consumer struct {
 	WaitTime int32
 }
 
+// NewConsumer builds a Consumer, defaulting MaxMessages to 10 and WaitTime to
+// 20 seconds. It is the only way to build one: a Consumer literal with a zero
+// WaitTime would busy-poll, so the fields are not exported.
+func NewConsumer(opts ConsumerOptions) *Consumer {
+	if opts.MaxMessages < 1 {
+		opts.MaxMessages = 10
+	}
+	if opts.WaitTime < 1 {
+		opts.WaitTime = 20
+	}
+	return &Consumer{opts: opts}
+}
+
+// Run receives and handles messages until ctx is cancelled.
 func (c *Consumer) Run(ctx context.Context) error {
-	c.Logger.InfoContext(ctx, "sqs consumer starting", "queue", c.QueueURL)
+	c.opts.Logger.InfoContext(ctx, "sqs consumer starting", "queue", c.opts.QueueURL)
 
 	for {
 		if ctx.Err() != nil {
-			c.Logger.InfoContext(ctx, "sqs consumer stopping")
+			c.opts.Logger.InfoContext(ctx, "sqs consumer stopping")
 			return nil
 		}
 
-		out, err := c.Client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-			QueueUrl:              aws.String(c.QueueURL),
-			MaxNumberOfMessages:   c.MaxMessages,
-			WaitTimeSeconds:       c.WaitTime,
+		out, err := c.opts.Client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
+			QueueUrl:              aws.String(c.opts.QueueURL),
+			MaxNumberOfMessages:   c.opts.MaxMessages,
+			WaitTimeSeconds:       c.opts.WaitTime,
 			MessageAttributeNames: []string{"All"},
 			// ApproximateReceiveCount is how many times this message has been
 			// delivered. It is the only way to tell a first attempt from a
@@ -80,7 +100,7 @@ func (c *Consumer) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			c.Logger.ErrorContext(ctx, "sqs receive failed", "error", err)
+			c.opts.Logger.ErrorContext(ctx, "sqs receive failed", "error", err)
 			// Back off rather than hammering a failing endpoint.
 			select {
 			case <-ctx.Done():
@@ -104,7 +124,7 @@ func (c *Consumer) handle(ctx context.Context, msg types.Message) {
 		// timeout lapses, and after maxReceiveCount attempts the redrive policy
 		// moves it to the dead-letter queue. Deleting it here to keep the logs
 		// quiet is how a lost message becomes a mystery.
-		c.Logger.ErrorContext(ctx, "message not handled; leaving it for redelivery",
+		c.opts.Logger.ErrorContext(ctx, "message not handled; leaving it for redelivery",
 			"error", err, "receive_count", receives)
 		return
 	}
@@ -113,11 +133,11 @@ func (c *Consumer) handle(ctx context.Context, msg types.Message) {
 	// durably done. A crash before this point means redelivery, which is why
 	// scheduling has to be idempotent - and it is: ZADD on an id already
 	// present moves it rather than duplicating it.
-	if _, err := c.Client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-		QueueUrl:      aws.String(c.QueueURL),
+	if _, err := c.opts.Client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+		QueueUrl:      aws.String(c.opts.QueueURL),
 		ReceiptHandle: msg.ReceiptHandle,
 	}); err != nil {
-		c.Logger.ErrorContext(ctx, "delete failed; the message will be redelivered", "error", err)
+		c.opts.Logger.ErrorContext(ctx, "delete failed; the message will be redelivered", "error", err)
 	}
 }
 
@@ -146,12 +166,12 @@ func (c *Consumer) process(ctx context.Context, msg types.Message) error {
 		return fmt.Errorf("%w: payload is missing dispute_id or deadline_at", ErrUnhandled)
 	}
 
-	if err := c.Deadlines.Schedule(ctx, payload.DisputeID, payload.DeadlineAt); err != nil {
+	if err := c.opts.Deadlines.Schedule(ctx, payload.DisputeID, payload.DeadlineAt); err != nil {
 		// A transient Redis failure. Worth retrying, so it is not ErrUnhandled.
 		return err
 	}
 
-	c.Logger.InfoContext(ctx, "scheduled from queue",
+	c.opts.Logger.InfoContext(ctx, "scheduled from queue",
 		"dispute_id", payload.DisputeID,
 		"deadline_at", payload.DeadlineAt,
 		"outbox_id", env.OutboxID)
