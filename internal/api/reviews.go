@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 	"github.com/regisoliveira/dispute-router/internal/events"
 )
 
@@ -51,6 +52,9 @@ func (s *Store) Reviews(ctx context.Context, limit int) ([]ReviewRow, error) {
 		limit = 50
 	}
 
+	// 'draft_ready' is spelled out rather than bound: the review queue's index
+	// (disputes_draft_ready_deadline_idx) is partial on exactly that literal,
+	// and a bind parameter is not something the planner can prove implies it.
 	rows, err := s.pool.Query(ctx, `
 		SELECT a.id, d.id, d.external_id, m.name, d.reason_code,
 		       d.amount_minor, d.currency,
@@ -216,12 +220,12 @@ func validReviewer(reviewer string) error {
 // than something checked beforehand: two reviewers with the page open is the
 // ordinary case, not the exotic one.
 func (s *Store) Decide(ctx context.Context, runID int64, decision, reviewer string) error {
-	var toState string
+	var toState dispute.State
 	switch decision {
 	case "submitted":
-		toState = "represented"
+		toState = dispute.StateRepresented
 	case "discarded":
-		toState = "received"
+		toState = dispute.StateReceived
 	default:
 		return fmt.Errorf("%w: decision must be submitted or discarded, got %q", ErrInvalidInput, decision)
 	}
@@ -256,7 +260,8 @@ func (s *Store) Decide(ctx context.Context, runID int64, decision, reviewer stri
 		// told the page is stale rather than allowed to send into nothing.
 		tag, err := tx.Exec(ctx, `
 			UPDATE disputes SET state = $2, version = version + 1
-			 WHERE id = $1 AND state = 'draft_ready' AND deadline_at > now()`, disputeID, toState)
+			 WHERE id = $1 AND state = $3 AND deadline_at > now()`,
+			disputeID, toState, dispute.StateDraftReady)
 		if err != nil {
 			return fmt.Errorf("move dispute %d: %w", disputeID, err)
 		}
@@ -266,7 +271,7 @@ func (s *Store) Decide(ctx context.Context, runID int64, decision, reviewer stri
 
 		return events.Record(ctx, tx, events.Event{
 			DisputeID: disputeID,
-			FromState: "draft_ready",
+			FromState: dispute.StateDraftReady,
 			ToState:   toState,
 			Actor:     "user:" + reviewer,
 			Detail: map[string]any{

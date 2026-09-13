@@ -2,7 +2,11 @@
 // dispute before its clock runs out.
 package worker
 
-import "time"
+import (
+	"time"
+
+	"github.com/regisoliveira/dispute-router/internal/dispute"
+)
 
 // Action is what the worker decided to do.
 type Action string
@@ -37,7 +41,7 @@ const (
 type Decision struct {
 	Action Action
 	// ToState is empty for actions that change nothing.
-	ToState string
+	ToState dispute.State
 	// Reason is written into the audit trail. Every automated decision has to
 	// be explainable a year later, to someone who was not here.
 	Reason string
@@ -91,8 +95,8 @@ func categoryOf(reasonCode string) reasonCategory {
 // without either.
 type Candidate struct {
 	ID          int64
-	Kind        string // alert | chargeback
-	State       string
+	Kind        dispute.Kind
+	State       dispute.State
 	ReasonCode  string
 	AmountMinor int64
 	Currency    string
@@ -121,7 +125,13 @@ type Candidate struct {
 // relationship, and a rule engine that quietly writes off money is the one
 // nobody notices is wrong.
 func Decide(c Candidate, now time.Time) Decision {
-	if c.Resolved || (c.State != "received" && c.State != "resolving" && c.State != "draft_ready") {
+	// Deliberately not a predicate on State: "still the worker's to touch"
+	// includes draft_ready here and excludes it in the API's open filter, so
+	// the two meanings of "open" stay where they are used.
+	stillOpen := c.State == dispute.StateReceived ||
+		c.State == dispute.StateResolving ||
+		c.State == dispute.StateDraftReady
+	if c.Resolved || !stillOpen {
 		return Decision{Action: ActionSkip, Reason: "already resolved"}
 	}
 
@@ -133,19 +143,19 @@ func Decide(c Candidate, now time.Time) Decision {
 	if !now.Before(c.DeadlineAt) {
 		return Decision{
 			Action:  ActionExpire,
-			ToState: "expired",
+			ToState: dispute.StateExpired,
 			Reason:  "deadline passed with no decision",
 		}
 	}
 
 	// A draft with time left belongs to a person. The worker only ever
 	// touches it once the clock has run out.
-	if c.State == "draft_ready" {
+	if c.State == dispute.StateDraftReady {
 		return Decision{Action: ActionSkip, Reason: "awaiting a reviewer"}
 	}
 
 	switch c.Kind {
-	case "alert":
+	case dispute.KindAlert:
 		// An alert on a charge that has already been refunded in full is
 		// answered, and the answer is "already refunded". Nothing is left to
 		// give back, so the merchant's ceiling does not enter into it: no money
@@ -158,7 +168,7 @@ func Decide(c Candidate, now time.Time) Decision {
 		if c.RefundableRemainingMinor <= 0 {
 			return Decision{
 				Action:  ActionClose,
-				ToState: "refunded",
+				ToState: dispute.StateRefunded,
 				Reason:  "original charge already refunded in full; nothing left to return and no money moved",
 			}
 		}
@@ -198,11 +208,11 @@ func Decide(c Candidate, now time.Time) Decision {
 
 		return Decision{
 			Action:  ActionRefund,
-			ToState: "refunded",
+			ToState: dispute.StateRefunded,
 			Reason:  "alert within the merchant's auto-refund ceiling",
 		}
 
-	case "chargeback":
+	case dispute.KindChargeback:
 		// The money is already gone; the only question is whether it is worth
 		// arguing for, and arguing means writing a letter. This rule engine
 		// used to move evidence-led chargebacks straight to 'represented' with
@@ -242,5 +252,5 @@ func Decide(c Candidate, now time.Time) Decision {
 		}
 	}
 
-	return Decision{Action: ActionEscalate, Reason: "unknown dispute kind " + c.Kind}
+	return Decision{Action: ActionEscalate, Reason: "unknown dispute kind " + string(c.Kind)}
 }

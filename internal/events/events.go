@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 )
 
 // Event is one row of the dispute audit trail.
@@ -26,10 +28,10 @@ type Event struct {
 
 	// FromState is the state the dispute is leaving. Empty writes NULL, which
 	// is what the first event of a dispute means: there was nothing before it.
-	FromState string
+	FromState dispute.State
 
 	// ToState is the state the dispute is entering.
-	ToState string
+	ToState dispute.State
 
 	// Actor is who caused the change: "system", "agent", "network",
 	// "worker:<id>" or "user:<name>". It is rendered into the record the agent
@@ -55,7 +57,7 @@ func Record(ctx context.Context, tx pgx.Tx, e Event) error {
 		return fmt.Errorf("dispute %d event: encode detail: %w", e.DisputeID, err)
 	}
 
-	var fromState *string
+	var fromState *dispute.State
 	if e.FromState != "" {
 		fromState = &e.FromState
 	}

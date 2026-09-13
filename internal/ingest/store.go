@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 	"github.com/regisoliveira/dispute-router/internal/events"
 	"github.com/regisoliveira/dispute-router/internal/ledger"
 	"github.com/regisoliveira/dispute-router/internal/outbox"
@@ -133,13 +134,13 @@ func (s *Store) record(
 				merchant_id, transaction_id, external_id, kind, card_network, reason_code,
 				amount_minor, currency, state, deadline_at, opened_at, cardholder_claim
 			)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'received', $9, $10, $11)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			ON CONFLICT (merchant_id, external_id) DO NOTHING
 			RETURNING id`,
 			merchant.ID, transactionID, event.Data.DisputeID, event.Data.Kind,
 			event.Data.CardNetwork, event.Data.ReasonCode, event.Data.AmountMinor,
-			event.Data.Currency, event.Data.RespondBy, event.Data.OpenedAt,
-			event.Data.CardholderClaim,
+			event.Data.Currency, dispute.StateReceived, event.Data.RespondBy,
+			event.Data.OpenedAt, event.Data.CardholderClaim,
 		).Scan(&disputeID)
 
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -158,7 +159,7 @@ func (s *Store) record(
 		// A chargeback is a clawback that has already happened: the acquirer took
 		// the money when the network filed it, and the outcome is weeks away. An
 		// alert is only a warning, so nothing moves.
-		if event.Data.Kind == "chargeback" {
+		if dispute.Kind(event.Data.Kind) == dispute.KindChargeback {
 			if err := ledger.Hold(ctx, tx, disputeID, merchant.ID, event.Data.AmountMinor,
 				event.Data.Currency, event.Data.OpenedAt, event.Data.ReasonCode); err != nil {
 				return err
@@ -169,7 +170,7 @@ func (s *Store) record(
 		// was written: the audit trail is read in the order things happened.
 		if err := events.Record(ctx, tx, events.Event{
 			DisputeID: disputeID,
-			ToState:   "received",
+			ToState:   dispute.StateReceived,
 			Actor:     "system",
 			Detail: map[string]any{
 				"source":           "webhook",
@@ -296,6 +297,11 @@ func (s *Store) recordRuling(
 		outcome error
 	)
 
+	// The network's verdict and the dispute's two terminal states are the same
+	// two words. Validate has already refused anything that is not one of them,
+	// so this conversion cannot widen what reaches the CHECK constraint.
+	ruled := dispute.State(event.Data.Outcome)
+
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		webhookEventID, duplicate, err := insertDelivery(ctx, tx, merchant.ID, event.Type, event.ID, raw, signature)
 		if err != nil {
@@ -320,9 +326,10 @@ func (s *Store) recordRuling(
 			   SET state = $3,
 			       resolved_at = $4,
 			       version = version + 1
-			 WHERE merchant_id = $1 AND external_id = $2 AND state = 'represented'
+			 WHERE merchant_id = $1 AND external_id = $2 AND state = $5
 			RETURNING id, transaction_id, amount_minor, currency`,
-			merchant.ID, event.Data.DisputeID, event.Data.Outcome, event.Data.DecidedAt,
+			merchant.ID, event.Data.DisputeID, ruled, event.Data.DecidedAt,
+			dispute.StateRepresented,
 		).Scan(&disputeID, &transactionID, &amountMinor, &currency)
 
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -342,8 +349,8 @@ func (s *Store) recordRuling(
 
 		if err := events.Record(ctx, tx, events.Event{
 			DisputeID: disputeID,
-			FromState: "represented",
-			ToState:   event.Data.Outcome,
+			FromState: dispute.StateRepresented,
+			ToState:   ruled,
 			Actor:     "network",
 			Detail: map[string]any{
 				"source":           "webhook",
@@ -359,7 +366,7 @@ func (s *Store) recordRuling(
 		// Both outcomes move money now, because the funds were held when the
 		// chargeback arrived. A win releases the hold back to the merchant; a loss
 		// sends it to the issuer and charges the fee.
-		if event.Data.Outcome == "lost" {
+		if ruled == dispute.StateLost {
 			err = ledger.SettleLoss(ctx, tx, disputeID, merchant.ID, amountMinor, currency,
 				event.Data.DecidedAt, "representment lost")
 		} else {

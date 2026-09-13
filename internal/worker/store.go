@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 	"github.com/regisoliveira/dispute-router/internal/events"
 	"github.com/regisoliveira/dispute-router/internal/ledger"
 	"github.com/regisoliveira/dispute-router/internal/outbox"
@@ -75,7 +76,10 @@ func (s *Store) load(ctx context.Context, disputeID int64) (loaded, error) {
 // approved is still money running out of time, and until it was here nothing
 // ever expired one. Two partial indexes serve the query - the sweeper's on
 // received/resolving and the review queue's on draft_ready - so it stays cheap
-// however much resolved history piles up behind it.
+// however much resolved history piles up behind it. That is also why the three
+// states are spelled out rather than bound as a parameter: a partial index is
+// only used when the planner can prove the query implies its predicate, which
+// it cannot do about a bind parameter.
 func (s *Store) OpenDeadlines(ctx context.Context) (map[int64]time.Time, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, deadline_at
@@ -122,7 +126,7 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 		return fmt.Errorf("apply: decision %q changes no state", decision.Action)
 	}
 
-	resolved := decision.ToState != "represented"
+	resolved := decision.ToState != dispute.StateRepresented
 
 	// The version check is the actual guard against two workers acting on one
 	// dispute. The Redis lock only makes it unlikely; this makes it impossible.
@@ -179,7 +183,7 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 		// the held funds go to the issuer and the merchant pays the fee. An
 		// expired alert costs nothing here - no money was ever held, and the
 		// chargeback it invites has not arrived yet.
-		if l.Kind == "chargeback" {
+		if l.Kind == dispute.KindChargeback {
 			if err := ledger.SettleLoss(ctx, tx, l.ID, l.MerchantID, l.AmountMinor,
 				l.Currency, time.Now(), "response window closed with no representment"); err != nil {
 				return err
@@ -191,7 +195,7 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 	return outbox.Insert(ctx, tx, outbox.Entry{
 		AggregateType: "dispute",
 		AggregateID:   l.ID,
-		EventType:     "dispute." + decision.ToState,
+		EventType:     "dispute." + string(decision.ToState),
 		Payload: map[string]any{
 			"dispute_id":   l.ID,
 			"merchant_id":  l.MerchantID,

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 	"github.com/regisoliveira/dispute-router/internal/events"
 )
 
@@ -58,15 +59,18 @@ type Claim struct {
 // being redrafted forever. Past it, the last run goes in front of a person -
 // escalation here means a human, because there is nothing else for it to mean.
 func (r *Runs) Candidates(ctx context.Context, maxAttempts, limit int) ([]int64, error) {
+	// 'received' is spelled out rather than bound: disputes_open_deadline_idx
+	// is partial on state IN ('received','resolving'), and the planner can only
+	// use it when the literal lets it prove the predicate holds.
 	rows, err := r.pool.Query(ctx, `
 		SELECT d.id
 		  FROM disputes d
 		 WHERE d.state = 'received'
-		   AND d.kind  = 'chargeback'
+		   AND d.kind  = $3
 		   AND d.deadline_at > now() + interval '5 minutes'
 		   AND (SELECT count(*) FROM agent_runs a WHERE a.dispute_id = d.id) < $1
 		 ORDER BY d.deadline_at
-		 LIMIT $2`, maxAttempts, limit)
+		 LIMIT $2`, maxAttempts, limit, dispute.KindChargeback)
 	if err != nil {
 		return nil, fmt.Errorf("agent candidates: %w", err)
 	}
@@ -96,8 +100,8 @@ func (r *Runs) Hold(ctx context.Context, disputeID int64) (Claim, error) {
 	err := r.pool.QueryRow(ctx, `
 		WITH held AS (
 		  UPDATE disputes
-		     SET state = 'resolving', version = version + 1
-		   WHERE id = $1 AND state = 'received'
+		     SET state = $2, version = version + 1
+		   WHERE id = $1 AND state = $3
 		  RETURNING id, version
 		)
 		SELECT h.id, h.version,
@@ -105,7 +109,7 @@ func (r *Runs) Hold(ctx context.Context, disputeID int64) (Claim, error) {
 		       (SELECT coalesce(sum(a.cost_micros), 0) FROM agent_runs a WHERE a.dispute_id = h.id),
 		       coalesce((SELECT a.findings::text FROM agent_runs a WHERE a.dispute_id = h.id
 		                  ORDER BY a.attempt DESC LIMIT 1), '[]')
-		  FROM held h`, disputeID).
+		  FROM held h`, disputeID, dispute.StateResolving, dispute.StateReceived).
 		Scan(&claim.DisputeID, &claim.Version, &claim.Attempt, &claim.SpentMicros, &priorFindings)
 
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -123,8 +127,8 @@ func (r *Runs) Hold(ctx context.Context, disputeID int64) (Claim, error) {
 // Release puts a dispute back when the run produced nothing worth reviewing.
 func (r *Runs) Release(ctx context.Context, claim Claim) error {
 	tag, err := r.pool.Exec(ctx, `
-		UPDATE disputes SET state = 'received', version = version + 1
-		 WHERE id = $1 AND version = $2`, claim.DisputeID, claim.Version)
+		UPDATE disputes SET state = $3, version = version + 1
+		 WHERE id = $1 AND version = $2`, claim.DisputeID, claim.Version, dispute.StateReceived)
 	if err != nil {
 		return fmt.Errorf("release dispute %d: %w", claim.DisputeID, err)
 	}
@@ -231,7 +235,7 @@ func (r *Runs) Record(ctx context.Context, claim Claim, run Run) error {
 
 		return events.Record(ctx, tx, events.Event{
 			DisputeID: claim.DisputeID,
-			FromState: "resolving",
+			FromState: dispute.StateResolving,
 			ToState:   toState,
 			Actor:     "agent",
 			Detail: map[string]any{
@@ -254,14 +258,14 @@ func (r *Runs) Record(ctx context.Context, claim Claim, run Run) error {
 // the deadline is still moving, so the last attempt goes in front of a person
 // with its findings attached rather than being redrafted until the dispute
 // expires.
-func nextState(outcome string, escalated bool) (state string, awaitingReview bool) {
+func nextState(outcome string, escalated bool) (state dispute.State, awaitingReview bool) {
 	if escalated {
-		return "draft_ready", true
+		return dispute.StateDraftReady, true
 	}
 	switch outcome {
 	case OutcomeDrafted, OutcomeInsufficient:
-		return "draft_ready", true
+		return dispute.StateDraftReady, true
 	default:
-		return "received", false
+		return dispute.StateReceived, false
 	}
 }

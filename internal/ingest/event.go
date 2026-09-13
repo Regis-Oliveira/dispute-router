@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"time"
 	"unicode/utf8"
+
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 )
 
 // ErrInvalidEvent wraps every validation failure so the handler can answer 400
@@ -55,7 +57,10 @@ type DisputeData struct {
 const maxClaimBytes = 4000
 
 var (
-	validKinds    = map[string]bool{"alert": true, "chargeback": true}
+	validKinds = map[string]bool{
+		string(dispute.KindAlert):      true,
+		string(dispute.KindChargeback): true,
+	}
 	validNetworks = map[string]bool{"visa": true, "mastercard": true, "amex": true, "discover": true}
 )
 
@@ -166,7 +171,13 @@ const (
 	TypeDisputeResolved = "dispute.resolved"
 )
 
-var validOutcomes = map[string]bool{"won": true, "lost": true}
+// validOutcomes is written in terms of the dispute states because that is what
+// a verdict becomes: recordRuling writes the outcome straight into
+// disputes.state, so the two vocabularies have to stay the same two words.
+var validOutcomes = map[string]bool{
+	string(dispute.StateWon):  true,
+	string(dispute.StateLost): true,
+}
 
 // peekType reads just enough of a body to route it.
 //

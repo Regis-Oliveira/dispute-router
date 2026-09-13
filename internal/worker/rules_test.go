@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 )
 
 var now = time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -149,7 +151,10 @@ func TestNoRuleEverConcedesAChargeback(t *testing.T) {
 }
 
 func TestAlreadyResolvedIsSkipped(t *testing.T) {
-	for _, state := range []string{"refunded", "won", "lost", "expired", "represented"} {
+	for _, state := range []dispute.State{
+		dispute.StateRefunded, dispute.StateWon, dispute.StateLost,
+		dispute.StateExpired, dispute.StateRepresented,
+	} {
 		c := alert(func(c *Candidate) { c.State = state })
 		if got := Decide(c, now); got.Action != ActionSkip {
 			t.Errorf("state %s: Action = %q, want skip", state, got.Action)

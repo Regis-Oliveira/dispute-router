@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/regisoliveira/dispute-router/internal/dispute"
 )
 
 // builder accumulates WHERE fragments and their arguments together, so a
@@ -183,9 +185,22 @@ func parseFilters(r *http.Request) (Filters, error) {
 }
 
 var (
-	knownStates   = set("received", "resolving", "refunded", "represented", "won", "lost", "expired")
-	knownKinds    = set("alert", "chargeback")
-	knownNetworks = set("visa", "mastercard", "amex", "discover")
+	// knownStates is missing draft_ready, and that is a bug rather than a
+	// policy: the state was added to the schema by migration 000003 and never
+	// reached this whitelist, so ?state=draft_ready - a dispute sitting in the
+	// review queue - is answered "unknown state". The same omission is in the
+	// dashboard's DisputeState union, its filter control, the schema tag on
+	// disputetools.ListDisputesInput.State, and the simulator's money
+	// invariant. Fixing it here alone would let the API accept a value no
+	// client can ask for, so it is one change that does all five; recorded
+	// here because this is where it was discovered.
+	knownStates = stringSet(
+		dispute.StateReceived, dispute.StateResolving, dispute.StateRefunded,
+		dispute.StateRepresented, dispute.StateWon, dispute.StateLost,
+		dispute.StateExpired,
+	)
+	knownKinds    = stringSet(dispute.KindAlert, dispute.KindChargeback)
+	knownNetworks = stringSet("visa", "mastercard", "amex", "discover")
 )
 
 // normalize fills in what a caller left at zero so that the value renders
@@ -263,7 +278,10 @@ func (f Filters) apply(b *builder, now time.Time) {
 	}
 	if f.OpenOnly || f.DueWithin != nil {
 		// Matches the partial index on (deadline_at) WHERE state IN (...), so
-		// this filter reads from a small index instead of the whole table.
+		// this filter reads from a small index instead of the whole table. The
+		// literals are the reason it does: a bind parameter is not something
+		// the planner can prove implies the index's predicate, so binding
+		// dispute.StateReceived here would cost the index.
 		b.conds = append(b.conds, "d.state IN ('received','resolving')")
 	}
 	if f.DueWithin != nil {
@@ -305,10 +323,12 @@ func csvValues(raw string) []string {
 	return out
 }
 
-func set(values ...string) map[string]bool {
+// stringSet collects a typed vocabulary into a set keyed by the raw string,
+// because what it is tested against is a value straight off the query string.
+func stringSet[T ~string](values ...T) map[string]bool {
 	m := make(map[string]bool, len(values))
 	for _, v := range values {
-		m[v] = true
+		m[string(v)] = true
 	}
 	return m
 }

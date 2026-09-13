@@ -155,6 +155,11 @@ func (s *Store) Summary(ctx context.Context, f Filters) (Summary, error) {
 	group.Go(func() error {
 		// generate_series gives every day in the window a row, so a quiet day
 		// is a zero rather than a gap the chart would draw straight through.
+		//
+		// The two kinds stay literal. Binding them would leave the column
+		// aliases - alerts, chargebacks, and the JSON field names behind them -
+		// spelling the same vocabulary out anyway, so it would move the
+		// duplication rather than remove it.
 		rows, err := s.pool.Query(groupCtx, `
 			WITH days AS (
 			  SELECT generate_series(
@@ -203,6 +208,10 @@ func (s *Store) Summary(ctx context.Context, f Filters) (Summary, error) {
 
 // openClause narrows to disputes still on the clock, whether or not the caller
 // already supplied a WHERE.
+//
+// Spelled out rather than bound from internal/dispute for the same reason as
+// Filters.apply: disputes_open_deadline_idx is partial on these two literals,
+// and the planner cannot prove a bind parameter implies its predicate.
 func openClause(where string) string {
 	if where == "" {
 		return " WHERE d.state IN ('received','resolving')"
