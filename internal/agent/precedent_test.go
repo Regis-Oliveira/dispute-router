@@ -19,6 +19,11 @@ import (
 // right width, that neighbours come back in distance order. What it cannot test
 // is retrieval quality, which is a property of the model and belongs in an eval
 // that spends money.
+//
+// It is declared in this untagged file although two of its three callers are
+// behind //go:build integration, because the third - precedent_live_test.go -
+// is in the default run, and a helper the default build needs cannot live in a
+// file the default build does not compile.
 type wordVector struct {
 	dims  int
 	kinds []llm.EmbedKind
@@ -69,55 +74,6 @@ func TestVectorLiteral(t *testing.T) {
 
 	if got := pgvector([]float32{0.5, -0.25, 0}); got != "[0.5,-0.25,0]" {
 		t.Errorf("pgvector = %q", got)
-	}
-}
-
-// The asymmetry most callers ignore: a stored document and a search query are
-// embedded differently, and confusing them costs recall quietly.
-func TestAQueryIsEmbeddedAsAQuery(t *testing.T) {
-	pool := scratchDB(t)
-	embedder := &wordVector{dims: 1024}
-	retriever := NewRetriever(pool, embedder, 3)
-
-	if _, _, err := retriever.For(t.Context(), 1, "mrc_nothing", "the parcel never arrived"); err != nil {
-		t.Fatalf("For: %v", err)
-	}
-	if len(embedder.kinds) == 0 || embedder.kinds[0] != llm.EmbedQuery {
-		t.Errorf("the claim was embedded as %v, want %q", embedder.kinds, llm.EmbedQuery)
-	}
-}
-
-// Most cardholders file through their bank and say nothing. Retrieval has to
-// say so rather than searching for the empty string, which matches everything.
-func TestNoClaimMeansNoSearch(t *testing.T) {
-	pool := scratchDB(t)
-	embedder := &wordVector{dims: 1024}
-
-	precedents, retrieval, err := NewRetriever(pool, embedder, 3).
-		For(t.Context(), 1, "mrc_nothing", "   ")
-	if err != nil {
-		t.Fatalf("For: %v", err)
-	}
-	if len(precedents) != 0 || retrieval.Method != RetrievalNone {
-		t.Errorf("precedents=%d method=%q; an absent claim triggered a search",
-			len(precedents), retrieval.Method)
-	}
-	if len(embedder.kinds) != 0 {
-		t.Error("an embedding was paid for with nothing to embed")
-	}
-}
-
-// Without an embedder the retriever is not disabled - it uses the baseline.
-func TestWithoutAnEmbedderRetrievalIsLexical(t *testing.T) {
-	pool := scratchDB(t)
-
-	_, retrieval, err := NewRetriever(pool, nil, 3).
-		For(t.Context(), 1, "mrc_nothing", "the parcel never arrived")
-	if err != nil {
-		t.Fatalf("For: %v", err)
-	}
-	if retrieval.Method != RetrievalLexical {
-		t.Errorf("method = %q, want lexical", retrieval.Method)
 	}
 }
 

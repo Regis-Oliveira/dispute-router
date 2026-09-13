@@ -1,3 +1,5 @@
+//go:build integration
+
 package agent
 
 import (
@@ -9,6 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// The one test here embeds a corpus it seeded itself, which it can only do in
+// the scratch database scratchDB creates and drops - so the file carries
+// scratchdb_test.go's integration tag.
+//
 // cancelOnFirstRecord is a slog.Handler that cancels a context the first time
 // a record reaches it. The backfill logs once per batch, after that batch is
 // written and before it checks the context, so this is the one seam where "the

@@ -1,3 +1,5 @@
+//go:build integration
+
 package agent
 
 import (
@@ -8,6 +10,9 @@ import (
 	"github.com/regisoliveira/dispute-router/internal/llm"
 )
 
+// Every test in this file holds, records or releases a dispute against the
+// scratch database scratchDB creates and drops, so the whole file carries
+// scratchdb_test.go's integration tag rather than half of one.
 func aRun(outcome Outcome, escalated bool) Run {
 	return Run{
 		Model: "test-model", PromptFingerprint: "sha256:test",

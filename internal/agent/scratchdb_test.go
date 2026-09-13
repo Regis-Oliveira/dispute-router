@@ -1,3 +1,5 @@
+//go:build integration
+
 package agent
 
 import (
@@ -23,6 +25,12 @@ import (
 // leaving rows behind on every run or disabling the trigger to clean up, and
 // the second would test a table that behaves differently from the one that
 // ships.
+//
+// CREATE DATABASE is why this file and everything that calls scratchDB carry
+// //go:build integration: it needs a role that can create databases, which the
+// application's own role has no reason to be. The default run is then the one
+// that asks for nothing beyond reading and writing the tables the application
+// already owns, and a single untagged caller would be enough to lose that.
 func scratchDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
