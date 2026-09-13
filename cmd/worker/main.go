@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -67,9 +66,10 @@ func run(logger *slog.Logger) error {
 		id = "worker"
 	}
 
+	deadlines := worker.NewDeadlines(rdb)
 	workers := worker.NewPool(worker.Options{
 		Store:             worker.NewStore(pool),
-		Deadlines:         worker.NewDeadlines(rdb),
+		Deadlines:         deadlines,
 		Locks:             worker.NewLocks(rdb, cfg.WorkerLockTTL),
 		Logger:            logger,
 		Concurrency:       cfg.WorkerConcurrency,
@@ -95,7 +95,7 @@ func run(logger *slog.Logger) error {
 	consumer := &worker.Consumer{
 		Client:      awsx.SQS(awsCfg, cfg.AWSEndpoint),
 		QueueURL:    cfg.SQSQueueURL,
-		Deadlines:   worker.NewDeadlines(rdb),
+		Deadlines:   deadlines,
 		Logger:      logger,
 		MaxMessages: int32(cfg.SQSMaxMessages),
 		WaitTime:    int32(cfg.SQSWaitSeconds),
@@ -120,9 +120,6 @@ func run(logger *slog.Logger) error {
 	if err := group.Wait(); err != nil {
 		return err
 	}
-
-	// Give the last in-flight decisions a moment to finish their writes.
-	time.Sleep(200 * time.Millisecond)
 	logger.Info("stopped cleanly")
 	return nil
 }

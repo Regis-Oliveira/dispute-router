@@ -1,16 +1,18 @@
 package worker
 
 import (
+	"github.com/jackc/pgx/v5"
 	"context"
 	"errors"
 	"log/slog"
 	"sync/atomic"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"golang.org/x/sync/errgroup"
 )
 
+// Options configures a Pool; NewPool fills in Concurrency and BatchSize when
+// they are zero.
 type Options struct {
 	Store     *Store
 	Deadlines *Deadlines
@@ -32,6 +34,7 @@ type Options struct {
 	ID string
 }
 
+// Pool claims due disputes from the deadline index and decides them.
 type Pool struct {
 	opts Options
 
@@ -43,6 +46,7 @@ type Pool struct {
 	contended atomic.Int64
 }
 
+// NewPool builds a Pool, defaulting Concurrency to 4 and BatchSize to 100.
 func NewPool(opts Options) *Pool {
 	if opts.Concurrency < 1 {
 		opts.Concurrency = 4
@@ -53,7 +57,10 @@ func NewPool(opts Options) *Pool {
 	return &Pool{opts: opts}
 }
 
-// Run starts the reconciler and the poller and blocks until ctx is cancelled.
+// Run starts the reconciler and the poller and blocks until ctx is cancelled
+// and every in-flight handler has returned. Handlers run inside drainOnce's
+// own group, which pollLoop waits on before it returns, so a caller needs no
+// grace period after Run for the last decisions to finish their writes.
 func (p *Pool) Run(ctx context.Context) error {
 	group, groupCtx := errgroup.WithContext(ctx)
 	group.Go(func() error { return p.reconcileLoop(groupCtx) })
