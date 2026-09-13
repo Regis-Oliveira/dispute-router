@@ -93,8 +93,10 @@ func readEvidence(ctx context.Context, source EvidenceSource, disputeID int64, f
 			return nil, err
 		}
 		ref.ContentType = object.ContentType
-		text, err := extractText(object)
-		object.Body.Close()
+		text, err := func() (string, error) {
+			defer object.Body.Close()
+			return extractText(object)
+		}()
 		if err != nil {
 			ref.Status = EvidenceNotRead
 			ref.Note = err.Error()

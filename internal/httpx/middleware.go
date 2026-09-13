@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -75,6 +76,12 @@ func Middleware(logger *slog.Logger) func(http.Handler) http.Handler {
 
 			defer func() {
 				if recovered := recover(); recovered != nil {
+					// net/http's own recover treats this one as the handler
+					// choosing to abort the response, not a crash. It has to
+					// reach that recover to be honoured.
+					if err, ok := recovered.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+						panic(recovered)
+					}
 					logger.ErrorContext(ctx, "handler panicked",
 						"panic", recovered, "request_id", id, "path", r.URL.Path)
 					if recorder.status == 0 {

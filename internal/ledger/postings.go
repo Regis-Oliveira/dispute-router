@@ -8,6 +8,7 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -36,7 +37,10 @@ type posting struct {
 	amountMinor    int64
 }
 
-// write inserts a journal entry and its legs.
+// write inserts a journal entry and its legs. metadata is encoded here rather
+// than by the callers: a hand-built literal with %q is Go quoting, not JSON
+// escaping, and the two disagree on exactly the characters a reason code
+// from outside would carry.
 //
 // The balance is not checked here: the database checks it at COMMIT, for every
 // entry, including ones written by code that has not been reviewed as carefully
@@ -44,15 +48,20 @@ type posting struct {
 func write(
 	ctx context.Context, tx pgx.Tx,
 	externalRef, kind, currency, description string,
-	merchantID int64, occurredAt time.Time, metadata string,
+	merchantID int64, occurredAt time.Time, metadata any,
 	postings []posting,
 ) error {
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("post %s: encode metadata: %w", externalRef, err)
+	}
+
 	var ledgerTxID int64
-	err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 		INSERT INTO ledger_transactions (external_ref, kind, currency, description, occurred_at, metadata)
 		VALUES ($1, $2, $3::char(3), $4, $5, $6::jsonb)
 		RETURNING id`,
-		externalRef, kind, currency, description, occurredAt, metadata,
+		externalRef, kind, currency, description, occurredAt, string(encoded),
 	).Scan(&ledgerTxID)
 	if err != nil {
 		return fmt.Errorf("post %s: %w", externalRef, err)
@@ -99,7 +108,7 @@ func Hold(ctx context.Context, tx pgx.Tx, disputeID, merchantID, amountMinor int
 	return write(ctx, tx,
 		ref(disputeID, "hold"), "chargeback", currency,
 		"funds held pending the network's decision",
-		merchantID, at, fmt.Sprintf(`{"reason_code":%q}`, reasonCode),
+		merchantID, at, map[string]string{"reason_code": reasonCode},
 		[]posting{
 			{account: "merchant_balance", merchantScoped: true, direction: "debit", amountMinor: amountMinor},
 			{account: "disputes_payable", merchantScoped: true, direction: "credit", amountMinor: amountMinor},
@@ -114,7 +123,7 @@ func ReleaseHold(ctx context.Context, tx pgx.Tx, disputeID, merchantID, amountMi
 	return write(ctx, tx,
 		ref(disputeID, "release"), "representment_won", currency,
 		"representment won, hold released",
-		merchantID, at, `{}`,
+		merchantID, at, map[string]any{},
 		[]posting{
 			{account: "disputes_payable", merchantScoped: true, direction: "debit", amountMinor: amountMinor},
 			{account: "merchant_balance", merchantScoped: true, direction: "credit", amountMinor: amountMinor},
@@ -134,7 +143,7 @@ func SettleLoss(ctx context.Context, tx pgx.Tx, disputeID, merchantID, amountMin
 	return write(ctx, tx,
 		ref(disputeID, "chargeback"), "representment_lost", currency,
 		why,
-		merchantID, at, fmt.Sprintf(`{"fee_minor":%d}`, ChargebackFeeMinor),
+		merchantID, at, map[string]int64{"fee_minor": ChargebackFeeMinor},
 		[]posting{
 			{account: "disputes_payable", merchantScoped: true, direction: "debit", amountMinor: amountMinor},
 			{account: "settlement_clearing", direction: "credit", amountMinor: amountMinor},
@@ -154,7 +163,7 @@ func Refund(ctx context.Context, tx pgx.Tx, disputeID, merchantID, amountMinor i
 	return write(ctx, tx,
 		ref(disputeID, "refund"), "refund", currency,
 		"auto-refund inside the alert window",
-		merchantID, at, fmt.Sprintf(`{"reason_code":%q}`, reasonCode),
+		merchantID, at, map[string]string{"reason_code": reasonCode},
 		[]posting{
 			{account: "merchant_balance", merchantScoped: true, direction: "debit", amountMinor: amountMinor},
 			{account: "settlement_clearing", direction: "credit", amountMinor: amountMinor},

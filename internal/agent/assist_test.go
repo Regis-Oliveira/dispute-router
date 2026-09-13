@@ -152,7 +152,8 @@ func TestTheFingerprintCoversTheRecordTemplate(t *testing.T) {
 	if got := promptFingerprint(); got == promptsOnly {
 		t.Error("the fingerprint is still the hash of the two system prompts alone")
 	}
-	if promptFingerprint() != promptFingerprint() {
+	first, second := promptFingerprint(), promptFingerprint()
+	if first != second {
 		t.Error("the fingerprint is not stable across calls")
 	}
 	template, _ := Facts{}.Render()
