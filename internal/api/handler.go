@@ -33,29 +33,47 @@ func NewHandler(store *Store, rdb *redis.Client, evidence *Evidence, logger *slo
 // Routes returns the dashboard's routes. All but two are GETs over the read
 // model, which is what lets this service be scaled and cached independently
 // of ingest; the two POSTs are explained where they are registered.
-func (h *Handler) Routes() *http.ServeMux {
+//
+// requestTimeout is applied here, one route at a time, so that a route's own
+// registration says whether it is bounded. It used to wrap the whole mux and
+// exempt SSE by matching "/api/stream" as a string, which meant the next
+// long-lived route anybody added would silently inherit a deadline that cut it
+// off mid-response.
+func (h *Handler) Routes(requestTimeout time.Duration) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/disputes", h.listDisputes)
-	mux.HandleFunc("GET /api/disputes.csv", h.exportDisputes)
-	mux.HandleFunc("GET /api/disputes/{id}", h.getDispute)
-	mux.HandleFunc("GET /api/disputes/{id}/evidence", h.listEvidence)
+
+	bounded := withTimeout(requestTimeout)
+	handle := func(pattern string, handler http.HandlerFunc) {
+		mux.Handle(pattern, bounded(handler))
+	}
+
+	handle("GET /api/disputes", h.listDisputes)
+	handle("GET /api/disputes.csv", h.exportDisputes)
+	handle("GET /api/disputes/{id}", h.getDispute)
+	handle("GET /api/disputes/{id}/evidence", h.listEvidence)
 	// POST because it is not safe to cache, though it writes nothing: minting
 	// a presigned URL reads a credential, it does not change any state. The
 	// service stays read-only with respect to Postgres.
-	mux.HandleFunc("POST /api/disputes/{id}/evidence", h.presignEvidence)
-	mux.HandleFunc("GET /api/reviews", h.listReviews)
-	mux.HandleFunc("GET /api/reviews/{id}", h.getReview)
+	handle("POST /api/disputes/{id}/evidence", h.presignEvidence)
+	handle("GET /api/reviews", h.listReviews)
+	handle("GET /api/reviews/{id}", h.getReview)
 	// The only endpoint in this service that changes a dispute, and the only
 	// path in the system that reaches 'represented'. See decideReview.
-	mux.HandleFunc("POST /api/reviews/{id}/decision", h.decideReview)
-	mux.HandleFunc("GET /api/decisions", h.listDecisions)
-	mux.HandleFunc("GET /api/summary", h.summary)
-	mux.HandleFunc("GET /api/merchants", h.merchants)
+	handle("POST /api/reviews/{id}/decision", h.decideReview)
+	handle("GET /api/decisions", h.listDecisions)
+	handle("GET /api/summary", h.summary)
+	handle("GET /api/merchants", h.merchants)
+
+	// The one unbounded route, registered without the wrapper on purpose: SSE
+	// is long-lived by design and a deadline would sever the feed every
+	// requestTimeout. It still runs on the request's own context, so the
+	// stream ends when the client disconnects.
 	mux.HandleFunc("GET /api/stream", h.stream)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+
+	handle("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /readyz", h.ready)
+	handle("GET /readyz", h.ready)
 	return mux
 }
 
@@ -321,16 +339,12 @@ func CORS(allowed []string) func(http.Handler) http.Handler {
 // LiveChannel is the Redis pub/sub channel the outbox relay publishes to.
 const LiveChannel = "disputes:live"
 
-// Timeout fails a request that outruns its budget instead of holding a
-// connection and a database session open indefinitely.
-func Timeout(d time.Duration) func(http.Handler) http.Handler {
+// withTimeout fails a request that outruns its budget instead of holding a
+// connection and a database session open indefinitely. Routes applies it per
+// route; a route registered without it is long-lived on purpose.
+func withTimeout(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// SSE is long-lived by design; a timeout would sever it every d.
-			if r.URL.Path == "/api/stream" {
-				next.ServeHTTP(w, r)
-				return
-			}
 			ctx, cancel := context.WithTimeout(r.Context(), d)
 			defer cancel()
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -343,7 +357,11 @@ func Timeout(d time.Duration) func(http.Handler) http.Handler {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) listReviews(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	limit, err := parseLimit(r.URL.Query())
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	rows, err := h.store.Reviews(r.Context(), limit)
 	if err != nil {
@@ -427,8 +445,16 @@ func (h *Handler) listDecisions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, err := parseLimit(q)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	offset, err := parseOffset(q)
+	if err != nil {
+		httpx.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	list, err := h.store.Decisions(r.Context(), DecisionFilters{
 		Reviewer:      q.Get("reviewer"),

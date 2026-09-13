@@ -48,9 +48,12 @@ type ReviewRow struct {
 // and a queue sorted by arrival quietly lets the tightest deadline sit behind
 // three comfortable ones.
 func (s *Store) Reviews(ctx context.Context, limit int) ([]ReviewRow, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 50
+	// Clamped down to the cap rather than reset to the default, so that asking
+	// for 201 cannot return fewer rows than asking for 200.
+	if limit <= 0 {
+		limit = defaultLimit
 	}
+	limit = min(limit, maxLimit)
 
 	// 'draft_ready' is spelled out rather than bound: the review queue's index
 	// (disputes_draft_ready_deadline_idx) is partial on exactly that literal,

@@ -78,12 +78,14 @@ type DecisionList struct {
 func (s *Store) Decisions(ctx context.Context, f DecisionFilters) (DecisionList, error) {
 	started := time.Now()
 
-	if f.Limit <= 0 || f.Limit > 200 {
-		f.Limit = 50
+	// The same clamp Filters.normalize applies, and for the same reason: a
+	// limit above the cap comes down to the cap rather than back to the
+	// default, so asking for 201 cannot return fewer rows than asking for 200.
+	if f.Limit <= 0 {
+		f.Limit = defaultLimit
 	}
-	if f.Offset < 0 {
-		f.Offset = 0
-	}
+	f.Limit = min(f.Limit, maxLimit)
+	f.Offset = max(f.Offset, 0)
 
 	// The same builder the disputes list uses, rather than a second copy of it
 	// written as a closure: a condition and the value it tests stay paired, and

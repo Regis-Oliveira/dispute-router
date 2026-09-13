@@ -180,34 +180,44 @@ type EvidenceFile struct {
 }
 
 // List returns everything filed against a dispute.
+//
+// Paged, because one ListObjectsV2 answers with at most a thousand keys and a
+// truncated response looks exactly like a complete one. Nothing anywhere caps
+// how many files a dispute can collect - the upload policy bounds a file's
+// size, not their number - so the thousand-and-first piece of evidence was a
+// file the reviewer would never be shown.
 func (e *Evidence) List(ctx context.Context, disputeID int64) ([]EvidenceFile, error) {
-	out, err := e.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
+	pages := s3.NewListObjectsV2Paginator(e.client, &s3.ListObjectsV2Input{
 		Bucket: aws.String(e.bucket),
 		Prefix: aws.String(prefix(disputeID)),
 	})
-	if err != nil {
-		return nil, fmt.Errorf("list evidence: %w", err)
-	}
 
-	files := make([]EvidenceFile, 0, len(out.Contents))
-	for _, object := range out.Contents {
-		key := aws.ToString(object.Key)
-
-		signed, err := e.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
-			Bucket: aws.String(e.bucket),
-			Key:    aws.String(key),
-		}, s3.WithPresignExpires(e.ttl))
+	files := []EvidenceFile{}
+	for pages.HasMorePages() {
+		page, err := pages.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("presign download for %s: %w", key, err)
+			return nil, fmt.Errorf("list evidence: %w", err)
 		}
 
-		files = append(files, EvidenceFile{
-			Key:        key,
-			Name:       path.Base(key),
-			SizeBytes:  aws.ToInt64(object.Size),
-			UploadedAt: aws.ToTime(object.LastModified),
-			URL:        signed.URL,
-		})
+		for _, object := range page.Contents {
+			key := aws.ToString(object.Key)
+
+			signed, err := e.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+				Bucket: aws.String(e.bucket),
+				Key:    aws.String(key),
+			}, s3.WithPresignExpires(e.ttl))
+			if err != nil {
+				return nil, fmt.Errorf("presign download for %s: %w", key, err)
+			}
+
+			files = append(files, EvidenceFile{
+				Key:        key,
+				Name:       path.Base(key),
+				SizeBytes:  aws.ToInt64(object.Size),
+				UploadedAt: aws.ToTime(object.LastModified),
+				URL:        signed.URL,
+			})
+		}
 	}
 	return files, nil
 }

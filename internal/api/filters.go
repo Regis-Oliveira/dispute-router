@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -105,7 +107,6 @@ func parseFilters(r *http.Request) (Filters, error) {
 		Search:    strings.TrimSpace(q.Get("q")),
 		OpenOnly:  q.Get("open") == "true",
 		Desc:      q.Get("dir") != "asc",
-		Limit:     defaultLimit,
 		Sort:      defaultSort,
 	}
 
@@ -116,24 +117,17 @@ func parseFilters(r *http.Request) (Filters, error) {
 		f.Sort = raw
 	}
 
-	if raw := q.Get("limit"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 {
-			return Filters{}, fmt.Errorf("limit must be a positive integer")
-		}
-		f.Limit = min(n, maxLimit)
+	limit, err := parseLimit(q)
+	if err != nil {
+		return Filters{}, err
 	}
+	f.Limit = limit
 
-	if raw := q.Get("offset"); raw != "" {
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 0 {
-			return Filters{}, fmt.Errorf("offset must be a non-negative integer")
-		}
-		if n > maxOffset {
-			return Filters{}, fmt.Errorf("offset above %d is not supported; narrow the filters or use the CSV export", maxOffset)
-		}
-		f.Offset = n
+	offset, err := parseOffset(q)
+	if err != nil {
+		return Filters{}, err
 	}
+	f.Offset = offset
 
 	for _, spec := range []struct {
 		key    string
@@ -182,6 +176,42 @@ func parseFilters(r *http.Request) (Filters, error) {
 		return Filters{}, err
 	}
 	return f, nil
+}
+
+// parseLimit reads ?limit for every endpoint that pages, so that one query
+// string means one thing across the API. Absent is the default page size;
+// present but not a positive integer is refused rather than quietly replaced,
+// because a caller who asked for a page size and got a different one has no
+// way to tell.
+//
+// Above the cap is clamped to the cap, never reset to the default: ?limit=201
+// must not return fewer rows than ?limit=200.
+func parseLimit(q url.Values) (int, error) {
+	raw := q.Get("limit")
+	if raw == "" {
+		return defaultLimit, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, errors.New("limit must be a positive integer")
+	}
+	return min(n, maxLimit), nil
+}
+
+// parseOffset reads ?offset on the same terms as parseLimit.
+func parseOffset(q url.Values) (int, error) {
+	raw := q.Get("offset")
+	if raw == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return 0, errors.New("offset must be a non-negative integer")
+	}
+	if n > maxOffset {
+		return 0, fmt.Errorf("offset above %d is not supported; narrow the filters or use the CSV export", maxOffset)
+	}
+	return n, nil
 }
 
 var (

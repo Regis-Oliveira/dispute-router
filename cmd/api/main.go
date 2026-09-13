@@ -73,9 +73,10 @@ func run(logger *slog.Logger) error {
 	handler := api.NewHandler(api.NewStore(pool), rdb, evidence, logger)
 
 	// Applied outermost-first: request id and logging wrap everything, then
-	// CORS answers preflights before the timeout clock starts.
-	var root http.Handler = handler.Routes()
-	root = api.Timeout(cfg.API.RequestTimeout)(root)
+	// CORS answers preflights before anything is routed. The request deadline
+	// is not here: Routes applies it per route, so that the SSE stream can be
+	// registered unbounded without a middleware having to recognise its path.
+	var root http.Handler = handler.Routes(cfg.API.RequestTimeout)
 	root = api.CORS(cfg.API.CORSOrigins)(root)
 	root = httpx.Observe(logger)(root)
 
