@@ -128,6 +128,7 @@ func scanDispute(rows pgx.Rows) (DisputeRow, error) {
 func (s *Store) ListDisputes(ctx context.Context, f Filters) (DisputeList, error) {
 	started := time.Now()
 	now := started.UTC()
+	f = f.normalize()
 
 	var b builder
 	f.apply(&b, now)
@@ -210,6 +211,7 @@ func (s *Store) ListDisputes(ctx context.Context, f Filters) (DisputeList, error
 // time from the database straight onto the socket, so memory stays flat
 // whether the result is 40 rows or 400,000.
 func (s *Store) StreamCSV(ctx context.Context, f Filters, w *csv.Writer) (int, error) {
+	f = f.normalize()
 	var b builder
 	f.apply(&b, time.Now().UTC())
 

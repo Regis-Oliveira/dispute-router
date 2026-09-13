@@ -189,6 +189,22 @@ var (
 	knownNetworks = set("visa", "mastercard", "amex", "discover")
 )
 
+// normalize fills in what a caller left at zero so that the value renders
+// usable SQL. ParseFilters sets every default itself; this exists for the
+// callers that build a Filters literal (disputetools, tests), where a missing
+// Sort used to render "ORDER BY  DESC" and a missing Limit "LIMIT 0".
+func (f Filters) normalize() Filters {
+	if _, ok := sortColumns[f.Sort]; !ok {
+		f.Sort = defaultSort
+	}
+	if f.Limit <= 0 {
+		f.Limit = defaultLimit
+	}
+	f.Limit = min(f.Limit, maxLimit)
+	f.Offset = max(f.Offset, 0)
+	return f
+}
+
 // validateEnums refuses a value the schema could never hold. Passing it through
 // would return an empty page that looks like "no disputes match" rather than
 // "you asked for something that does not exist".
