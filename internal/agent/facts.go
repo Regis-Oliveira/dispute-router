@@ -293,7 +293,7 @@ func (f Facts) view() recordView {
 			ID: d.ID, Reference: d.Reference, Merchant: d.Merchant, MerchantName: d.MerchantName,
 			Kind: d.Kind, State: d.State, ReasonCode: d.ReasonCode, CardNetwork: d.CardNetwork,
 			Amount:          money.FormatMinor(d.AmountMinor, d.Currency),
-			OriginalCharge:  money.FormatMinor(d.OriginalCharge, d.Currency),
+			OriginalCharge:  money.FormatMinor(d.OriginalChargeMinor, d.Currency),
 			HoursToDeadline: d.HoursToDeadline, Overdue: d.Overdue,
 			OpenedAt: d.OpenedAt, ChargedAt: d.ChargedAt, Descriptor: d.Descriptor,
 			CardLast4: d.CardLast4, CustomerRef: d.CustomerRef, CustomerEmail: d.CustomerEmail,

@@ -126,7 +126,7 @@ func gradeFigures(facts agent.Facts, draft agent.Draft) Grade {
 
 	allowed := map[int64]bool{}
 	d := facts.Dispute
-	for _, amount := range []int64{d.AmountMinor, d.OriginalCharge, d.RefundedMinor} {
+	for _, amount := range []int64{d.AmountMinor, d.OriginalChargeMinor, d.RefundedMinor} {
 		if amount > 0 {
 			allowed[amount] = true
 		}

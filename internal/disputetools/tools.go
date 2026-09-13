@@ -257,23 +257,23 @@ type GetDisputeOutput struct {
 	// The formatted strings are the figures to quote; the integers beside
 	// them are for arithmetic. Both are here because a tool answer is read by
 	// a model, and a model handed only the integer writes it as the amount.
-	Amount             string        `json:"amount"`
-	AmountMinor        int64         `json:"amount_minor"`
-	Currency           string        `json:"currency"`
-	OriginalChargeText string        `json:"original_charge"`
-	OriginalCharge     int64         `json:"original_charge_minor"`
-	RefundedText       string        `json:"refunded,omitempty"`
-	RefundedMinor      int64         `json:"refunded_minor"`
-	HoursToDeadline    int           `json:"hours_to_deadline"`
-	Overdue            bool          `json:"overdue"`
-	OpenedAt           string        `json:"opened_at"`
-	ChargedAt          string        `json:"charged_at"`
-	Descriptor         string        `json:"statement_descriptor"`
-	CardLast4          string        `json:"card_last4"`
-	CustomerRef        string        `json:"customer_ref"`
-	CustomerEmail      string        `json:"customer_email_masked"`
-	History            []HistoryLine `json:"history"`
-	Ledger             []LedgerLine  `json:"ledger"`
+	Amount              string        `json:"amount"`
+	AmountMinor         int64         `json:"amount_minor"`
+	Currency            string        `json:"currency"`
+	OriginalCharge      string        `json:"original_charge"`
+	OriginalChargeMinor int64         `json:"original_charge_minor"`
+	RefundedText        string        `json:"refunded,omitempty"`
+	RefundedMinor       int64         `json:"refunded_minor"`
+	HoursToDeadline     int           `json:"hours_to_deadline"`
+	Overdue             bool          `json:"overdue"`
+	OpenedAt            string        `json:"opened_at"`
+	ChargedAt           string        `json:"charged_at"`
+	Descriptor          string        `json:"statement_descriptor"`
+	CardLast4           string        `json:"card_last4"`
+	CustomerRef         string        `json:"customer_ref"`
+	CustomerEmail       string        `json:"customer_email_masked"`
+	History             []HistoryLine `json:"history"`
+	Ledger              []LedgerLine  `json:"ledger"`
 }
 
 // GetDispute is the tool. It never returns the cardholder's claim.
@@ -299,20 +299,20 @@ func (s *Set) DisputeWithClaim(ctx context.Context, in GetDisputeInput) (GetDisp
 	out := GetDisputeOutput{
 		ID: d.ID, Reference: d.ExternalID, Merchant: d.MerchantID, MerchantName: d.MerchantName,
 		Kind: d.Kind, State: d.State, ReasonCode: d.ReasonCode, CardNetwork: d.CardNetwork,
-		Amount:             money.FormatMinor(d.Amount.AmountMinor, d.Amount.Currency),
-		AmountMinor:        d.Amount.AmountMinor,
-		Currency:           d.Amount.Currency,
-		OriginalChargeText: money.FormatMinor(d.OriginalAmount.AmountMinor, d.OriginalAmount.Currency),
-		OriginalCharge:     d.OriginalAmount.AmountMinor,
-		RefundedMinor:      d.RefundedMinor,
-		HoursToDeadline:    int(d.SecondsToDeadline / 3600),
-		Overdue:            d.SecondsToDeadline < 0 && d.ResolvedAt == nil,
-		OpenedAt:           d.OpenedAt.UTC().Format(time.RFC3339),
-		ChargedAt:          d.CapturedAt.UTC().Format(time.RFC3339),
-		Descriptor:         d.Descriptor,
-		CardLast4:          d.CardLast4,
-		CustomerRef:        d.CustomerRef,
-		CustomerEmail:      maskEmail(d.CustomerEmail),
+		Amount:              money.FormatMinor(d.Amount.AmountMinor, d.Amount.Currency),
+		AmountMinor:         d.Amount.AmountMinor,
+		Currency:            d.Amount.Currency,
+		OriginalCharge:      money.FormatMinor(d.OriginalAmount.AmountMinor, d.OriginalAmount.Currency),
+		OriginalChargeMinor: d.OriginalAmount.AmountMinor,
+		RefundedMinor:       d.RefundedMinor,
+		HoursToDeadline:     int(d.SecondsToDeadline / 3600),
+		Overdue:             d.SecondsToDeadline < 0 && d.ResolvedAt == nil,
+		OpenedAt:            d.OpenedAt.UTC().Format(time.RFC3339),
+		ChargedAt:           d.CapturedAt.UTC().Format(time.RFC3339),
+		Descriptor:          d.Descriptor,
+		CardLast4:           d.CardLast4,
+		CustomerRef:         d.CustomerRef,
+		CustomerEmail:       maskEmail(d.CustomerEmail),
 	}
 
 	if d.RefundedMinor > 0 {

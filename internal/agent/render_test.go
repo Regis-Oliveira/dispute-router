@@ -14,7 +14,7 @@ import (
 func TestThePromptCarriesFormattedMoneyAndNoMinorUnits(t *testing.T) {
 	facts := Facts{}
 	facts.Dispute.AmountMinor = 5799
-	facts.Dispute.OriginalCharge = 5799
+	facts.Dispute.OriginalChargeMinor = 5799
 	facts.Dispute.RefundedMinor = 100
 	facts.Dispute.Currency = "USD"
 	facts.History = nil

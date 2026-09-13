@@ -19,7 +19,7 @@ func draftFrom(t *testing.T, recommendation, letter string, cited ...string) age
 func usdFacts() agent.Facts {
 	facts := agent.Facts{}
 	facts.Dispute.AmountMinor = 4100
-	facts.Dispute.OriginalCharge = 4100
+	facts.Dispute.OriginalChargeMinor = 4100
 	facts.Dispute.Currency = "USD"
 	facts.Dispute.ReasonCode = "10.4"
 	facts.Evidence = []agent.EvidenceRef{{Name: "receipt.pdf"}}
