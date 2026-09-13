@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -10,7 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/regisoliveira/dispute-router/internal/events"
 	"github.com/regisoliveira/dispute-router/internal/ledger"
+	"github.com/regisoliveira/dispute-router/internal/outbox"
 )
 
 // ErrStaleCandidate means the dispute changed between being read and being
@@ -104,20 +105,9 @@ func (s *Store) OpenDeadlines(ctx context.Context) (map[int64]time.Time, error) 
 // refunded with no ledger entry, or refunded with nothing downstream ever
 // hearing about it.
 func (s *Store) apply(ctx context.Context, l loaded, decision Decision, workerID string) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := applyTx(ctx, tx, l, decision, workerID); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-	return nil
+	return pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		return applyTx(ctx, tx, l, decision, workerID)
+	})
 }
 
 // applyTx is apply's body, separated from the transaction that wraps it.
@@ -154,21 +144,18 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 		return fmt.Errorf("update dispute %d: %w", l.ID, err)
 	}
 
-	detail, err := json.Marshal(map[string]any{
-		"action": string(decision.Action),
-		"reason": decision.Reason,
-		"worker": workerID,
-	})
-	if err != nil {
-		return fmt.Errorf("marshal decision detail: %w", err)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO dispute_events (dispute_id, from_state, to_state, actor, detail, occurred_at)
-		VALUES ($1, $2, $3, $4, $5::jsonb, now())`,
-		l.ID, l.State, decision.ToState, "worker:"+workerID, string(detail),
-	); err != nil {
-		return fmt.Errorf("insert dispute_event: %w", err)
+	if err := events.Record(ctx, tx, events.Event{
+		DisputeID: l.ID,
+		FromState: l.State,
+		ToState:   decision.ToState,
+		Actor:     "worker:" + workerID,
+		Detail: map[string]any{
+			"action": string(decision.Action),
+			"reason": decision.Reason,
+			"worker": workerID,
+		},
+	}); err != nil {
+		return err
 	}
 
 	switch decision.Action {
@@ -201,29 +188,21 @@ func applyTx(ctx context.Context, tx pgx.Tx, l loaded, decision Decision, worker
 
 	}
 
-	payload, err := json.Marshal(map[string]any{
-		"dispute_id":   l.ID,
-		"merchant_id":  l.MerchantID,
-		"from_state":   l.State,
-		"to_state":     decision.ToState,
-		"action":       string(decision.Action),
-		"reason":       decision.Reason,
-		"amount_minor": l.AmountMinor,
-		"currency":     l.Currency,
+	return outbox.Insert(ctx, tx, outbox.Entry{
+		AggregateType: "dispute",
+		AggregateID:   l.ID,
+		EventType:     "dispute." + decision.ToState,
+		Payload: map[string]any{
+			"dispute_id":   l.ID,
+			"merchant_id":  l.MerchantID,
+			"from_state":   l.State,
+			"to_state":     decision.ToState,
+			"action":       string(decision.Action),
+			"reason":       decision.Reason,
+			"amount_minor": l.AmountMinor,
+			"currency":     l.Currency,
+		},
 	})
-	if err != nil {
-		return fmt.Errorf("marshal outbox payload: %w", err)
-	}
-
-	if _, err := tx.Exec(ctx, `
-		INSERT INTO outbox (aggregate_type, aggregate_id, event_type, payload)
-		VALUES ('dispute', $1, $2, $3::jsonb)`,
-		l.ID, "dispute."+decision.ToState, string(payload),
-	); err != nil {
-		return fmt.Errorf("insert outbox: %w", err)
-	}
-
-	return nil
 }
 
 // addRefundToTransaction keeps the denormalised refund total on the original
