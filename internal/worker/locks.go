@@ -48,30 +48,52 @@ func lockKey(disputeID int64) string {
 	return "lock:dispute:" + strconv.FormatInt(disputeID, 10)
 }
 
-// Acquire returns a token, or ok=false if somebody else holds the lock.
-func (l *Locks) Acquire(ctx context.Context, disputeID int64) (string, bool, error) {
+// Lock is one held dispute lock: the id and the token that proves ownership of
+// it, carried together.
+//
+// Acquire used to return (token, bool, error) and Release used to take the id
+// and the token back as separate arguments, which made it the caller's job to
+// keep two values paired across the body of a handler. Pairing them here means
+// a caller cannot release dispute 7 with dispute 9's token, which is the one
+// mistake the release script cannot catch: the token would be the wrong one for
+// the key, the script would decline to delete, and the lock would look released
+// while it sat there for the rest of its TTL.
+type Lock struct {
+	locks     *Locks
+	disputeID int64
+	token     string
+}
+
+// Acquire takes the lock for one dispute. A nil Lock with a nil error means
+// somebody else holds it, which is an ordinary outcome rather than a failure.
+func (l *Locks) Acquire(ctx context.Context, disputeID int64) (*Lock, error) {
 	token, err := newToken()
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
 
 	ok, err := l.rdb.SetNX(ctx, lockKey(disputeID), token, l.ttl).Result()
 	if err != nil {
-		return "", false, fmt.Errorf("acquire lock for dispute %d: %w", disputeID, err)
+		return nil, fmt.Errorf("acquire lock for dispute %d: %w", disputeID, err)
 	}
 	if !ok {
-		return "", false, nil
+		return nil, nil
 	}
-	return token, true, nil
+	return &Lock{locks: l, disputeID: disputeID, token: token}, nil
 }
 
-// Release gives the lock back. A release that finds someone else's token is not
-// an error - it means this worker overran its TTL, which is worth knowing but
-// not worth failing over, because the version check already protected the data.
-func (l *Locks) Release(ctx context.Context, disputeID int64, token string) (bool, error) {
-	deleted, err := release.Run(ctx, l.rdb, []string{lockKey(disputeID)}, token).Int64()
+// Release gives the lock back, reporting whether this holder still had it. A
+// release that finds someone else's token is not an error - it means this
+// worker overran its TTL, which is worth knowing but not worth failing over,
+// because the version check already protected the data.
+//
+// ctx should outlive the cancellation that ended the work: a release skipped at
+// shutdown leaves the lock standing for the whole TTL.
+func (lock *Lock) Release(ctx context.Context) (held bool, err error) {
+	deleted, err := release.Run(ctx, lock.locks.rdb,
+		[]string{lockKey(lock.disputeID)}, lock.token).Int64()
 	if err != nil {
-		return false, fmt.Errorf("release lock for dispute %d: %w", disputeID, err)
+		return false, fmt.Errorf("release lock for dispute %d: %w", lock.disputeID, err)
 	}
 	return deleted == 1, nil
 }

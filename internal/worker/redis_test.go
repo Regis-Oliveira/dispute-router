@@ -161,22 +161,22 @@ func TestLockIsExclusive(t *testing.T) {
 	ctx := context.Background()
 	locks := NewLocks(testRedis(t), 5*time.Second)
 
-	token, ok, err := locks.Acquire(ctx, 7)
-	if err != nil || !ok {
-		t.Fatalf("first Acquire: token=%q ok=%v err=%v", token, ok, err)
+	lock, err := locks.Acquire(ctx, 7)
+	if err != nil || lock == nil {
+		t.Fatalf("first Acquire: lock=%v err=%v", lock, err)
 	}
 
-	if _, ok, err := locks.Acquire(ctx, 7); err != nil || ok {
-		t.Errorf("second Acquire: ok=%v err=%v, want ok=false", ok, err)
+	if again, err := locks.Acquire(ctx, 7); err != nil || again != nil {
+		t.Errorf("second Acquire: lock=%v err=%v, want nil lock", again, err)
 	}
 
-	held, err := locks.Release(ctx, 7, token)
+	held, err := lock.Release(ctx)
 	if err != nil || !held {
 		t.Fatalf("Release: held=%v err=%v", held, err)
 	}
 
-	if _, ok, err := locks.Acquire(ctx, 7); err != nil || !ok {
-		t.Errorf("Acquire after release: ok=%v err=%v, want ok=true", ok, err)
+	if after, err := locks.Acquire(ctx, 7); err != nil || after == nil {
+		t.Errorf("Acquire after release: lock=%v err=%v, want a lock", after, err)
 	}
 }
 
@@ -188,21 +188,21 @@ func TestReleaseCannotDeleteSomebodyElsesLock(t *testing.T) {
 	rdb := testRedis(t)
 	locks := NewLocks(rdb, 100*time.Millisecond)
 
-	stale, ok, err := locks.Acquire(ctx, 9)
-	if err != nil || !ok {
-		t.Fatalf("Acquire: %v", err)
+	stale, err := locks.Acquire(ctx, 9)
+	if err != nil || stale == nil {
+		t.Fatalf("Acquire: lock=%v err=%v", stale, err)
 	}
 
 	// Let the TTL lapse, then let a second worker take it.
 	time.Sleep(200 * time.Millisecond)
 
-	fresh, ok, err := locks.Acquire(ctx, 9)
-	if err != nil || !ok {
-		t.Fatalf("second Acquire after expiry: ok=%v err=%v", ok, err)
+	fresh, err := locks.Acquire(ctx, 9)
+	if err != nil || fresh == nil {
+		t.Fatalf("second Acquire after expiry: lock=%v err=%v", fresh, err)
 	}
 
 	// The first worker now tries to release. It must not succeed.
-	held, err := locks.Release(ctx, 9, stale)
+	held, err := stale.Release(ctx)
 	if err != nil {
 		t.Fatalf("Release: %v", err)
 	}
@@ -211,10 +211,10 @@ func TestReleaseCannotDeleteSomebodyElsesLock(t *testing.T) {
 	}
 
 	// And the real holder is still holding it.
-	if _, ok, _ := locks.Acquire(ctx, 9); ok {
+	if other, _ := locks.Acquire(ctx, 9); other != nil {
 		t.Error("the lock was released by the wrong holder")
 	}
-	if held, _ := locks.Release(ctx, 9, fresh); !held {
+	if held, _ := fresh.Release(ctx); !held {
 		t.Error("the real holder could not release its own lock")
 	}
 }

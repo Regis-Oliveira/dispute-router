@@ -198,14 +198,14 @@ func (p *Pool) drainOnce(ctx context.Context) (int, error) {
 func (p *Pool) handle(ctx context.Context, disputeID int64) {
 	logger := p.opts.Logger.With("dispute_id", disputeID)
 
-	token, acquired, err := p.opts.Locks.Acquire(ctx, disputeID)
+	lock, err := p.opts.Locks.Acquire(ctx, disputeID)
 	if err != nil {
 		p.failed.Add(1)
 		logger.ErrorContext(ctx, "lock failed", "error", err)
 		p.rescheduleSoon(ctx, disputeID)
 		return
 	}
-	if !acquired {
+	if lock == nil {
 		// Somebody else has it. The claim already removed the id from the
 		// index, so it has to go back or it would never be looked at again.
 		p.contended.Add(1)
@@ -213,7 +213,10 @@ func (p *Pool) handle(ctx context.Context, disputeID int64) {
 		return
 	}
 	defer func() {
-		held, releaseErr := p.opts.Locks.Release(ctx, disputeID, token)
+		releaseCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+
+		held, releaseErr := lock.Release(releaseCtx)
 		if releaseErr != nil {
 			logger.ErrorContext(ctx, "lock release failed", "error", releaseErr)
 			return
@@ -260,7 +263,9 @@ func (p *Pool) handle(ctx context.Context, disputeID int64) {
 		// and the other 1,663 disputes were never looked at at all. The
 		// symptom was a worker that logged nothing and pinned a core.
 		p.skipped.Add(1)
-		if err := p.opts.Deadlines.Schedule(ctx, disputeID, p.nextVisit(current.DeadlineAt)); err != nil {
+		scheduleCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		if err := p.opts.Deadlines.Schedule(scheduleCtx, disputeID, p.nextVisit(current.DeadlineAt)); err != nil {
 			logger.ErrorContext(ctx, "reschedule after escalation failed", "error", err)
 		}
 		return
@@ -297,7 +302,24 @@ const (
 	// maxBatchesPerTick bounds one poll tick so the loop always returns to its
 	// select.
 	maxBatchesPerTick = 20
+
+	// cleanupTimeout bounds the calls that run after the work is over. Short
+	// because each is a single Redis round trip, and bounded at all because the
+	// context they run under no longer carries the shutdown deadline.
+	cleanupTimeout = 2 * time.Second
 )
+
+// cleanupContext detaches from ctx's cancellation while keeping its values.
+//
+// The lock release and the reschedules run after the decision is made or
+// abandoned, and they are what puts the dispute back where the next pass will
+// find it. Run under the request context they are cancelled by the very
+// shutdown that makes them necessary: every in-flight handler would fail to
+// release, and each lock would stand until its TTL - minutes during which the
+// restarted worker skips those disputes as contended.
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
 
 // nextVisit returns when a dispute should be looked at again, guaranteed to be
 // outside the current claim window.
@@ -322,6 +344,9 @@ func (p *Pool) nextVisit(preferred time.Time) time.Time {
 // broken refund turned into 491 identical retries per dispute and 23,671 log
 // lines in under a minute.
 func (p *Pool) rescheduleSoon(ctx context.Context, disputeID int64) {
+	ctx, cancel := cleanupContext(ctx)
+	defer cancel()
+
 	if err := p.opts.Deadlines.Schedule(ctx, disputeID, p.nextVisit(time.Time{})); err != nil {
 		p.opts.Logger.ErrorContext(ctx, "reschedule failed", "error", err, "dispute_id", disputeID)
 	}
