@@ -75,6 +75,65 @@ prints whatever ended up dead-lettered.
 The generator is deterministic: every row is a pure function of `SEED`. Reproducing a bug is
 `SEED=42 make seed`, not a database dump.
 
+## Error reporting (optional)
+
+Everything above runs with no Sentry account, and that is the default: with no
+DSN configured `sentry.Init` is never called, so there is no client, no network
+call and no change to any log line or status code. The wiring is there for when
+you want it.
+
+Turning it on is two values, in two places, because a server DSN is a secret and
+a browser DSN is not.
+
+**The Go services.** Create a project in Sentry, take the DSN from Settings →
+Client Keys, and put it in `.env`:
+
+```bash
+SENTRY_DSN=https://<key>@<org>.ingest.sentry.io/<project>
+SENTRY_ENVIRONMENT=local     # whatever tells this run apart from another
+SENTRY_RELEASE=              # leave empty unless you are running built binaries
+```
+
+`ingest`, `api`, `worker`, `agent`, `embed` and `mcp` pick it up on their next
+start. `ask`, `dlq`, `eval` and `retrieval` are deliberately not wired: they
+print to the terminal of the person who typed the command, which is where their
+failures already are.
+
+The DSN permits writing events and nothing else, but it is still not a value to
+commit — `.env.example` carries the name and `.env` carries the value.
+
+`SENTRY_RELEASE` empty is usually right: the SDK reads the VCS revision the Go
+toolchain stamps into a *built* binary, and `go run` leaves no stamp, so a value
+matters only once you are shipping binaries.
+
+**The dashboard.** Paste the DSN into `SENTRY_DSN` in
+[`apps/dashboard/src/app/core/sentry.ts`](apps/dashboard/src/app/core/sentry.ts)
+and rebuild. It is a constant rather than an environment variable on purpose: a
+browser DSN is public by design and ends up in the bundle whichever file it
+started in, so a build-time replacement would buy nothing.
+
+**Checking it works.** Cause one error and count the issues. A failure in the
+worker should produce exactly one issue tagged with its `dispute_id`, not two —
+the worker does not re-report what it has already logged, because the free tier
+is 5,000 events a month and a duplicate spends it twice to say less. A panic in
+an HTTP handler should arrive carrying the same `request_id` that went out on
+the `X-Request-Id` response header, which is what joins an event to the log line
+beside it.
+
+**What is deliberately not sent.** No request headers at all, rather than a
+filtered set — Sentry's own denylist does not know about `X-Processor-Signature`
+and would have leaked it. No query strings from the dashboard, because filters
+are mirrored into the URL and it carries whatever an operator typed into the
+search box. No session replay, no console breadcrumbs, no input events, and
+nothing below error level. `docs/DECISIONS.md` has the reasoning for each under
+"Observability".
+
+There is no route timing in the dashboard, and that is not an oversight: Sentry's
+browser tracing propagates two extra headers to the read API, whose CORS
+allow-list is `Content-Type` only, so enabling it would stop the dashboard
+loading any data. Widening the allow-list and enabling the integration is one
+change, not two.
+
 ## The parts worth reading
 
 ### `db/migrations/000002_ledger.up.sql`
