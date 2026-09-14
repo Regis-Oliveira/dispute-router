@@ -3,7 +3,7 @@ DASH := apps/dashboard
 
 .PHONY: help up down reset migrate seed verify emit psql redis logs \
         ingest api go-test go-test-integration go-lint tidy dash dash-test \
-        dash-build stack
+        dash-build stack attack
 
 help:
 	@echo "up      start postgres (:5433) and redis (:6379)"
@@ -25,6 +25,7 @@ help:
 	@echo "go-test-integration"
 	@echo "             the same, plus the tests that flush or drop a database"
 	@echo "go-lint      go vet and staticcheck"
+	@echo "attack       black-box security suite against the running services"
 	@echo "dash-test    unit tests for the dashboard"
 	@echo "tidy         resolve Go module dependencies"
 	@echo ""
@@ -158,6 +159,15 @@ go-test-integration:
 go-lint:
 	go vet ./...
 	go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
+
+# Black-box security suite: a real HTTP client against the running read API
+# (:8081) and ingest service (:8080). The `security` build tag keeps these out
+# of `make go-test`; each test skips cleanly when its target is not listening.
+# Override ATTACK_API_URL / ATTACK_INGEST_URL to aim elsewhere (distinct from the
+# simulator's INGEST_URL, which is a full webhook endpoint). The rate-limit attack drains a
+# Redis bucket and is slow, so it stays skipped unless ATTACK_RATE=1.
+attack:
+	go test -tags security -count=1 -v ./test/security/...
 
 dash:
 	cd $(DASH) && npm start
