@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/regisoliveira/dispute-router/internal/api"
 	"github.com/regisoliveira/dispute-router/internal/disputetools"
@@ -145,6 +146,13 @@ func NewFactSource(store *api.Store, evidence EvidenceSource, opts FactSourceOpt
 }
 
 // For reads everything known about one dispute, fresh.
+//
+// The dispute row is fetched first because everything else is keyed on what it
+// says - merchant, customer, reason code, the cardholder's claim. The other
+// four reads need nothing from each other, so they run together: serially they
+// are four round trips the deadline waits through in sequence, and one of them
+// is an embedding call over the network before its vector query has even
+// started.
 func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 	// Kept as well as the constructor's check, not instead of it: the zero
 	// value of this struct is reachable without NewFactSource, and reporting
@@ -159,54 +167,96 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 		return Facts{}, fmt.Errorf("dispute %d: %w", disputeID, err)
 	}
 
-	history, err := f.tools.CustomerHistory(ctx, disputetools.CustomerHistoryInput{
-		Merchant:    dispute.Merchant,
-		CustomerRef: dispute.CustomerRef,
+	// Each branch writes to its own variable and Facts is assembled after Wait.
+	// Distinct fields of one shared struct would be safe too, and it is the
+	// kind of safe that stops being true the first time two branches touch one
+	// field - on a day the race detector has nothing to say about, because the
+	// assembly is over before anything reads it.
+	var (
+		history   disputetools.CustomerHistoryOutput
+		evidence  []EvidenceRef
+		precedent []Precedent
+		retrieval Retrieval
+		rates     []BaseRate
+	)
+
+	group, groupCtx := errgroup.WithContext(ctx)
+
+	group.Go(func() error {
+		out, err := f.tools.CustomerHistory(groupCtx, disputetools.CustomerHistoryInput{
+			Merchant:    dispute.Merchant,
+			CustomerRef: dispute.CustomerRef,
+		})
+		if err != nil {
+			return fmt.Errorf("customer history for dispute %d: %w", disputeID, err)
+		}
+		history = out
+		return nil
 	})
-	if err != nil {
-		return Facts{}, fmt.Errorf("customer history for dispute %d: %w", disputeID, err)
+
+	group.Go(func() error {
+		files, err := f.evidence.List(groupCtx, disputeID)
+		if err != nil {
+			return fmt.Errorf("evidence for dispute %d: %w", disputeID, err)
+		}
+		// Still one file at a time, and deliberately: the rune budget shrinks
+		// as files are read in upload order, so which files reach the record is
+		// decided by the record rather than by which S3 call finished first.
+		evidence, err = readEvidence(groupCtx, f.evidence, disputeID, files)
+		if err != nil {
+			return fmt.Errorf("evidence for dispute %d: %w", disputeID, err)
+		}
+		return nil
+	})
+
+	if f.retriever != nil {
+		group.Go(func() error {
+			out, found, err := f.retriever.For(groupCtx, disputeID, dispute.Merchant, claim)
+			if err != nil {
+				// Retrieval failing is not the record failing. A draft written
+				// without precedent is worse, not wrong, and refusing to draft
+				// at all because a search was unavailable would be the
+				// expensive version of a cautious answer.
+				//
+				// So nil, not the error: a non-nil return here would cancel
+				// groupCtx and take the two reads the record cannot do without
+				// down with it.
+				retrieval = Retrieval{Method: RetrievalFailed, Note: err.Error()}
+				return nil
+			}
+			precedent, retrieval = out, found
+			return nil
+		})
 	}
 
-	files, err := f.evidence.List(ctx, disputeID)
-	if err != nil {
-		return Facts{}, fmt.Errorf("evidence for dispute %d: %w", disputeID, err)
-	}
-	evidence, err := readEvidence(ctx, f.evidence, disputeID, files)
-	if err != nil {
-		return Facts{}, fmt.Errorf("evidence for dispute %d: %w", disputeID, err)
+	if f.pool != nil {
+		group.Go(func() error {
+			out, err := baseRates(groupCtx, f.pool, dispute.Merchant, dispute.ReasonCode, dispute.Kind)
+			if err != nil {
+				// Same rule as retrieval, and the same reason for returning
+				// nil: a draft written without the population numbers is
+				// worse, not wrong, and an aggregate query failing should not
+				// cancel the reads that matter.
+				return nil
+			}
+			rates = out
+			return nil
+		})
 	}
 
-	facts := Facts{
+	if err := group.Wait(); err != nil {
+		return Facts{}, err
+	}
+
+	return Facts{
 		Dispute:         dispute,
 		History:         priorDisputes(history.Disputes, disputeID),
 		CardholderClaim: claim,
 		Evidence:        evidence,
-	}
-
-	if f.retriever != nil {
-		precedents, retrieval, err := f.retriever.For(ctx, disputeID, dispute.Merchant, claim)
-		if err != nil {
-			// Retrieval failing is not the record failing. A draft written
-			// without precedent is worse, not wrong, and refusing to draft at
-			// all because a search was unavailable would be the expensive
-			// version of a cautious answer.
-			retrieval = Retrieval{Method: RetrievalFailed, Note: err.Error()}
-		}
-		facts.Precedents = precedents
-		facts.Retrieval = retrieval
-	}
-
-	if f.pool != nil {
-		rates, err := baseRates(ctx, f.pool, dispute.Merchant, dispute.ReasonCode, dispute.Kind)
-		if err != nil {
-			// Same rule as retrieval: a draft written without the population
-			// numbers is worse, not wrong, and refusing to draft because an
-			// aggregate query failed would be the expensive kind of caution.
-			rates = nil
-		}
-		facts.BaseRates = rates
-	}
-	return facts, nil
+		Precedents:      precedent,
+		Retrieval:       retrieval,
+		BaseRates:       rates,
+	}, nil
 }
 
 // priorDisputes drops the dispute being drafted from its own customer history.
