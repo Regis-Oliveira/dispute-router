@@ -601,6 +601,54 @@ pre-existing. The point of the split is that `make go-test` needs no privilege
 beyond the application's own tables — which is a property only if it is applied
 everywhere, so a half-tagged state was worse than either alternative.
 
+**Concurrency is for calls that are independent *and* free of an ordering or a
+budget.** `FactSource.For` made six round trips in a row to assemble one
+dispute's record, and only the first was a real dependency: customer history,
+precedent and base rates are all keyed on what the dispute row says. The other
+four run in one `errgroup` now — 469 ms to 380 ms on the configuration that
+ships, measured in `docs/measurements/2026-09-15-facts-assembly.txt`. Two
+properties hold the shape up. The optional branches return `nil` rather than
+their error, because a goroutine in an `errgroup.WithContext` that returns
+non-nil cancels its siblings, and a failed base-rate query would have taken down
+the evidence read the record cannot do without; retrieval and base rates already
+degraded rather than failed, and that behaviour is now load-bearing rather than
+merely kind. And each branch writes its own local, with `Facts` assembled after
+`Wait` — distinct fields of one shared struct would be safe too, and it is the
+kind of safe that stops being true the first time two branches touch one field,
+on a day the race detector has nothing to say about.
+
+**The prize was fixed before the change was written: a fan-out removes the sum
+of every branch except the slowest.** Here the embedding call is roughly 400 ms
+and the other three reads together roughly 70 ms, so 70-odd milliseconds was the
+whole of it and Voyage set the floor either way. On loopback this is a small
+win. It is kept because every one of those branches is a network call anywhere
+that is not this laptop.
+
+**Four sequential loops stay sequential, and three of them fail the second half
+of that rule rather than the first.** `readEvidence` carries a rune budget that
+shrinks as files are read in upload order, so which files reach the record is
+decided by the record and not by which S3 call finished first. `drain` in
+`cmd/agent` and `Runner.Run` in `internal/agent/eval` each check a running cost
+total before the next call, and a ceiling means nothing with ten calls already
+in flight past it. `drainOnce` in `internal/outbox` publishes in id order and
+commits the prefix that succeeded, which concurrency turns into an arbitrary set
+of successes and no clean `id = ANY($1)`. Independence is the easy half of the
+test; the invariant is the half that decides.
+
+**A degraded record says so, at `warn`.** The base-rate branch swallowed its
+error into `rates = nil` with nothing logged. Retrieval gets away with the same
+shape because it writes the failure into `Retrieval.Note`, where a reader of
+`agent_runs` finds it; base rates have no such field, so a broken aggregate
+would have cost every subsequent draft a paragraph of context in silence.
+`FactSourceOptions` takes a `Logger` now. `warn` rather than `error` because the
+run succeeds and the letter is written, and because an error record becomes a
+Sentry event once a DSN is set — one flaky query would be one event per dispute
+drafted. The line carries the dispute, the merchant, the reason code and the
+kind, which are the query's own arguments; the cardholder claim and the customer
+reference are not on it. It is skipped entirely when the group context is
+already cancelled, because that means a sibling failed first and logging a
+degradation that never happened would bury the real cause.
+
 ---
 
 ## Observability
@@ -679,3 +727,13 @@ and the CORS allow-list change in the same commit.
 - `nx`/`make reset` recreates LocalStack's volume, so its VPC and subnet ids
   change; `make tf-plan` generates its tfvars rather than reading a committed
   file.
+- **`unset VOYAGE_API_KEY` does not turn the embedder off.** `config.Load` reads
+  the process environment first and falls back to `.env`, and only a variable
+  *present* in the environment shadows the file — so an unset name reads
+  straight through to `.env`. `export VOYAGE_API_KEY=""` is what disables it. An
+  afternoon of "lexical" measurements were vector measurements.
+- **Voyage rate-limits on the free tier, and the client waits 25 s per retry**
+  (`internal/llm/embed.go`, three attempts). Back-to-back runs of anything that
+  embeds read 25,5xx ms or 50,7xx ms, which are retry counts and not latency —
+  the first attempt at the assembly table showed a 2x speedup that was purely
+  which binary got throttled harder. Space repeated runs 40 s apart.
