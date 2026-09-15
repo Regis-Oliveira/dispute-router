@@ -1,0 +1,40 @@
+Assembling the record concurrently: FactSource.For before and after.
+
+Method: cmd/agent -prompt -dispute 140, which builds the record and stops
+without buying a token. assembly_ms is the wall time of FactSource.For alone.
+Two binaries built from the same tree, one with the sequential For and one with
+the errgroup, run alternately against the same warm stack.
+
+dispute   140  mrc_paperclip, chargeback, 10.4, state received
+claim     327 characters
+evidence  1754143331-receipt.txt (8009 bytes), 1754143400-tracking.csv (5558)
+          uploaded for this run; the bucket had none
+record    3 precedents, 2 base rates, 2 evidence files read
+
+vector retrieval (VOYAGE_API_KEY set) — the configuration that ships
+  before   409  502  491  447      median 469 ms
+  after    378  362  435  381      median 380 ms
+                                   ~19% off the assembly
+
+lexical retrieval (VOYAGE_API_KEY exported empty)
+  before    57   57   56   57   58   57      median 57 ms
+  after     49   48   48   51   50   48      median 49 ms
+                                             ~14% off the assembly
+
+Runs are spaced 40s apart in the vector table. Back to back they are not
+measurable: Voyage rate-limits this key and internal/llm/embed.go pauses a flat
+25s per retry, up to three attempts, so a throttled assembly reads 25,5xx or
+50,7xx ms and says nothing about the code. Both numbers appeared in the first
+attempt at this table and neither is latency.
+
+What the shape can and cannot buy. The fan-out removes the sum of every branch
+except the slowest; it cannot touch the slowest one. Here the embedding call is
+~400ms and the other three reads together are ~70ms, so ~70ms is the whole prize
+and the floor is the call to Voyage. In lexical mode the slowest branch is the
+evidence read (three S3 round trips, ~48ms) and the rest sum to ~8ms, which is
+why the absolute saving is smaller there while the proportion is similar.
+
+The honest reading: on loopback, against a Postgres and a LocalStack on the same
+machine, this is a small win. The reason to keep it is that every one of those
+branches is a network call in anything that is not this laptop, and the shape
+stops the record's cost being the sum of them.
