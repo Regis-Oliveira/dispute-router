@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"unicode/utf8"
 
@@ -107,6 +108,7 @@ type FactSource struct {
 	evidence  EvidenceSource
 	retriever *Retriever
 	pool      *pgxpool.Pool
+	log       *slog.Logger
 }
 
 // FactSourceOptions configures NewFactSource. Both fields are optional and
@@ -123,6 +125,9 @@ type FactSourceOptions struct {
 	// retrieval needs a cardholder claim to match on, and most disputes have
 	// none.
 	BaseRates *pgxpool.Pool
+
+	// Logger is where a degraded record says so. Nil means slog.Default.
+	Logger *slog.Logger
 }
 
 // NewFactSource reads the record through the dispute tools and the files
@@ -137,11 +142,15 @@ func NewFactSource(store *api.Store, evidence EvidenceSource, opts FactSourceOpt
 	if evidence == nil {
 		return nil, ErrNoEvidenceSource
 	}
+	if opts.Logger == nil {
+		opts.Logger = slog.Default()
+	}
 	return &FactSource{
 		tools:     disputetools.New(store),
 		evidence:  evidence,
 		retriever: opts.Precedent,
 		pool:      opts.BaseRates,
+		log:       opts.Logger,
 	}, nil
 }
 
@@ -237,6 +246,33 @@ func (f *FactSource) For(ctx context.Context, disputeID int64) (Facts, error) {
 				// nil: a draft written without the population numbers is
 				// worse, not wrong, and an aggregate query failing should not
 				// cancel the reads that matter.
+				//
+				// But it says so. Retrieval records its failure in the trace,
+				// where a reader of agent_runs finds it; base rates have no
+				// such field, so this line is the only thing standing between
+				// a broken aggregate and every subsequent draft quietly losing
+				// a paragraph of context.
+				//
+				// Warn, not Error: the run succeeds and the letter is written.
+				// Error in this codebase means somebody has to act, and it
+				// also becomes a Sentry event per occurrence once a DSN is set
+				// - one flaky query would be one event per dispute drafted.
+				//
+				// Nothing from the dispute's own record goes on the line. The
+				// merchant, the reason code and the kind are the query's own
+				// arguments and are business identifiers; the cardholder claim
+				// and the customer reference are neither, and are not here.
+				if groupCtx.Err() == nil {
+					// A cancelled context means a sibling already failed and
+					// reported it. Logging here too would bury the real cause
+					// under a degradation that never happened.
+					f.log.WarnContext(groupCtx, "drafting without base rates",
+						"dispute", disputeID,
+						"merchant", dispute.Merchant,
+						"reason_code", dispute.ReasonCode,
+						"kind", dispute.Kind,
+						"error", err)
+				}
 				return nil
 			}
 			rates = out

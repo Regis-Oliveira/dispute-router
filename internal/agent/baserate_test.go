@@ -1,9 +1,13 @@
 package agent
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/regisoliveira/dispute-router/internal/llm"
 	"github.com/regisoliveira/dispute-router/internal/llm/llmtest"
@@ -137,4 +141,57 @@ func TestBaseRatesExistForAClaimlessDispute(t *testing.T) {
 		t.Fatal("a dispute with no claim got no base rate either; the gap is not closed")
 	}
 	t.Logf("dispute %d: %d precedent(s), %d base rate scope(s)", id, len(facts.Precedents), len(facts.BaseRates))
+}
+
+// A base-rate query that fails must cost the draft its population numbers and
+// nothing else - and it must say so.
+//
+// The silence is the part under test. Retrieval records its failure in the
+// trace, where a reader of agent_runs finds it; base rates have no such field,
+// so the log line is the only thing between a broken aggregate and every
+// subsequent draft quietly losing a paragraph of context.
+func TestABrokenBaseRateQueryCostsTheRatesAndSaysSo(t *testing.T) {
+	if os.Getenv("DATABASE_URL") == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	store, _ := liveStore(t)
+	id := someDisputeID(t, store)
+
+	// A pool that is closed rather than misconfigured: it fails at query time,
+	// which is where a pool that has lost its database fails, and not at
+	// construction, where nothing under test would ever see it.
+	broken, err := pgxpool.New(t.Context(), os.Getenv("DATABASE_URL"))
+	if err != nil {
+		t.Fatalf("second pool: %v", err)
+	}
+	broken.Close()
+
+	var logged bytes.Buffer
+	source := factSource(t, store, fakeEvidence{}, FactSourceOptions{
+		BaseRates: broken,
+		Logger:    slog.New(slog.NewTextHandler(&logged, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	})
+
+	facts, err := source.For(t.Context(), id)
+	if err != nil {
+		t.Fatalf("a failed base-rate query failed the whole record: %v", err)
+	}
+	if len(facts.BaseRates) != 0 {
+		t.Fatalf("got %d base rates from a closed pool", len(facts.BaseRates))
+	}
+	if facts.Dispute.ID != id {
+		t.Fatalf("the record lost its dispute: got %d, want %d", facts.Dispute.ID, id)
+	}
+
+	line := logged.String()
+	if !strings.Contains(line, "drafting without base rates") {
+		t.Fatalf("the failure was swallowed with no log line; got %q", line)
+	}
+	// The identifiers that make the line actionable, and none from the
+	// cardholder's side of the record.
+	for _, want := range []string{"dispute=", "merchant=", "reason_code="} {
+		if !strings.Contains(line, want) {
+			t.Errorf("log line carries no %s: %q", want, line)
+		}
+	}
 }

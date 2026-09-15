@@ -125,6 +125,9 @@ func run() error {
 			// Available for every dispute, unlike precedent, which needs a
 			// claim to match on and therefore covers about one in seven.
 			BaseRates: pool,
+			// No logger of its own: this command has none, so a degraded
+			// record reports itself through slog's default on stderr, clear of
+			// the report on stdout.
 		})
 	if err != nil {
 		return err

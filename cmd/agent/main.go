@@ -137,6 +137,7 @@ func run(logger *slog.Logger) error {
 			// Available for every dispute, unlike precedent, which needs a
 			// claim to match on and therefore covers about one in seven.
 			BaseRates: pool,
+			Logger:    logger,
 		})
 	if err != nil {
 		return err
