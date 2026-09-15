@@ -150,17 +150,24 @@ func run(logger *slog.Logger) error {
 		if *disputeID <= 0 {
 			return fmt.Errorf("-prompt needs -dispute")
 		}
+		// Timed here as well as in Trace.Assembly, because this is the path
+		// that costs nothing to run: assembly can be measured on a real
+		// dispute without buying a token for the draft that would follow.
+		assembleStarted := time.Now()
 		record, err := facts.For(ctx, *disputeID)
 		if err != nil {
 			return err
 		}
+		assembly := time.Since(assembleStarted)
 		rendered, err := record.Render()
 		if err != nil {
 			return err
 		}
 		fmt.Println(rendered)
 		logger.Info("record built", "dispute", *disputeID,
-			"retrieval", record.Retrieval.Method, "precedents", len(record.Precedents))
+			"retrieval", record.Retrieval.Method, "precedents", len(record.Precedents),
+			"evidence_files", len(record.Evidence), "base_rates", len(record.BaseRates),
+			"assembly_ms", assembly.Milliseconds())
 		return nil
 	}
 
