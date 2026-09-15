@@ -369,6 +369,59 @@ AWS, phrased as a complaint about the name rather than its length.
 
 ---
 
+## The container image
+
+Until now there was none, and the Terraform had been written as though there
+were: `ecr.tf` creates a registry per service and `ecs.tf` refers to
+`:${var.image_tag}`, with a comment explaining that no container-level health
+check is possible because a Go binary on a scratch base has no shell. The
+Dockerfile is the thing all of that was already describing. Numbers in
+`docs/measurements/2026-09-15-docker-image.txt`.
+
+**One Dockerfile, three images, selected by `--build-arg SERVICE`.** The only
+difference between ingest, api and worker is which package under `./cmd` is
+built, so three files differing by one word each would be three places for that
+word to drift from `local.services`.
+
+**Multi-stage is the whole win and the rest is rounding: 586.4 MB to 20.9 MB,
+then 20.9 to 14.9.** The first number is the Go toolchain, the module cache and
+the source tree shipped to production to run a binary that needs none of them.
+The 6 MB after it is `-ldflags="-s -w"`, which is the right trade for a
+container that is replaced rather than debugged in place and the wrong one
+locally, where `go run` is untouched. `-trimpath` buys no bytes at all; it buys
+a panic that reads `internal/api/store.go:149` instead of the building
+machine's home directory.
+
+**scratch, and therefore the CA bundle, which is the line worth remembering.**
+`FROM scratch` has no certificate store, and every service here talks TLS to
+something - S3 and SQS at minimum, Anthropic and Voyage on the agent path.
+Without it `cmd/embed` fails with `x509: certificate signed by unknown
+authority` naming the Voyage endpoint, which reads like a broken API rather
+than a missing file; the measurement records both runs. `golang:alpine` already
+carries the bundle, so the fix is one COPY from a stage that exists.
+
+**The .dockerignore is an allowlist, and it is about the `.env` more than the
+gigabyte.** Unignored, this repo sends 1.0 GB of build context - 650 MB of
+Terraform providers, 321 MB of the dashboard's node_modules - to compile a Go
+binary that reads neither; the allowlist makes it 1.1 MB. A denylist would be a
+list of everything anybody will ever add, and the entry it would eventually
+miss is the one that matters: the context is readable by every stage, so a
+secret copied into a layer is a secret in anywhere that layer is pushed.
+
+**Cross-compiled, not emulated.** The build stage is pinned to
+`--platform=$BUILDPLATFORM` and sets `GOARCH=$TARGETARCH`, because Go needs one
+environment variable to target Graviton and running an emulated arm64 toolchain
+to avoid setting it is the slow way to the same binary.
+
+**`make image` tags with the short sha**, because ECR is set to IMMUTABLE and a
+tag that can be overwritten says nothing about what is running.
+
+**Local development still runs `go run`.** `make stack` is unchanged. The image
+exists for the deployment path the Terraform describes, and putting the edit
+loop behind a container build would cost the thing that makes the loop usable.
+
+---
+
 ## MCP
 
 **Every tool is read-only.** A model decides on its own when to call things,

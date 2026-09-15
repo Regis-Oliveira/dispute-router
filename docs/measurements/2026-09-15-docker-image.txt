@@ -1,0 +1,82 @@
+The service image: three shapes of the same binary, measured.
+
+All three build cmd/api from the same tree for linux/arm64 (ecs.tf pins Fargate
+to Graviton), on Docker Desktop on an M-series Mac. Sizes are
+`docker image inspect --format '{{.Size}}'`, which is the uncompressed size on
+disk, not the compressed size ECR bills for.
+
+  single stage, golang:1.25-alpine        586.4 MB
+  multi-stage -> scratch                   20.9 MB
+  + -trimpath -ldflags="-s -w" + certs     14.9 MB
+
+The first number is the whole Go toolchain, the module cache and the source
+tree shipped to production to run a binary that needed none of them. Multi-stage
+is what removes it, and it is worth 96% on its own - every refinement after it
+is worth 6 MB.
+
+The 6 MB is `-ldflags="-s -w"`, which drops the symbol table and DWARF debug
+info. It is not free: a panic still gives a stack trace with function names,
+because Go keeps those separately, but delve cannot attach usefully. That is the
+right trade for a container that is replaced rather than debugged in place, and
+the wrong one for a binary somebody runs locally - which is why `go run` and
+`make api` are untouched by any of this.
+
+`-trimpath` is not a size change. It removes the building machine's absolute
+paths from the binary, so a panic from a task reads `internal/api/store.go:149`
+rather than `/Users/<name>/StudyProjects/dispute-router/internal/api/store.go`.
+
+All three services, same build:
+
+  dispute-router/ingest   14.3 MB
+  dispute-router/api      14.9 MB
+  dispute-router/worker   14.0 MB
+
+---
+
+The build context, which is the other measurement and the one nobody looks at:
+
+  no .dockerignore       1.0 GB
+  allowlisted            1.1 MB
+
+`docker build` sends the context to the daemon before it reads an instruction.
+Unignored this repo sends 650 MB of Terraform provider binaries and 321 MB of
+the dashboard's node_modules, on every build, to compile a Go binary that reads
+neither. The .dockerignore is an allowlist (`*` then `!go.mod`, `!go.sum`,
+`!cmd/`, `!internal/`) rather than a denylist, because a denylist is a list of
+everything somebody will ever add, and the .env sitting in the repo root is the
+entry that matters: a build context is readable by every stage, and a secret
+copied into a layer is a secret in anything that layer is pushed to.
+
+---
+
+What scratch costs, demonstrated rather than asserted.
+
+`FROM scratch` has no certificate store. Both images below are cmd/embed, built
+from the same commit, run against the same database, one embedding call:
+
+  multi-stage -> scratch, nothing else:
+    200 claims outstanding for voyage-4
+    embedded 0 in 0 batch(es) over 211ms, 200 still outstanding
+    level=ERROR msg=fatal error="after 0 embedded: voyage: Post
+      \"https://api.voyageai.com/v1/embeddings\": tls: failed to verify
+      certificate: x509: certificate signed by unknown authority"
+
+  the same image plus COPY --from=build /etc/ssl/certs/ca-certificates.crt:
+    200 claims outstanding for voyage-4
+    level=INFO msg=embedded batch=1 rows=1 total=1
+    embedded 1 in 1 batch(es) over 319ms, 199 still outstanding
+
+The bundle is 179,359 bytes and golang:alpine already has it, so the fix is one
+COPY from a stage that exists. The failure is worth knowing by sight: it names
+the endpoint, so it reads as a broken API rather than a missing file, and every
+service here talks TLS to something - S3 and SQS at minimum, Anthropic and
+Voyage on the agent path.
+
+---
+
+The 14.9 MB api image, run against the live stack:
+
+  GET /healthz     200, {"status":"ok"}
+  GET /api/summary 200 in 121ms, 86,114 expired alerts at the top of the counts
+
+Running as 65532:65532, on a filesystem containing exactly two files.
