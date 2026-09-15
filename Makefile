@@ -35,6 +35,7 @@ help:
 	@echo "mcp-check   verify the MCP server starts and answers a handshake"
 	@echo "tf-check    format and validate the Terraform (needs opentofu)"
 	@echo "tf-plan     plan it against localstack, which resolves the data sources"
+	@echo "image       build the service images (S=api for one), tagged with the sha"
 	@echo "dlq-replay  dry-run a replay back onto the main queue"
 	@echo ""
 	@echo "psql    open a shell on the database"
@@ -180,6 +181,30 @@ dash-build:
 
 # LocalStack: the real AWS APIs, no account. awslocal is the AWS CLI with
 # --endpoint-url pre-set, and ships inside the image.
+# Build one service image, or all three.
+#
+#   make image S=api          one service
+#   make image                ingest, api and worker
+#
+# linux/arm64 because ecs.tf pins Fargate to Graviton, and a GOARCH=amd64
+# binary there dies with an exec format error that looks nothing like a
+# platform mismatch. Tagged with the short sha because ECR is set to IMMUTABLE:
+# a tag that can be overwritten is a tag that tells you nothing about what is
+# running.
+IMAGE_SERVICES := ingest api worker
+IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+IMAGE_PLATFORM ?= linux/arm64
+
+image:
+ifdef S
+	docker build --platform $(IMAGE_PLATFORM) --build-arg SERVICE=$(S) \
+	  -t dispute-router/$(S):$(IMAGE_TAG) .
+	@docker image inspect dispute-router/$(S):$(IMAGE_TAG) --format '{{.Size}}' \
+	  | awk '{printf "dispute-router/$(S):$(IMAGE_TAG)  %.1f MB\n", $$1/1048576}'
+else
+	@for s in $(IMAGE_SERVICES); do $(MAKE) --no-print-directory image S=$$s; done
+endif
+
 aws-init:
 	@./infra/localstack-init.sh
 

@@ -1,0 +1,24 @@
+# The build context is what `docker build` sends to the daemon before it reads
+# a single instruction. Unignored, this repo sends 1.0 GB of it: 650 MB of
+# Terraform provider binaries and 321 MB of the dashboard's node_modules,
+# neither of which any Go image has ever needed.
+#
+# The .env exclusion is not about size. A build context is readable by every
+# stage, so a secret that gets copied in is a secret in a layer, and a layer
+# that is pushed is a secret that is published.
+
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+
+# Belt and braces: the allowlist above already excludes these, but this file is
+# the thing somebody reads when they add a COPY line in a hurry.
+**/.env
+**/.env.*
+**/node_modules/
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+.git/
